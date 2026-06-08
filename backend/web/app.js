@@ -3,6 +3,8 @@ const statusText = document.querySelector("#status");
 const toast = document.querySelector("#toast");
 const dialog = document.querySelector("#link-dialog");
 const generatedLink = document.querySelector("#generated-link");
+const connectionResult = document.querySelector("#connection-result");
+const testLinkButton = document.querySelector("#test-link");
 
 async function api(path, options = {}) {
   const response = await fetch(path, {
@@ -132,6 +134,45 @@ document.querySelector("#join-form").addEventListener("submit", async (event) =>
     loadTasks();
   } catch (error) { notify(error.message); }
 });
+
+testLinkButton.addEventListener("click", async () => {
+  const form = document.querySelector("#join-form");
+  const link = new FormData(form).get("link");
+  if (!link) {
+    notify("请先粘贴同步链接");
+    return;
+  }
+  testLinkButton.disabled = true;
+  connectionResult.className = "hint";
+  connectionResult.textContent = "正在测试连接";
+  try {
+    const result = await api("/api/links/test", {
+      method: "POST",
+      body: JSON.stringify({ link }),
+    });
+    renderConnectionResult(result);
+  } catch (error) {
+    connectionResult.className = "hint error";
+    connectionResult.textContent = error.message;
+  } finally {
+    testLinkButton.disabled = false;
+  }
+});
+
+function renderConnectionResult(result) {
+  const parts = [endpointStatus("直连", result.direct)];
+  if (result.relay) parts.push(endpointStatus("Relay", result.relay));
+  connectionResult.className = result.usable ? "hint success" : "hint error";
+  connectionResult.textContent = result.usable
+    ? `连接可用：${parts.join("；")}`
+    : `连接失败：${parts.join("；")}`;
+}
+
+function endpointStatus(label, result) {
+  if (!result) return `${label} 未配置`;
+  if (result.ok) return `${label} 可用（${result.endpoint}）`;
+  return `${label} 失败（${result.error || result.endpoint}）`;
+}
 
 document.querySelector("#refresh").addEventListener("click", loadTasks);
 document.querySelector("#copy-link").addEventListener("click", async () => {

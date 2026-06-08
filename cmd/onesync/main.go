@@ -15,6 +15,7 @@ import (
 	"github.com/202121000995/OneSync/backend"
 	"github.com/202121000995/OneSync/internal/auth"
 	"github.com/202121000995/OneSync/internal/client"
+	"github.com/202121000995/OneSync/internal/diagnostic"
 	"github.com/202121000995/OneSync/internal/platform"
 	"github.com/202121000995/OneSync/internal/task"
 )
@@ -48,6 +49,10 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	connectionTester, err := diagnostic.NewChecker(clientTLS, diagnostic.DefaultTimeout)
+	if err != nil {
+		log.Fatal(err)
+	}
 	credentials, err := auth.NewCredentialStore(filepath.Join(*dataDir, "credentials"))
 	if err != nil {
 		log.Fatal(err)
@@ -68,7 +73,9 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	server, err := backend.NewServer(manager, auth.NewLinkService(), credentials)
+	server, err := backend.NewServerWithOptions(manager, auth.NewLinkService(), credentials, backend.Options{
+		ConnectionTester: connectionTester,
+	})
 	if err != nil {
 		log.Fatal(err)
 	}

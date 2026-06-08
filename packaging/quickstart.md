@@ -65,7 +65,9 @@ On the target computer:
 onesync -ca source.crt -sync-interval 10s
 ```
 
-Open the management page, paste the link, choose the target folder, and join. Start the source task and target task. The target will create and update files from the source. Files that exist only on the target are kept.
+Open the management page, paste the link, and click "测试连接" before joining. This checks the direct TLS endpoint with the target computer's current `-ca` trust configuration. It does not consume the link or create a task.
+
+Choose the target folder and join. Start the source task and target task. The target will create and update files from the source. Files that exist only on the target are kept.
 
 ## Relay connection
 
@@ -97,7 +99,7 @@ When generating the source link, keep the source TLS endpoint as the direct endp
 relay.example.com:7443
 ```
 
-The target first tries the direct source endpoint. If it cannot connect or authenticate directly, it falls back to Relay.
+On the target computer, "测试连接" checks both the direct source endpoint and the Relay TLS endpoint when Relay is present. The target first tries the direct source endpoint. If it cannot connect or authenticate directly, it falls back to Relay.
 
 ## Security notes
 

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/202121000995/OneSync/internal/auth"
+	"github.com/202121000995/OneSync/internal/diagnostic"
 	"github.com/202121000995/OneSync/internal/task"
 )
 
@@ -31,20 +32,40 @@ type taskManager interface {
 	List(ctx context.Context) ([]task.Task, error)
 }
 
+type connectionTester interface {
+	Test(ctx context.Context, endpoint, relayEndpoint string) diagnostic.Result
+}
+
+// Options controls optional management server dependencies.
+type Options struct {
+	ConnectionTester connectionTester
+}
+
 // Server provides the local management API and web page.
 type Server struct {
-	manager     taskManager
-	links       *auth.LinkService
-	credentials *auth.CredentialStore
-	handler     http.Handler
+	manager          taskManager
+	links            *auth.LinkService
+	credentials      *auth.CredentialStore
+	connectionTester connectionTester
+	handler          http.Handler
 }
 
 // NewServer creates a local management server.
 func NewServer(manager taskManager, links *auth.LinkService, credentials *auth.CredentialStore) (*Server, error) {
+	return NewServerWithOptions(manager, links, credentials, Options{})
+}
+
+// NewServerWithOptions creates a local management server with optional dependencies.
+func NewServerWithOptions(manager taskManager, links *auth.LinkService, credentials *auth.CredentialStore, options Options) (*Server, error) {
 	if manager == nil || links == nil || credentials == nil {
 		return nil, errors.New("manager, link service, and credential store are required")
 	}
-	server := &Server{manager: manager, links: links, credentials: credentials}
+	server := &Server{
+		manager:          manager,
+		links:            links,
+		credentials:      credentials,
+		connectionTester: options.ConnectionTester,
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/tasks", server.listTasks)
 	mux.HandleFunc("POST /api/tasks", server.createTask)
@@ -52,6 +73,7 @@ func NewServer(manager taskManager, links *auth.LinkService, credentials *auth.C
 	mux.HandleFunc("POST /api/tasks/{id}/stop", server.stopTask)
 	mux.HandleFunc("POST /api/links", server.issueLink)
 	mux.HandleFunc("POST /api/links/join", server.joinLink)
+	mux.HandleFunc("POST /api/links/test", server.testLink)
 
 	static, err := fs.Sub(webFiles, "web")
 	if err != nil {
@@ -229,6 +251,30 @@ func (s *Server) joinLink(writer http.ResponseWriter, request *http.Request) {
 		return
 	}
 	writeJSON(writer, http.StatusCreated, map[string]string{"task": input.TaskID})
+}
+
+func (s *Server) testLink(writer http.ResponseWriter, request *http.Request) {
+	if s.connectionTester == nil {
+		writeAPIError(writer, http.StatusServiceUnavailable, errors.New("connection tester is not configured"))
+		return
+	}
+	var input struct {
+		Link string `json:"link"`
+	}
+	if err := decodeJSON(writer, request, &input); err != nil {
+		return
+	}
+	link, err := s.links.Parse(input.Link)
+	if err != nil {
+		writeAPIError(writer, http.StatusBadRequest, err)
+		return
+	}
+	if !time.Now().UTC().Before(link.ExpiresAt) {
+		writeAPIError(writer, http.StatusBadRequest, errors.New("synchronization link has expired"))
+		return
+	}
+	result := s.connectionTester.Test(request.Context(), link.Endpoint, link.RelayEndpoint)
+	writeJSON(writer, http.StatusOK, result)
 }
 
 func (s *Server) securityMiddleware(next http.Handler) http.Handler {

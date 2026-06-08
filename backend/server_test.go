@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/202121000995/OneSync/internal/auth"
+	"github.com/202121000995/OneSync/internal/diagnostic"
 	"github.com/202121000995/OneSync/internal/task"
 )
 
@@ -116,6 +117,52 @@ func TestLinkIssueAndJoinStoresCredentialSeparately(t *testing.T) {
 	}
 }
 
+func TestLinkTestUsesConfiguredConnectionTester(t *testing.T) {
+	manager := &fakeManager{tasks: map[string]task.Task{
+		"source": {ID: "source", Role: task.RoleSource, SourcePath: "/private/source"},
+	}}
+	credentials, err := auth.NewCredentialStore(filepath.Join(t.TempDir(), "credentials"))
+	if err != nil {
+		t.Fatalf("NewCredentialStore() error = %v", err)
+	}
+	tester := &fakeConnectionTester{}
+	server, err := NewServerWithOptions(manager, auth.NewLinkService(), credentials, Options{
+		ConnectionTester: tester,
+	})
+	if err != nil {
+		t.Fatalf("NewServerWithOptions() error = %v", err)
+	}
+	issue := jsonRequest(http.MethodPost, "http://127.0.0.1/api/links", map[string]any{
+		"task_id": "source", "endpoint": "192.168.1.10:7443", "relay_endpoint": "relay.example:7443",
+	})
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, issue)
+	if response.Code != http.StatusCreated {
+		t.Fatalf("issue status = %d, body = %s", response.Code, response.Body.String())
+	}
+	var issued struct {
+		Link string `json:"link"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &issued); err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+
+	check := jsonRequest(http.MethodPost, "http://127.0.0.1/api/links/test", map[string]any{
+		"link": issued.Link,
+	})
+	response = httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, check)
+	if response.Code != http.StatusOK {
+		t.Fatalf("test status = %d, body = %s", response.Code, response.Body.String())
+	}
+	if tester.endpoint != "192.168.1.10:7443" || tester.relayEndpoint != "relay.example:7443" {
+		t.Fatalf("tester called with endpoint=%q relay=%q", tester.endpoint, tester.relayEndpoint)
+	}
+	if !bytes.Contains(response.Body.Bytes(), []byte(`"usable":true`)) {
+		t.Fatalf("test response = %s", response.Body.String())
+	}
+}
+
 func newTestServer(t *testing.T) *Server {
 	t.Helper()
 	return newServerWithManager(t, &fakeManager{tasks: make(map[string]task.Task)})
@@ -169,4 +216,19 @@ func (m *fakeManager) List(context.Context) ([]task.Task, error) {
 		tasks = append(tasks, found)
 	}
 	return tasks, nil
+}
+
+type fakeConnectionTester struct {
+	endpoint      string
+	relayEndpoint string
+}
+
+func (t *fakeConnectionTester) Test(_ context.Context, endpoint, relayEndpoint string) diagnostic.Result {
+	t.endpoint = endpoint
+	t.relayEndpoint = relayEndpoint
+	return diagnostic.Result{
+		Direct: diagnostic.EndpointResult{Endpoint: endpoint, OK: true},
+		Relay:  &diagnostic.EndpointResult{Endpoint: relayEndpoint, OK: true},
+		Usable: true,
+	}
 }
