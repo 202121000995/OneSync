@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OneSync</title>
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <p class="eyebrow">本机管理</p>
+        <h1>OneSync</h1>
+        <p>创建同步任务，生成链接，或在这台设备上加入同步。</p>
+      </div>
+      <button id="refresh" class="secondary">刷新</button>
+    </header>
+
+    <section class="grid">
+      <form id="create-form" class="card">
+        <h2>创建任务</h2>
+        <label>任务名称<input name="id" required maxlength="128" placeholder="例如：照片备份"></label>
+        <label>设备角色
+          <select name="role">
+            <option value="source">源端：发送文件</option>
+            <option value="target">目标端：接收文件</option>
+          </select>
+        </label>
+        <label>同步目录<input name="path" required placeholder="请选择或输入绝对路径"></label>
+        <button type="submit">创建任务</button>
+      </form>
+
+      <form id="join-form" class="card">
+        <h2>加入同步</h2>
+        <label>同步链接<textarea name="link" required rows="4" placeholder="粘贴源设备生成的链接"></textarea></label>
+        <label>保存目录<input name="target_path" required placeholder="请输入绝对路径"></label>
+        <label>任务名称（可选）<input name="task_id" maxlength="128"></label>
+        <button type="submit">加入同步</button>
+      </form>
+    </section>
+
+    <section class="card tasks">
+      <div class="section-title">
+        <h2>同步任务</h2>
+        <span id="status">正在加载</span>
+      </div>
+      <div id="task-list" class="task-list"></div>
+    </section>
+
+    <dialog id="link-dialog">
+      <form method="dialog">
+        <h2>同步链接</h2>
+        <p>链接 24 小时内有效，成功使用一次后失效。</p>
+        <textarea id="generated-link" rows="6" readonly></textarea>
+        <div class="dialog-actions">
+          <button id="copy-link" type="button">复制链接</button>
+          <button class="secondary">关闭</button>
+        </div>
+      </form>
+    </dialog>
+    <div id="toast" role="status"></div>
+  </main>
+  <script src="/app.js"></script>
+</body>
+</html>
