@@ -51,7 +51,7 @@ onesync -cert source.crt -key source.key -ca source.crt -sync-interval 10s
 
 Open the management page. On Windows 10 or newer it opens automatically. On Linux, open `http://127.0.0.1:8765` locally, or use a trusted SSH tunnel.
 
-Create a source task and choose the folder to send. Click "生成链接". When asked for the TLS address, enter the source synchronization endpoint, for example:
+Create a source task and choose the folder to send. Click "生成链接". In the dialog, enter the source synchronization endpoint, for example:
 
 ```text
 192.168.1.10:7443
@@ -93,7 +93,7 @@ onesync -cert source.crt -key source.key -ca onesync-ca.crt -sync-interval 10s
 onesync -ca onesync-ca.crt -sync-interval 10s
 ```
 
-When generating the source link, keep the source TLS endpoint as the direct endpoint and enter the Relay TLS address in the Relay prompt, for example:
+When generating the source link, keep the source TLS endpoint as the direct endpoint and enter the Relay TLS address in the optional Relay field, for example:
 
 ```text
 relay.example.com:7443

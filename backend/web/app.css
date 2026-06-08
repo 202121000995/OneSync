@@ -38,6 +38,7 @@ button.secondary { background: #e7eee8; color: #334239; }
 .error { color: #b42318 !important; }
 dialog { width: min(620px, calc(100% - 32px)); border: 0; border-radius: 20px; padding: 24px; box-shadow: 0 24px 90px rgba(0,0,0,.2); }
 dialog::backdrop { background: rgba(20, 32, 24, .45); }
+#generated-link { margin-top: 12px; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px; }
 #toast { position: fixed; right: 24px; bottom: 24px; max-width: 360px; padding: 12px 16px; border-radius: 12px; background: #17211b; color: #fff; opacity: 0; transform: translateY(10px); transition: .2s; pointer-events: none; }
 #toast.show { opacity: 1; transform: translateY(0); }

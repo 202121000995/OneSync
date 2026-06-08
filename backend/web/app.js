@@ -2,6 +2,7 @@ const list = document.querySelector("#task-list");
 const statusText = document.querySelector("#status");
 const toast = document.querySelector("#toast");
 const dialog = document.querySelector("#link-dialog");
+const linkForm = document.querySelector("#link-form");
 const generatedLink = document.querySelector("#generated-link");
 const connectionResult = document.querySelector("#connection-result");
 const testLinkButton = document.querySelector("#test-link");
@@ -93,19 +94,31 @@ async function taskAction(id, action) {
   } catch (error) { notify(error.message); }
 }
 
-async function issueLink(taskId) {
-  const endpoint = prompt("请输入其他设备可以访问的 TLS 地址，例如 192.168.1.10:7443");
-  if (!endpoint) return;
-  const relayEndpoint = prompt("可选：请输入 Relay TLS 地址；不使用可留空", "") || "";
+function issueLink(taskId) {
+  linkForm.reset();
+  linkForm.elements.task_id.value = taskId;
+  generatedLink.value = "";
+  dialog.showModal();
+}
+
+linkForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const data = new FormData(linkForm);
+  const endpoint = String(data.get("endpoint") || "").trim();
+  const relayEndpoint = String(data.get("relay_endpoint") || "").trim();
   try {
     const result = await api("/api/links", {
       method: "POST",
-      body: JSON.stringify({ task_id: taskId, endpoint, relay_endpoint: relayEndpoint }),
+      body: JSON.stringify({
+        task_id: data.get("task_id"),
+        endpoint,
+        relay_endpoint: relayEndpoint,
+      }),
     });
     generatedLink.value = result.link;
-    dialog.showModal();
+    notify("同步链接已生成");
   } catch (error) { notify(error.message); }
-}
+});
 
 document.querySelector("#create-form").addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -184,9 +197,14 @@ function endpointStatus(label, result) {
 
 document.querySelector("#refresh").addEventListener("click", loadTasks);
 document.querySelector("#copy-link").addEventListener("click", async () => {
+  if (!generatedLink.value) {
+    notify("请先生成同步链接");
+    return;
+  }
   await navigator.clipboard.writeText(generatedLink.value);
   notify("链接已复制");
 });
+document.querySelector("#close-link-dialog").addEventListener("click", () => dialog.close());
 
 loadTasks();
 setInterval(loadTasks, 3000);

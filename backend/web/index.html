@@ -53,13 +53,17 @@
     </section>
 
     <dialog id="link-dialog">
-      <form method="dialog">
+      <form id="link-form">
         <h2>同步链接</h2>
-        <p>链接 24 小时内有效，成功使用一次后失效。</p>
+        <p>填写其他设备可以访问的同步地址。链接 24 小时内有效，成功使用一次后失效。</p>
+        <input type="hidden" name="task_id">
+        <label>源端 TLS 地址<input name="endpoint" required placeholder="例如：192.168.1.10:7443"></label>
+        <label>Relay TLS 地址（可选）<input name="relay_endpoint" placeholder="例如：relay.example.com:7443"></label>
         <textarea id="generated-link" rows="6" readonly></textarea>
         <div class="dialog-actions">
+          <button id="generate-link" type="submit">生成链接</button>
           <button id="copy-link" type="button">复制链接</button>
-          <button class="secondary">关闭</button>
+          <button id="close-link-dialog" class="secondary" type="button">关闭</button>
         </div>
       </form>
     </dialog>
