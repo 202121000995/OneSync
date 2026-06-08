@@ -98,6 +98,18 @@ type runner struct {
 }
 
 func (r *runner) Run(ctx context.Context, taskID string) error {
+	return r.run(ctx, taskID, nil)
+}
+
+// RunWithReporter runs continuously and reports connection, sync, and waiting phases.
+func (r *runner) RunWithReporter(ctx context.Context, taskID string, reporter task.StateReporter) error {
+	if reporter == nil {
+		return errors.New("state reporter is required")
+	}
+	return r.run(ctx, taskID, reporter)
+}
+
+func (r *runner) run(ctx context.Context, taskID string, reporter task.StateReporter) error {
 	if taskID != r.task.ID {
 		return errors.New("runner task ID does not match")
 	}
@@ -105,10 +117,16 @@ func (r *runner) Run(ctx context.Context, taskID string) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if err := r.runCycle(ctx, taskID); err != nil {
+		if err := reportState(ctx, reporter, task.StateConnecting); err != nil {
+			return err
+		}
+		if err := r.runCycle(ctx, taskID, reporter); err != nil {
 			if !errors.Is(err, errConnectionUnavailable) {
 				return err
 			}
+		}
+		if err := reportState(ctx, reporter, task.StateIdle); err != nil {
+			return err
 		}
 		if err := filewatch.WaitPeriodic(ctx, r.factory.syncInterval); err != nil {
 			return err
@@ -116,7 +134,7 @@ func (r *runner) Run(ctx context.Context, taskID string) error {
 	}
 }
 
-func (r *runner) runCycle(ctx context.Context, taskID string) error {
+func (r *runner) runCycle(ctx context.Context, taskID string, reporter task.StateReporter) error {
 	credential, err := r.factory.credentials.Load(r.task.ID)
 	if err != nil {
 		return fmt.Errorf("load task credential: %w", err)
@@ -144,6 +162,9 @@ func (r *runner) runCycle(ctx context.Context, taskID string) error {
 			return err
 		}
 		defer connection.session.Close()
+		if err := reportState(ctx, reporter, task.StateSyncing); err != nil {
+			return err
+		}
 		if _, err := r.factory.credentials.Claim(r.task.ID, credential.Token, connection.peerID); err != nil {
 			return fmt.Errorf("claim target identity: %w", err)
 		}
@@ -167,9 +188,19 @@ func (r *runner) runCycle(ctx context.Context, taskID string) error {
 		return err
 	}
 	defer session.Close()
+	if err := reportState(ctx, reporter, task.StateSyncing); err != nil {
+		return err
+	}
 	engine, err := sync.DefaultTargetEngine(r.task.TargetPath, session)
 	if err != nil {
 		return err
 	}
 	return engine.Run(ctx, taskID)
+}
+
+func reportState(ctx context.Context, reporter task.StateReporter, state string) error {
+	if reporter == nil {
+		return nil
+	}
+	return reporter.SetState(ctx, state, "")
 }

@@ -74,6 +74,26 @@ func TestManagerSuccessfulRunBecomesIdle(t *testing.T) {
 	}
 }
 
+func TestManagerAcceptsRunnerStateReports(t *testing.T) {
+	runner := &reportingFakeRunner{reportedIdle: make(chan struct{})}
+	manager := newTestManager(t, filepath.Join(t.TempDir(), "tasks.json"), &fakeFactory{runner: runner})
+	createSourceTask(t, manager, "task")
+
+	if err := manager.Start(context.Background(), "task"); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	<-runner.reportedIdle
+	task := waitForTaskState(t, manager, "task", StateIdle)
+	if task.LastError != "" {
+		t.Fatalf("reported task = %+v", task)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := manager.Stop(ctx, "task"); err != nil {
+		t.Fatalf("Stop() error = %v", err)
+	}
+}
+
 func TestManagerFailedRunPersistsError(t *testing.T) {
 	runner := &fakeRunner{runErr: errors.New("connection failed")}
 	manager := newTestManager(t, filepath.Join(t.TempDir(), "tasks.json"), &fakeFactory{runner: runner})
@@ -294,4 +314,24 @@ func (r *fakeRunner) Run(ctx context.Context, _ string) error {
 		}
 	}
 	return r.runErr
+}
+
+type reportingFakeRunner struct {
+	reportedIdle chan struct{}
+}
+
+func (r *reportingFakeRunner) Run(context.Context, string) error {
+	return errors.New("Run should not be called for reporting runner")
+}
+
+func (r *reportingFakeRunner) RunWithReporter(ctx context.Context, _ string, reporter StateReporter) error {
+	if err := reporter.SetState(ctx, StateSyncing, ""); err != nil {
+		return err
+	}
+	if err := reporter.SetState(ctx, StateIdle, ""); err != nil {
+		return err
+	}
+	close(r.reportedIdle)
+	<-ctx.Done()
+	return ctx.Err()
 }

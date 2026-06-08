@@ -103,6 +103,50 @@ func TestRunnersKeepSynchronizingUntilCanceled(t *testing.T) {
 	waitRunnerCancellation(t, results)
 }
 
+func TestRunnerReportsContinuousStates(t *testing.T) {
+	serverTLS, clientTLS := clientTestTLS(t)
+	endpoint := availableAddress(t)
+	sourceRoot := t.TempDir()
+	targetRoot := t.TempDir()
+	sourceStore := credentialStore(t)
+	targetStore := credentialStore(t)
+	token := testToken()
+	peerID, err := auth.NewPeerID()
+	if err != nil {
+		t.Fatalf("NewPeerID() error = %v", err)
+	}
+	saveCredential(t, sourceStore, "source", auth.Credential{
+		SessionID: "session", Endpoint: endpoint, Token: token, OneTime: true,
+	})
+	saveCredential(t, targetStore, "target", auth.Credential{
+		SessionID: "session", Endpoint: endpoint, Token: token, PeerID: peerID,
+	})
+	sourceFactory := testFactory(t, sourceStore, serverTLS, clientTLS)
+	targetFactory := testFactory(t, targetStore, nil, clientTLS)
+	sourceTask := task.Task{ID: "source", Role: task.RoleSource, SourcePath: sourceRoot}
+	targetTask := task.Task{ID: "target", Role: task.RoleTarget, TargetPath: targetRoot}
+	sourceRunner, targetRunner := createRunnerPair(t, sourceFactory, targetFactory, sourceTask, targetTask)
+	sourceReporter := newStateRecorder()
+	targetReporter := newStateRecorder()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	results := make(chan error, 2)
+	go func() {
+		results <- sourceRunner.(task.ReportingRunner).RunWithReporter(ctx, sourceTask.ID, sourceReporter)
+	}()
+	time.Sleep(20 * time.Millisecond)
+	go func() {
+		results <- targetRunner.(task.ReportingRunner).RunWithReporter(ctx, targetTask.ID, targetReporter)
+	}()
+
+	writeTestFile(t, filepath.Join(sourceRoot, "file.txt"), "content")
+	waitForTestFile(t, filepath.Join(targetRoot, "file.txt"), "content")
+	sourceReporter.waitFor(t, task.StateConnecting, task.StateSyncing, task.StateIdle)
+	targetReporter.waitFor(t, task.StateConnecting, task.StateSyncing, task.StateIdle)
+	cancel()
+	waitRunnerCancellation(t, results)
+}
+
 func TestRunnersSynchronizeThroughRelayAfterDirectFailure(t *testing.T) {
 	serverTLS, clientTLS := clientTestTLS(t)
 	broker, err := relay.NewBroker(relay.Config{
@@ -340,6 +384,39 @@ func waitForTestFileOrRunnerError(t *testing.T, path, want string, results <-cha
 			}
 		case <-deadline.C:
 			assertTestFile(t, path, want)
+		}
+	}
+}
+
+type stateRecorder struct {
+	updates chan string
+}
+
+func newStateRecorder() *stateRecorder {
+	return &stateRecorder{updates: make(chan string, 100)}
+}
+
+func (r *stateRecorder) SetState(ctx context.Context, state, _ string) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case r.updates <- state:
+		return nil
+	}
+}
+
+func (r *stateRecorder) waitFor(t *testing.T, states ...string) {
+	t.Helper()
+	next := 0
+	deadline := time.After(5 * time.Second)
+	for next < len(states) {
+		select {
+		case state := <-r.updates:
+			if state == states[next] {
+				next++
+			}
+		case <-deadline:
+			t.Fatalf("state %q was not reported", states[next])
 		}
 	}
 }

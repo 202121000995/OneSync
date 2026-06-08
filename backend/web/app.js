@@ -43,7 +43,7 @@ function renderTask(task) {
   details.querySelector("p").textContent = `${task.role === "source" ? "源端" : "目标端"} · ${path} · `;
   const badge = document.createElement("span");
   badge.className = "badge";
-  badge.textContent = task.state;
+  badge.textContent = stateLabel(task.state);
   details.querySelector("p").append(badge);
   details.querySelector(".error").textContent = task.last_error || "";
 
@@ -54,6 +54,17 @@ function renderTask(task) {
   if (task.role === "source") actions.append(actionButton("生成链接", () => issueLink(task.id)));
   item.append(details, actions);
   return item;
+}
+
+function stateLabel(state) {
+  return ({
+    created: "已创建",
+    connecting: "连接中",
+    syncing: "同步中",
+    idle: "等待下一轮",
+    failed: "失败",
+    stopped: "已停止",
+  })[state] || state;
 }
 
 function actionButton(label, action, secondary = false) {

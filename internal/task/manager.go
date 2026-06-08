@@ -16,6 +16,16 @@ type Runner interface {
 	Run(ctx context.Context, taskID string) error
 }
 
+// StateReporter lets long-running runners publish their current phase.
+type StateReporter interface {
+	SetState(ctx context.Context, state, lastError string) error
+}
+
+// ReportingRunner performs a task and reports intermediate states.
+type ReportingRunner interface {
+	RunWithReporter(ctx context.Context, taskID string, reporter StateReporter) error
+}
+
 // RunnerFactory creates fresh runtime resources for each task start.
 type RunnerFactory interface {
 	Create(ctx context.Context, task Task) (Runner, error)
@@ -191,10 +201,17 @@ func (m *Manager) run(ctx context.Context, task Task, runtime *runtimeTask) {
 		err = errors.New("runner factory returned nil runner")
 	}
 	if err == nil {
-		err = m.setState(task.ID, StateSyncing, "")
-	}
-	if err == nil {
-		err = runner.Run(ctx, task.ID)
+		if reportingRunner, ok := runner.(ReportingRunner); ok {
+			err = reportingRunner.RunWithReporter(ctx, task.ID, taskStateReporter{
+				manager: m,
+				taskID:  task.ID,
+			})
+		} else {
+			err = m.setState(task.ID, StateSyncing, "")
+			if err == nil {
+				err = runner.Run(ctx, task.ID)
+			}
+		}
 	}
 
 	state := StateIdle
@@ -206,6 +223,21 @@ func (m *Manager) run(ctx context.Context, task Task, runtime *runtimeTask) {
 		lastError = boundedError(err)
 	}
 	runtime.err = m.finishRun(task.ID, runtime, state, lastError)
+}
+
+type taskStateReporter struct {
+	manager *Manager
+	taskID  string
+}
+
+func (r taskStateReporter) SetState(ctx context.Context, state, lastError string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if !validState(state) {
+		return fmt.Errorf("invalid task state %q", state)
+	}
+	return r.manager.setState(r.taskID, state, lastError)
 }
 
 func boundedError(err error) string {
