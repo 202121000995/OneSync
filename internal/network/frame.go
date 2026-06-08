@@ -21,9 +21,11 @@ const (
 	MessageAuthenticate
 	MessageSnapshotRequest
 	MessageSnapshotResponse
+	MessageSyncPlan
 	MessageFileBegin
 	MessageFileChunk
 	MessageFileEnd
+	MessageSyncComplete
 	MessageAck
 	MessageError
 	MessagePing

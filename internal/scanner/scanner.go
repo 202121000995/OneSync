@@ -44,6 +44,8 @@ type filesystemScanner struct {
 	computeHash bool
 }
 
+const reservedTransferDirectory = ".onesync-part"
+
 // New returns a filesystem scanner configured with options.
 func New(options Options) Scanner {
 	return &filesystemScanner{computeHash: options.ComputeHash}
@@ -88,6 +90,9 @@ func (s *filesystemScanner) Scan(ctx context.Context, root string) (Snapshot, er
 			return fmt.Errorf("walk %q: %w", path, walkErr)
 		}
 		if path == absoluteRoot || entry.IsDir() {
+			if path != absoluteRoot && entry.IsDir() && entry.Name() == reservedTransferDirectory {
+				return filepath.SkipDir
+			}
 			return nil
 		}
 		if entry.Type()&fs.ModeSymlink != 0 {

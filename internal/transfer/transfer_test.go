@@ -134,6 +134,24 @@ func TestFileTransferSupportsEmptyFile(t *testing.T) {
 	}
 }
 
+func TestSenderRejectsSymbolicLinkSource(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symbolic link creation commonly requires elevated Windows privileges")
+	}
+	target := filepath.Join(t.TempDir(), "outside.txt")
+	writeTestFile(t, target, []byte("outside"))
+	link := filepath.Join(t.TempDir(), "link.txt")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatalf("Symlink() error = %v", err)
+	}
+
+	client, server := transferSessionPair(t)
+	_ = server
+	if err := (Sender{}).SendFile(context.Background(), client, 1, link, "link.txt"); err == nil {
+		t.Fatal("SendFile() error = nil, want symbolic link rejection")
+	}
+}
+
 func TestTargetPathRejectsUnsafePaths(t *testing.T) {
 	for _, filePath := range []string{
 		"",

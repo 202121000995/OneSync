@@ -29,10 +29,11 @@ func (s Sender) SendFile(ctx context.Context, session network.Session, requestID
 		return fmt.Errorf("chunk size must be between 1 and %d", MaxChunkSize)
 	}
 
-	size, hash, err := inspectFile(ctx, sourcePath)
+	file, size, hash, err := openSourceFile(ctx, sourcePath)
 	if err != nil {
 		return err
 	}
+	defer file.Close()
 	fileID := makeFileID(relativePath, hash)
 	beginPayload, err := encodeBegin(fileBegin{
 		Path:   relativePath,
@@ -56,11 +57,6 @@ func (s Sender) SendFile(ctx context.Context, session network.Session, requestID
 		return errors.New("receiver resume offset exceeds file size")
 	}
 
-	file, err := os.Open(sourcePath)
-	if err != nil {
-		return fmt.Errorf("open source file: %w", err)
-	}
-	defer file.Close()
 	if _, err := file.Seek(offset, io.SeekStart); err != nil {
 		return fmt.Errorf("seek source file: %w", err)
 	}
@@ -129,24 +125,42 @@ func receiveAckOffset(ctx context.Context, session network.Session, requestID ui
 }
 
 func inspectFile(ctx context.Context, sourcePath string) (int64, [hashSize]byte, error) {
+	file, size, hash, err := openSourceFile(ctx, sourcePath)
+	if file != nil {
+		_ = file.Close()
+	}
+	return size, hash, err
+}
+
+func openSourceFile(ctx context.Context, sourcePath string) (*os.File, int64, [hashSize]byte, error) {
+	pathInfo, err := os.Lstat(sourcePath)
+	if err != nil {
+		return nil, 0, [hashSize]byte{}, fmt.Errorf("inspect source file: %w", err)
+	}
+	if !pathInfo.Mode().IsRegular() {
+		return nil, 0, [hashSize]byte{}, errors.New("source is not a regular file")
+	}
+
 	file, err := os.Open(sourcePath)
 	if err != nil {
-		return 0, [hashSize]byte{}, fmt.Errorf("open source file: %w", err)
+		return nil, 0, [hashSize]byte{}, fmt.Errorf("open source file: %w", err)
 	}
-	defer file.Close()
 	info, err := file.Stat()
 	if err != nil {
-		return 0, [hashSize]byte{}, fmt.Errorf("stat source file: %w", err)
+		file.Close()
+		return nil, 0, [hashSize]byte{}, fmt.Errorf("stat source file: %w", err)
 	}
-	if !info.Mode().IsRegular() {
-		return 0, [hashSize]byte{}, errors.New("source is not a regular file")
+	if !info.Mode().IsRegular() || !os.SameFile(pathInfo, info) {
+		file.Close()
+		return nil, 0, [hashSize]byte{}, errors.New("source file changed while opening")
 	}
 
 	hash := sha256.New()
 	buffer := make([]byte, MaxChunkSize)
 	for {
 		if err := ctx.Err(); err != nil {
-			return 0, [hashSize]byte{}, err
+			file.Close()
+			return nil, 0, [hashSize]byte{}, err
 		}
 		count, readErr := file.Read(buffer)
 		if count > 0 {
@@ -156,10 +170,15 @@ func inspectFile(ctx context.Context, sourcePath string) (int64, [hashSize]byte,
 			break
 		}
 		if readErr != nil {
-			return 0, [hashSize]byte{}, fmt.Errorf("hash source file: %w", readErr)
+			file.Close()
+			return nil, 0, [hashSize]byte{}, fmt.Errorf("hash source file: %w", readErr)
 		}
 	}
 	var sum [hashSize]byte
 	copy(sum[:], hash.Sum(nil))
-	return info.Size(), sum, nil
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		file.Close()
+		return nil, 0, [hashSize]byte{}, fmt.Errorf("rewind source file: %w", err)
+	}
+	return file, info.Size(), sum, nil
 }

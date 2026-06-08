@@ -108,6 +108,23 @@ func TestScanIgnoresSymbolicLinks(t *testing.T) {
 	}
 }
 
+func TestScanIgnoresReservedTransferDirectory(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, ".onesync-part", "partial.bin"), "partial")
+	writeFile(t, filepath.Join(root, "visible.txt"), "visible")
+
+	snapshot, err := New(Options{}).Scan(context.Background(), root)
+	if err != nil {
+		t.Fatalf("Scan() error = %v", err)
+	}
+	if _, exists := snapshot.Files[".onesync-part/partial.bin"]; exists {
+		t.Fatal("Scan() included a reserved transfer file")
+	}
+	if _, exists := snapshot.Files["visible.txt"]; !exists {
+		t.Fatal("Scan() omitted a visible file")
+	}
+}
+
 func TestScanRejectsSymbolicLinkRoot(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("symbolic link creation commonly requires elevated Windows privileges")
