@@ -123,7 +123,6 @@ type OperationType string
 const (
     OperationCreate OperationType = "create"
     OperationUpdate OperationType = "update"
-    OperationDelete OperationType = "delete"
 )
 
 type Operation struct {
@@ -132,7 +131,7 @@ type Operation struct {
 }
 ```
 
-删除操作只使用 `Entry.Path`。操作必须按确定性顺序输出，便于测试和恢复。
+V1 不自动删除目标端独有文件。操作必须按路径确定性排序输出，便于测试和恢复。
 
 ### 4.4 同步任务
 
@@ -186,9 +185,11 @@ type Differ interface {
 规则：
 
 - 仅源端存在：`create`
-- 两端存在但内容不同：`update`
-- 仅目标端存在：`delete`
+- 两端存在但内容不同：`update`，始终以源端为准
+- 仅目标端存在：保留，不生成操作
 - 内容一致：不生成操作
+
+比较双方均有哈希时以哈希为准；任一方缺少哈希时比较大小和修改时间。权限模式不参与跨平台内容差异判断。
 
 ### 5.3 Transport
 
@@ -220,7 +221,7 @@ type Engine interface {
 - 生成同步计划。
 - 按协议传输文件。
 - 在目标端原子替换完整文件。
-- 成功传输后执行删除。
+- 保留目标端独有文件，不执行自动删除。
 - 汇报任务进度和错误。
 
 ### 5.5 Task Manager
@@ -416,6 +417,3 @@ V1 不引入数据库。配置与任务状态使用本地文件持久化：
 - TCP 与 Relay 是否要求 V1 即支持 TLS。
 - 同步链接的有效期和重复使用规则。
 - 符号链接的最终处理策略。
-- 文件冲突时是否始终以源端覆盖目标端。
-- 目标端存在未同步文件时是否允许自动删除。
-
