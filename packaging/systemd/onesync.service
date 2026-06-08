@@ -1,0 +1,23 @@
+[Unit]
+Description=OneSync management and synchronization service
+Documentation=file:/usr/share/doc/onesync/systemd.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=onesync
+Group=onesync
+UMask=0077
+StateDirectory=onesync
+LogsDirectory=onesync
+ExecStart=/usr/local/bin/onesync -port 8765 -data-dir /var/lib/onesync -log-file /var/log/onesync/onesync.log
+Restart=on-failure
+RestartSec=5s
+KillSignal=SIGTERM
+TimeoutStopSec=30s
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

@@ -478,3 +478,43 @@
 - 当前 Windows 客户端仍是控制台程序加本机 Web 管理页，尚未实现托盘图标、安装器或后台服务。
 - 证书签发、导入和信任根分发仍由用户或部署流程完成，客户端不会自动创建生产证书。
 - 任务启动目前执行单轮同步；持续监听文件变化和自动触发下一轮仍待后续阶段接入。
+
+## Linux 服务集成审核
+
+审核分支：`feature/linux-service`
+
+审核结论：通过。
+
+审核说明：
+
+- OneSync 主程序和 Relay 均支持 `SIGTERM`，适配 systemd 的停止流程。
+- OneSync 主程序和 Relay 均新增 `-log-file` 参数，可把日志追加写入本地文件。
+- 日志文件按 `0600` 创建，日志目录按 `0700` 创建。
+- 未指定 `-log-file` 时继续输出到标准输出，适配 journald 收集。
+- Linux 和其他非 Windows 构建不会自动弹出浏览器；Windows 自动打开本机管理页行为保持不变。
+- 新增 `packaging/systemd/onesync.service`，用于管理页和同步任务长期运行。
+- 新增 `packaging/systemd/onesync-relay.service`，用于 Relay 长期运行。
+- 新增 `packaging/systemd/systemd.md`，说明安装、启动、停止、重启和查看日志。
+- systemd 模板使用专门的 `onesync` 用户、`StateDirectory`、`LogsDirectory`、`UMask=0077`、失败重启和基础提权限制。
+- systemd 模板不默认启用强文件系统沙箱，避免阻断用户自定义同步目录。
+- 未引入第三方依赖。
+
+审核中修复：
+
+- Relay 主程序同步接入服务停止信号和日志文件输出，不只覆盖 OneSync 主程序。
+- 非 Windows 停止信号改为覆盖全部非 Windows 构建，Linux 交叉编译明确通过。
+- 增加日志文件权限测试，防止服务日志以过宽权限创建。
+
+验证结果：
+
+- `go test ./...` 通过。
+- `go vet ./...` 通过。
+- OneSync 与 Relay 日志文件测试通过。
+- Windows amd64 主程序构建通过。
+- Linux amd64 主程序和 Relay 构建通过。
+
+剩余风险：
+
+- systemd 单元仍是模板，实际部署时需要创建 `onesync` 用户并安装二进制、证书和单元文件。
+- Relay TLS 证书和私钥仍由部署方提供和轮换。
+- 若部署方启用额外 systemd 沙箱，需要把真实同步目录加入允许读写范围。

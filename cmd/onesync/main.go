@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"os/signal"
 	"path/filepath"
 	"time"
 
@@ -30,8 +29,16 @@ func main() {
 	certificatePath := flag.String("cert", "", "TLS certificate file for source tasks")
 	privateKeyPath := flag.String("key", "", "TLS private key file for source tasks")
 	caPath := flag.String("ca", "", "optional trusted CA certificate file")
+	logPath := flag.String("log-file", "", "optional log file path")
 	flag.Parse()
 
+	logFile, err := configureLogging(*logPath)
+	if err != nil {
+		log.Fatal(err)
+	}
+	if logFile != nil {
+		defer logFile.Close()
+	}
 	serverTLS, err := loadServerTLS(*certificatePath, *privateKeyPath)
 	if err != nil {
 		log.Fatal(err)
@@ -64,7 +71,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	ctx, stop := platform.NotifyShutdown(context.Background())
 	defer stop()
 	managementURL := fmt.Sprintf("http://127.0.0.1:%d", *port)
 	log.Printf("OneSync management page: %s", managementURL)
@@ -77,6 +84,21 @@ func main() {
 	if err := server.ListenAndServe(ctx, *port); err != nil {
 		log.Fatal(err)
 	}
+}
+
+func configureLogging(logPath string) (*os.File, error) {
+	if logPath == "" {
+		return nil, nil
+	}
+	if err := os.MkdirAll(filepath.Dir(logPath), 0o700); err != nil {
+		return nil, fmt.Errorf("create log directory: %w", err)
+	}
+	file, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		return nil, fmt.Errorf("open log file: %w", err)
+	}
+	log.SetOutput(file)
+	return file, nil
 }
 
 func loadServerTLS(certificatePath, privateKeyPath string) (*tls.Config, error) {

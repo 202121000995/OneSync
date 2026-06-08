@@ -1,0 +1,23 @@
+[Unit]
+Description=OneSync Relay service
+Documentation=file:/usr/share/doc/onesync/systemd.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=onesync
+Group=onesync
+UMask=0077
+StateDirectory=onesync
+LogsDirectory=onesync
+ExecStart=/usr/local/bin/onesync-relay -listen :7443 -cert /etc/onesync/relay.crt -key /etc/onesync/relay.key -log-file /var/log/onesync/relay.log
+Restart=on-failure
+RestartSec=5s
+KillSignal=SIGTERM
+TimeoutStopSec=30s
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
