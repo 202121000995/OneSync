@@ -7,6 +7,8 @@ import (
 	"sort"
 	"sync"
 	"time"
+
+	"github.com/202121000995/OneSync/internal/progress"
 )
 
 var ErrTaskNotFound = errors.New("task not found")
@@ -19,6 +21,11 @@ type Runner interface {
 // StateReporter lets long-running runners publish their current phase.
 type StateReporter interface {
 	SetState(ctx context.Context, state, lastError string) error
+}
+
+// ProgressReporter lets long-running runners publish file-level progress.
+type ProgressReporter interface {
+	SetProgress(ctx context.Context, snapshot progress.Snapshot) error
 }
 
 // ReportingRunner performs a task and reports intermediate states.
@@ -125,6 +132,7 @@ func (m *Manager) Start(ctx context.Context, taskID string) error {
 	previous := task
 	task.State = StateConnecting
 	task.LastError = ""
+	task.Progress = nil
 	task.UpdatedAt = m.now().UTC()
 	m.tasks[taskID] = task
 	if err := m.store.save(m.tasks); err != nil {
@@ -240,6 +248,16 @@ func (r taskStateReporter) SetState(ctx context.Context, state, lastError string
 	return r.manager.setState(r.taskID, state, lastError)
 }
 
+func (r taskStateReporter) SetProgress(ctx context.Context, snapshot progress.Snapshot) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := progress.Validate(snapshot); err != nil {
+		return err
+	}
+	return r.manager.setProgress(r.taskID, snapshot)
+}
+
 func boundedError(err error) string {
 	const limit = 4096
 	message := err.Error()
@@ -256,6 +274,21 @@ func (m *Manager) setState(taskID, state, lastError string) error {
 	previous := task
 	task.State = state
 	task.LastError = lastError
+	task.UpdatedAt = m.now().UTC()
+	m.tasks[taskID] = task
+	if err := m.store.save(m.tasks); err != nil {
+		m.tasks[taskID] = previous
+		return err
+	}
+	return nil
+}
+
+func (m *Manager) setProgress(taskID string, snapshot progress.Snapshot) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	task := m.tasks[taskID]
+	previous := task
+	task.Progress = &snapshot
 	task.UpdatedAt = m.now().UTC()
 	m.tasks[taskID] = task
 	if err := m.store.save(m.tasks); err != nil {

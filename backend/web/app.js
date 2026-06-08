@@ -40,13 +40,14 @@ function renderTask(task) {
   item.className = "task";
   const details = document.createElement("div");
   const path = task.role === "source" ? task.source_path : task.target_path;
-  details.innerHTML = `<h3></h3><p></p><p class="error"></p>`;
+  details.innerHTML = `<h3></h3><p></p><p class="progress"></p><p class="error"></p>`;
   details.querySelector("h3").textContent = task.id;
   details.querySelector("p").textContent = `${task.role === "source" ? "源端" : "目标端"} · ${path} · `;
   const badge = document.createElement("span");
   badge.className = "badge";
   badge.textContent = stateLabel(task.state);
   details.querySelector("p").append(badge);
+  details.querySelector(".progress").textContent = progressLabel(task.progress);
   details.querySelector(".error").textContent = task.last_error || "";
 
   const actions = document.createElement("div");
@@ -56,6 +57,13 @@ function renderTask(task) {
   if (task.role === "source") actions.append(actionButton("生成链接", () => issueLink(task.id)));
   item.append(details, actions);
   return item;
+}
+
+function progressLabel(progress) {
+  if (!progress || progress.total_files === 0) return "";
+  const base = `本轮进度：${progress.completed_files}/${progress.total_files}`;
+  if (!progress.current_path) return base;
+  return `${base} · 正在处理 ${progress.current_path}`;
 }
 
 function stateLabel(state) {
@@ -181,3 +189,4 @@ document.querySelector("#copy-link").addEventListener("click", async () => {
 });
 
 loadTasks();
+setInterval(loadTasks, 3000);

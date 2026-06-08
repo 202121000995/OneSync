@@ -32,6 +32,7 @@ button.secondary { background: #e7eee8; color: #334239; }
 .task:first-child { border-top: 0; }
 .task h3 { margin: 0 0 5px; }
 .task p { margin: 0; font-size: 14px; }
+.task .progress { margin-top: 5px; color: #2d7a4e; }
 .actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 .badge { display: inline-block; border-radius: 999px; padding: 4px 9px; background: #eef4ef; color: #496052; font-size: 12px; }
 .error { color: #b42318 !important; }

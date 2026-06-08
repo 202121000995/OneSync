@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/202121000995/OneSync/internal/network"
+	"github.com/202121000995/OneSync/internal/progress"
 	"github.com/202121000995/OneSync/internal/scanner"
 	"github.com/202121000995/OneSync/internal/transfer"
 )
@@ -27,18 +28,24 @@ type fileReceiver interface {
 	ReceiveFile(ctx context.Context, session network.Session) error
 }
 
+// ProgressReporter receives file-level synchronization progress.
+type ProgressReporter interface {
+	SetProgress(ctx context.Context, snapshot progress.Snapshot) error
+}
+
 // Engine runs one source or target synchronization cycle.
 type Engine struct {
-	role     string
-	root     string
-	session  network.Session
-	scanner  scanner.Scanner
-	differ   Differ
-	sender   fileSender
-	receiver fileReceiver
-	cycles   cycleGroup
-	taskMu   sync.Mutex
-	taskID   string
+	role             string
+	root             string
+	session          network.Session
+	scanner          scanner.Scanner
+	differ           Differ
+	sender           fileSender
+	receiver         fileReceiver
+	progressReporter ProgressReporter
+	cycles           cycleGroup
+	taskMu           sync.Mutex
+	taskID           string
 }
 
 // Config provides the role-specific dependencies for a synchronization engine.
@@ -50,6 +57,7 @@ type Config struct {
 	Differ   Differ
 	Sender   fileSender
 	Receiver fileReceiver
+	Progress ProgressReporter
 }
 
 // NewEngine validates and creates a synchronization engine.
@@ -70,13 +78,14 @@ func NewEngine(config Config) (*Engine, error) {
 		return nil, errors.New("target receiver is required")
 	}
 	return &Engine{
-		role:     config.Role,
-		root:     config.Root,
-		session:  config.Session,
-		scanner:  config.Scanner,
-		differ:   config.Differ,
-		sender:   config.Sender,
-		receiver: config.Receiver,
+		role:             config.Role,
+		root:             config.Root,
+		session:          config.Session,
+		scanner:          config.Scanner,
+		differ:           config.Differ,
+		sender:           config.Sender,
+		receiver:         config.Receiver,
+		progressReporter: config.Progress,
 	}, nil
 }
 
@@ -132,6 +141,9 @@ func (e *Engine) runSource(ctx context.Context) error {
 	if len(operations) > MaxOperations {
 		return fmt.Errorf("sync plan contains %d operations, limit is %d", len(operations), MaxOperations)
 	}
+	if err := e.reportProgress(ctx, progress.Snapshot{TotalFiles: len(operations)}); err != nil {
+		return err
+	}
 
 	const planRequestID uint64 = 2
 	if err := sendPlan(ctx, e.session, planRequestID, len(operations)); err != nil {
@@ -147,8 +159,21 @@ func (e *Engine) runSource(ctx context.Context) error {
 		}
 		sourcePath := filepath.Join(e.root, filepath.FromSlash(operation.Entry.Path))
 		requestID := uint64(index) + 3
+		if err := e.reportProgress(ctx, progress.Snapshot{
+			TotalFiles:     len(operations),
+			CompletedFiles: index,
+			CurrentPath:    operation.Entry.Path,
+		}); err != nil {
+			return err
+		}
 		if err := e.sender.SendFile(ctx, e.session, requestID, sourcePath, operation.Entry.Path); err != nil {
 			return fmt.Errorf("transfer %q: %w", operation.Entry.Path, err)
+		}
+		if err := e.reportProgress(ctx, progress.Snapshot{
+			TotalFiles:     len(operations),
+			CompletedFiles: index + 1,
+		}); err != nil {
+			return err
 		}
 	}
 
@@ -197,15 +222,24 @@ func (e *Engine) runTarget(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("decode sync plan: %w", err)
 	}
+	if err := e.reportProgress(ctx, progress.Snapshot{TotalFiles: operationCount}); err != nil {
+		return err
+	}
 	if err := e.session.Send(ctx, network.Message{
 		Type: network.MessageAck, RequestID: planMessage.RequestID,
 	}); err != nil {
 		return fmt.Errorf("acknowledge sync plan: %w", err)
 	}
 
-	for range operationCount {
+	for index := range operationCount {
 		if err := e.receiver.ReceiveFile(ctx, e.session); err != nil {
 			return fmt.Errorf("receive file: %w", err)
+		}
+		if err := e.reportProgress(ctx, progress.Snapshot{
+			TotalFiles:     operationCount,
+			CompletedFiles: index + 1,
+		}); err != nil {
+			return err
 		}
 	}
 
@@ -219,6 +253,13 @@ func (e *Engine) runTarget(ctx context.Context) error {
 	return e.session.Send(ctx, network.Message{
 		Type: network.MessageAck, RequestID: complete.RequestID,
 	})
+}
+
+func (e *Engine) reportProgress(ctx context.Context, snapshot progress.Snapshot) error {
+	if e.progressReporter == nil {
+		return nil
+	}
+	return e.progressReporter.SetProgress(ctx, snapshot)
 }
 
 type cycleCall struct {
@@ -261,24 +302,33 @@ func (g *cycleGroup) Do(ctx context.Context, key string, run func() error) error
 }
 
 // DefaultSourceEngine creates a source engine using production implementations.
-func DefaultSourceEngine(root string, session network.Session) (*Engine, error) {
+func DefaultSourceEngine(root string, session network.Session, reporters ...ProgressReporter) (*Engine, error) {
 	return NewEngine(Config{
-		Role:    RoleSource,
-		Root:    root,
-		Session: session,
-		Scanner: scanner.New(scanner.Options{ComputeHash: true}),
-		Differ:  NewDiffer(),
-		Sender:  transfer.Sender{},
+		Role:     RoleSource,
+		Root:     root,
+		Session:  session,
+		Scanner:  scanner.New(scanner.Options{ComputeHash: true}),
+		Differ:   NewDiffer(),
+		Sender:   transfer.Sender{},
+		Progress: firstProgressReporter(reporters),
 	})
 }
 
 // DefaultTargetEngine creates a target engine using production implementations.
-func DefaultTargetEngine(root string, session network.Session) (*Engine, error) {
+func DefaultTargetEngine(root string, session network.Session, reporters ...ProgressReporter) (*Engine, error) {
 	return NewEngine(Config{
 		Role:     RoleTarget,
 		Root:     root,
 		Session:  session,
 		Scanner:  scanner.New(scanner.Options{ComputeHash: true}),
 		Receiver: transfer.Receiver{Root: root},
+		Progress: firstProgressReporter(reporters),
 	})
+}
+
+func firstProgressReporter(reporters []ProgressReporter) ProgressReporter {
+	if len(reporters) == 0 {
+		return nil
+	}
+	return reporters[0]
 }

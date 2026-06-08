@@ -7,6 +7,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/202121000995/OneSync/internal/progress"
 )
 
 func TestManagerCreatePersistsAndReloads(t *testing.T) {
@@ -90,6 +92,27 @@ func TestManagerAcceptsRunnerStateReports(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	if err := manager.Stop(ctx, "task"); err != nil {
+		t.Fatalf("Stop() error = %v", err)
+	}
+}
+
+func TestManagerAcceptsRunnerProgressReports(t *testing.T) {
+	runner := &progressReportingRunner{reported: make(chan struct{})}
+	manager := newTestManager(t, filepath.Join(t.TempDir(), "tasks.json"), &fakeFactory{runner: runner})
+	createSourceTask(t, manager, "task")
+
+	if err := manager.Start(context.Background(), "task"); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	<-runner.reported
+	task, err := manager.Get(context.Background(), "task")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if task.Progress == nil || task.Progress.TotalFiles != 3 || task.Progress.CompletedFiles != 2 || task.Progress.CurrentPath != "folder/file.txt" {
+		t.Fatalf("progress = %+v", task.Progress)
+	}
+	if err := manager.Stop(context.Background(), "task"); err != nil {
 		t.Fatalf("Stop() error = %v", err)
 	}
 }
@@ -332,6 +355,31 @@ func (r *reportingFakeRunner) RunWithReporter(ctx context.Context, _ string, rep
 		return err
 	}
 	close(r.reportedIdle)
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+type progressReportingRunner struct {
+	reported chan struct{}
+}
+
+func (r *progressReportingRunner) Run(context.Context, string) error {
+	return errors.New("Run should not be called for progress reporting runner")
+}
+
+func (r *progressReportingRunner) RunWithReporter(ctx context.Context, _ string, reporter StateReporter) error {
+	progressReporter, ok := reporter.(ProgressReporter)
+	if !ok {
+		return errors.New("progress reporter is not available")
+	}
+	if err := progressReporter.SetProgress(ctx, progress.Snapshot{
+		TotalFiles:     3,
+		CompletedFiles: 2,
+		CurrentPath:    "folder/file.txt",
+	}); err != nil {
+		return err
+	}
+	close(r.reported)
 	<-ctx.Done()
 	return ctx.Err()
 }

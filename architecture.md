@@ -63,6 +63,7 @@ V1 不支持：
 │   ├── filewatch/
 │   ├── logger/
 │   ├── network/
+│   ├── progress/
 │   ├── relay/
 │   ├── scanner/
 │   ├── sync/
@@ -84,6 +85,7 @@ V1 不支持：
 - `internal/sync`：快照比较、同步计划与执行编排。
 - `internal/transfer`：文件分块发送、临时接收、哈希校验和断点续传。
 - `internal/network`：TCP 连接、协议帧和传输会话。
+- `internal/progress`：任务级文件进度快照和校验。
 - `internal/relay`：中转连接配对和数据转发。
 - `internal/task`：同步任务生命周期与状态管理。
 - `internal/config`：配置读取、校验和持久化。
@@ -157,6 +159,13 @@ type Task struct {
     PeerAddress string
     RelayURL    string
     State       string
+    Progress    *Progress
+}
+
+type Progress struct {
+    TotalFiles     int
+    CompletedFiles int
+    CurrentPath    string
 }
 ```
 
@@ -379,6 +388,14 @@ V1 的持续触发由 `internal/filewatch` 的周期等待实现，默认间隔 
 - `syncing`：正在执行本轮快照、差异和文件传输。
 - `idle`：本轮已结束，正在等待下一次周期触发。
 
+同步引擎会在每轮同步中汇报文件级进度：
+
+- `TotalFiles`：本轮需要创建或更新的文件数。
+- `CompletedFiles`：本轮已完成的文件数。
+- `CurrentPath`：源端当前正在发送的相对路径；目标端无法在不解析传输层细节时提前知道文件名，可只汇报数量。
+
+管理页按周期刷新任务列表，显示本轮 `CompletedFiles/TotalFiles` 和源端当前文件。
+
 源端任务：
 
 - 从独立凭据文件读取会话 ID、连接端点、可选 Relay 端点和同步令牌。
@@ -515,6 +532,8 @@ V1 不引入数据库。配置与任务状态使用本地文件持久化：
     - 增加本地 TLS 证书生成工具和两机验收说明。
 13. `feature/connection-check`
     - 增加同步链接 TLS 连接测试 API 和管理页按钮。
+14. `feature/sync-progress`
+    - 增加任务级文件同步进度持久化和管理页展示。
 
 ## 16. 待确认项
 

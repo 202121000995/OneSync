@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/202121000995/OneSync/internal/auth"
+	"github.com/202121000995/OneSync/internal/progress"
 	"github.com/202121000995/OneSync/internal/relay"
 	"github.com/202121000995/OneSync/internal/task"
 )
@@ -143,6 +144,8 @@ func TestRunnerReportsContinuousStates(t *testing.T) {
 	waitForTestFile(t, filepath.Join(targetRoot, "file.txt"), "content")
 	sourceReporter.waitFor(t, task.StateConnecting, task.StateSyncing, task.StateIdle)
 	targetReporter.waitFor(t, task.StateConnecting, task.StateSyncing, task.StateIdle)
+	sourceReporter.waitForProgress(t, progress.Snapshot{TotalFiles: 1, CompletedFiles: 1})
+	targetReporter.waitForProgress(t, progress.Snapshot{TotalFiles: 1, CompletedFiles: 1})
 	cancel()
 	waitRunnerCancellation(t, results)
 }
@@ -389,11 +392,15 @@ func waitForTestFileOrRunnerError(t *testing.T, path, want string, results <-cha
 }
 
 type stateRecorder struct {
-	updates chan string
+	updates  chan string
+	progress chan progress.Snapshot
 }
 
 func newStateRecorder() *stateRecorder {
-	return &stateRecorder{updates: make(chan string, 100)}
+	return &stateRecorder{
+		updates:  make(chan string, 100),
+		progress: make(chan progress.Snapshot, 100),
+	}
 }
 
 func (r *stateRecorder) SetState(ctx context.Context, state, _ string) error {
@@ -401,6 +408,15 @@ func (r *stateRecorder) SetState(ctx context.Context, state, _ string) error {
 	case <-ctx.Done():
 		return ctx.Err()
 	case r.updates <- state:
+		return nil
+	}
+}
+
+func (r *stateRecorder) SetProgress(ctx context.Context, snapshot progress.Snapshot) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case r.progress <- snapshot:
 		return nil
 	}
 }
@@ -417,6 +433,21 @@ func (r *stateRecorder) waitFor(t *testing.T, states ...string) {
 			}
 		case <-deadline:
 			t.Fatalf("state %q was not reported", states[next])
+		}
+	}
+}
+
+func (r *stateRecorder) waitForProgress(t *testing.T, want progress.Snapshot) {
+	t.Helper()
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case got := <-r.progress:
+			if got.TotalFiles == want.TotalFiles && got.CompletedFiles == want.CompletedFiles && got.CurrentPath == want.CurrentPath {
+				return
+			}
+		case <-deadline:
+			t.Fatalf("progress %+v was not reported", want)
 		}
 	}
 }

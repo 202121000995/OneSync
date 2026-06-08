@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/202121000995/OneSync/internal/progress"
 )
 
 const (
@@ -24,16 +26,17 @@ const (
 
 // Task contains persistent synchronization task state.
 type Task struct {
-	ID          string    `json:"id"`
-	Role        string    `json:"role"`
-	SourcePath  string    `json:"source_path,omitempty"`
-	TargetPath  string    `json:"target_path,omitempty"`
-	PeerAddress string    `json:"peer_address,omitempty"`
-	RelayURL    string    `json:"relay_url,omitempty"`
-	State       string    `json:"state"`
-	LastError   string    `json:"last_error,omitempty"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID          string             `json:"id"`
+	Role        string             `json:"role"`
+	SourcePath  string             `json:"source_path,omitempty"`
+	TargetPath  string             `json:"target_path,omitempty"`
+	PeerAddress string             `json:"peer_address,omitempty"`
+	RelayURL    string             `json:"relay_url,omitempty"`
+	State       string             `json:"state"`
+	LastError   string             `json:"last_error,omitempty"`
+	Progress    *progress.Snapshot `json:"progress,omitempty"`
+	CreatedAt   time.Time          `json:"created_at"`
+	UpdatedAt   time.Time          `json:"updated_at"`
 }
 
 func validateTask(task Task) error {
@@ -70,6 +73,11 @@ func validateTask(task Task) error {
 	}
 	if task.State != "" && !validState(task.State) {
 		return fmt.Errorf("invalid task state %q", task.State)
+	}
+	if task.Progress != nil {
+		if err := progress.Validate(*task.Progress); err != nil {
+			return err
+		}
 	}
 	return nil
 }

@@ -168,7 +168,7 @@ func (r *runner) runCycle(ctx context.Context, taskID string, reporter task.Stat
 		if _, err := r.factory.credentials.Claim(r.task.ID, credential.Token, connection.peerID); err != nil {
 			return fmt.Errorf("claim target identity: %w", err)
 		}
-		engine, err := sync.DefaultSourceEngine(r.task.SourcePath, connection.session)
+		engine, err := sync.DefaultSourceEngine(r.task.SourcePath, connection.session, progressReporter(reporter))
 		if err != nil {
 			return err
 		}
@@ -191,7 +191,7 @@ func (r *runner) runCycle(ctx context.Context, taskID string, reporter task.Stat
 	if err := reportState(ctx, reporter, task.StateSyncing); err != nil {
 		return err
 	}
-	engine, err := sync.DefaultTargetEngine(r.task.TargetPath, session)
+	engine, err := sync.DefaultTargetEngine(r.task.TargetPath, session, progressReporter(reporter))
 	if err != nil {
 		return err
 	}
@@ -203,4 +203,9 @@ func reportState(ctx context.Context, reporter task.StateReporter, state string)
 		return nil
 	}
 	return reporter.SetState(ctx, state, "")
+}
+
+func progressReporter(reporter task.StateReporter) sync.ProgressReporter {
+	progressReporter, _ := reporter.(sync.ProgressReporter)
+	return progressReporter
 }

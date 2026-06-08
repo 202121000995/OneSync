@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/202121000995/OneSync/internal/network"
+	"github.com/202121000995/OneSync/internal/progress"
 )
 
 func TestEngineSynchronizesCreateAndUpdateAndPreservesTargetOnly(t *testing.T) {
@@ -42,6 +43,65 @@ func TestEngineHandlesNoChanges(t *testing.T) {
 
 	runEnginePair(t, sourceRoot, targetRoot, "task-no-change")
 	assertEngineFile(t, filepath.Join(targetRoot, "same.txt"), content)
+}
+
+func TestEngineReportsFileProgress(t *testing.T) {
+	sourceRoot := t.TempDir()
+	targetRoot := t.TempDir()
+	writeEngineFile(t, filepath.Join(sourceRoot, "a.txt"), []byte("a"))
+	writeEngineFile(t, filepath.Join(sourceRoot, "b.txt"), []byte("b"))
+
+	sourceConnection, targetConnection := net.Pipe()
+	sourceSession, err := network.NewSession(sourceConnection, network.DefaultMaxPayload)
+	if err != nil {
+		t.Fatalf("NewSession(source) error = %v", err)
+	}
+	targetSession, err := network.NewSession(targetConnection, network.DefaultMaxPayload)
+	if err != nil {
+		t.Fatalf("NewSession(target) error = %v", err)
+	}
+	defer sourceSession.Close()
+	defer targetSession.Close()
+
+	recorder := &progressRecorder{}
+	sourceEngine, err := DefaultSourceEngine(sourceRoot, sourceSession, recorder)
+	if err != nil {
+		t.Fatalf("DefaultSourceEngine() error = %v", err)
+	}
+	targetEngine, err := DefaultTargetEngine(targetRoot, targetSession)
+	if err != nil {
+		t.Fatalf("DefaultTargetEngine() error = %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	targetErrors := make(chan error, 1)
+	go func() {
+		targetErrors <- targetEngine.Run(ctx, "task-progress")
+	}()
+	if err := sourceEngine.Run(ctx, "task-progress"); err != nil {
+		t.Fatalf("source Run() error = %v", err)
+	}
+	if err := <-targetErrors; err != nil {
+		t.Fatalf("target Run() error = %v", err)
+	}
+	snapshots := recorder.snapshots()
+	if len(snapshots) < 5 {
+		t.Fatalf("progress snapshots = %+v", snapshots)
+	}
+	final := snapshots[len(snapshots)-1]
+	if final.TotalFiles != 2 || final.CompletedFiles != 2 || final.CurrentPath != "" {
+		t.Fatalf("final progress = %+v", final)
+	}
+	foundCurrent := false
+	for _, snapshot := range snapshots {
+		if snapshot.CurrentPath == "a.txt" || snapshot.CurrentPath == "b.txt" {
+			foundCurrent = true
+		}
+	}
+	if !foundCurrent {
+		t.Fatalf("progress did not include current file: %+v", snapshots)
+	}
 }
 
 func TestCycleGroupMergesConcurrentTaskRuns(t *testing.T) {
@@ -208,4 +268,19 @@ func assertEngineFile(t *testing.T, filePath string, want []byte) {
 	if !bytes.Equal(got, want) {
 		t.Fatalf("ReadFile(%q) = %q, want %q", filePath, got, want)
 	}
+}
+
+type progressRecorder struct {
+	values []progress.Snapshot
+}
+
+func (r *progressRecorder) SetProgress(_ context.Context, snapshot progress.Snapshot) error {
+	r.values = append(r.values, snapshot)
+	return nil
+}
+
+func (r *progressRecorder) snapshots() []progress.Snapshot {
+	values := make([]progress.Snapshot, len(r.values))
+	copy(values, r.values)
+	return values
 }
