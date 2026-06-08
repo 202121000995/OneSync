@@ -11,6 +11,7 @@ import (
 	"crypto/x509/pkix"
 	"encoding/base64"
 	"encoding/pem"
+	"errors"
 	"math/big"
 	"net"
 	"os"
@@ -47,7 +48,7 @@ func TestRunnersSynchronizeDirectlyAndReconnectBoundPeer(t *testing.T) {
 	targetTask := task.Task{ID: "target", Role: task.RoleTarget, TargetPath: targetRoot}
 
 	writeTestFile(t, filepath.Join(sourceRoot, "folder", "file.txt"), "first")
-	runRunnerPair(t, sourceFactory, targetFactory, sourceTask, targetTask)
+	runRunnerPairUntilFile(t, sourceFactory, targetFactory, sourceTask, targetTask, filepath.Join(targetRoot, "folder", "file.txt"), "first")
 	assertTestFile(t, filepath.Join(targetRoot, "folder", "file.txt"), "first")
 
 	claimed, err := sourceStore.Load("source")
@@ -59,8 +60,47 @@ func TestRunnersSynchronizeDirectlyAndReconnectBoundPeer(t *testing.T) {
 	}
 
 	writeTestFile(t, filepath.Join(sourceRoot, "folder", "file.txt"), "second")
-	runRunnerPair(t, sourceFactory, targetFactory, sourceTask, targetTask)
+	runRunnerPairUntilFile(t, sourceFactory, targetFactory, sourceTask, targetTask, filepath.Join(targetRoot, "folder", "file.txt"), "second")
 	assertTestFile(t, filepath.Join(targetRoot, "folder", "file.txt"), "second")
+}
+
+func TestRunnersKeepSynchronizingUntilCanceled(t *testing.T) {
+	serverTLS, clientTLS := clientTestTLS(t)
+	endpoint := availableAddress(t)
+	sourceRoot := t.TempDir()
+	targetRoot := t.TempDir()
+	sourceStore := credentialStore(t)
+	targetStore := credentialStore(t)
+	token := testToken()
+	peerID, err := auth.NewPeerID()
+	if err != nil {
+		t.Fatalf("NewPeerID() error = %v", err)
+	}
+	saveCredential(t, sourceStore, "source", auth.Credential{
+		SessionID: "session", Endpoint: endpoint, Token: token, OneTime: true,
+	})
+	saveCredential(t, targetStore, "target", auth.Credential{
+		SessionID: "session", Endpoint: endpoint, Token: token, PeerID: peerID,
+	})
+	sourceFactory := testFactory(t, sourceStore, serverTLS, clientTLS)
+	targetFactory := testFactory(t, targetStore, nil, clientTLS)
+	sourceTask := task.Task{ID: "source", Role: task.RoleSource, SourcePath: sourceRoot}
+	targetTask := task.Task{ID: "target", Role: task.RoleTarget, TargetPath: targetRoot}
+	sourceRunner, targetRunner := createRunnerPair(t, sourceFactory, targetFactory, sourceTask, targetTask)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	results := make(chan error, 2)
+	go func() { results <- sourceRunner.Run(ctx, sourceTask.ID) }()
+	time.Sleep(20 * time.Millisecond)
+	go func() { results <- targetRunner.Run(ctx, targetTask.ID) }()
+
+	targetFile := filepath.Join(targetRoot, "file.txt")
+	writeTestFile(t, filepath.Join(sourceRoot, "file.txt"), "first")
+	waitForTestFile(t, targetFile, "first")
+	writeTestFile(t, filepath.Join(sourceRoot, "file.txt"), "second")
+	waitForTestFile(t, targetFile, "second")
+	cancel()
+	waitRunnerCancellation(t, results)
 }
 
 func TestRunnersSynchronizeThroughRelayAfterDirectFailure(t *testing.T) {
@@ -115,15 +155,34 @@ func TestRunnersSynchronizeThroughRelayAfterDirectFailure(t *testing.T) {
 	sourceTask := task.Task{ID: "source", Role: task.RoleSource, SourcePath: sourceRoot}
 	targetTask := task.Task{ID: "target", Role: task.RoleTarget, TargetPath: targetRoot}
 	writeTestFile(t, filepath.Join(sourceRoot, "relay.txt"), "through Relay")
-	runRunnerPair(t, sourceFactory, targetFactory, sourceTask, targetTask)
+	runRunnerPairUntilFile(t, sourceFactory, targetFactory, sourceTask, targetTask, filepath.Join(targetRoot, "relay.txt"), "through Relay")
 	assertTestFile(t, filepath.Join(targetRoot, "relay.txt"), "through Relay")
 }
 
-func runRunnerPair(
+func runRunnerPairUntilFile(
 	t *testing.T,
 	sourceFactory, targetFactory *Factory,
 	sourceTask, targetTask task.Task,
+	targetPath, targetContent string,
 ) {
+	t.Helper()
+	sourceRunner, targetRunner := createRunnerPair(t, sourceFactory, targetFactory, sourceTask, targetTask)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	results := make(chan error, 2)
+	go func() { results <- sourceRunner.Run(ctx, sourceTask.ID) }()
+	time.Sleep(20 * time.Millisecond)
+	go func() { results <- targetRunner.Run(ctx, targetTask.ID) }()
+	waitForTestFileOrRunnerError(t, targetPath, targetContent, results)
+	time.Sleep(100 * time.Millisecond)
+	cancel()
+	waitRunnerCancellation(t, results)
+}
+
+func createRunnerPair(
+	t *testing.T,
+	sourceFactory, targetFactory *Factory,
+	sourceTask, targetTask task.Task,
+) (task.Runner, task.Runner) {
 	t.Helper()
 	sourceRunner, err := sourceFactory.Create(context.Background(), sourceTask)
 	if err != nil {
@@ -133,14 +192,13 @@ func runRunnerPair(
 	if err != nil {
 		t.Fatalf("create target runner: %v", err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	results := make(chan error, 2)
-	go func() { results <- sourceRunner.Run(ctx, sourceTask.ID) }()
-	time.Sleep(20 * time.Millisecond)
-	go func() { results <- targetRunner.Run(ctx, targetTask.ID) }()
+	return sourceRunner, targetRunner
+}
+
+func waitRunnerCancellation(t *testing.T, results chan error) {
+	t.Helper()
 	for range 2 {
-		if err := <-results; err != nil {
+		if err := <-results; err != nil && !errors.Is(err, context.Canceled) {
 			t.Fatalf("runner error = %v", err)
 		}
 	}
@@ -209,9 +267,10 @@ func credentialStore(t *testing.T) *auth.CredentialStore {
 func testFactory(t *testing.T, store *auth.CredentialStore, serverTLS, clientTLS *tls.Config) *Factory {
 	t.Helper()
 	factory, err := NewFactory(Config{
-		Credentials: store,
-		ServerTLS:   serverTLS,
-		ClientTLS:   clientTLS,
+		Credentials:  store,
+		ServerTLS:    serverTLS,
+		ClientTLS:    clientTLS,
+		SyncInterval: 20 * time.Millisecond,
 	})
 	if err != nil {
 		t.Fatalf("NewFactory() error = %v", err)
@@ -248,5 +307,39 @@ func assertTestFile(t *testing.T, path, want string) {
 	}
 	if string(data) != want {
 		t.Fatalf("file = %q, want %q", data, want)
+	}
+}
+
+func waitForTestFile(t *testing.T, path, want string) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		data, err := os.ReadFile(path)
+		if err == nil && string(data) == want {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	assertTestFile(t, path, want)
+}
+
+func waitForTestFileOrRunnerError(t *testing.T, path, want string, results <-chan error) {
+	t.Helper()
+	deadline := time.NewTimer(5 * time.Second)
+	defer deadline.Stop()
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case err := <-results:
+			t.Fatalf("runner exited before file synchronized: %v", err)
+		case <-ticker.C:
+			data, err := os.ReadFile(path)
+			if err == nil && string(data) == want {
+				return
+			}
+		case <-deadline.C:
+			assertTestFile(t, path, want)
+		}
 	}
 }

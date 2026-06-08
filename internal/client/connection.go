@@ -12,6 +12,8 @@ import (
 	"github.com/202121000995/OneSync/internal/relay"
 )
 
+var errConnectionUnavailable = errors.New("connection is temporarily unavailable")
+
 type connectionResult struct {
 	connection authenticatedConnection
 	err        error
@@ -63,7 +65,7 @@ func connectSource(
 		relayed = func(ctx context.Context) (authenticatedConnection, error) {
 			session, err := connectRelay(ctx, credential.RelayEndpoint, credential.SessionID, relay.RoleSource, relayToken, clientTLS, maxPayload)
 			if err != nil {
-				return authenticatedConnection{}, err
+				return authenticatedConnection{}, fmt.Errorf("%w: %v", errConnectionUnavailable, err)
 			}
 			peerID, err := network.AuthenticatePeerServer(ctx, session, authenticationToken, expectedPeerID)
 			if err != nil {
@@ -89,6 +91,7 @@ func connectTarget(
 		return nil, err
 	}
 	session, directErr := transport.Connect(ctx, credential.Endpoint)
+	directConnected := directErr == nil
 	if directErr == nil {
 		directErr = network.AuthenticatePeerClient(ctx, session, 1, authenticationToken, peerID)
 		if directErr == nil {
@@ -97,13 +100,19 @@ func connectTarget(
 		_ = session.Close()
 	}
 	if credential.RelayEndpoint == "" {
-		return nil, directErr
+		if directConnected {
+			return nil, directErr
+		}
+		return nil, fmt.Errorf("%w: %v", errConnectionUnavailable, directErr)
 	}
 	session, relayErr := connectRelay(
 		ctx, credential.RelayEndpoint, credential.SessionID, relay.RoleTarget, relayToken, clientTLS, maxPayload,
 	)
 	if relayErr != nil {
-		return nil, fmt.Errorf("direct connection failed: %v; Relay connection failed: %w", directErr, relayErr)
+		if directConnected {
+			return nil, fmt.Errorf("direct authentication failed: %v; Relay connection failed: %w", directErr, relayErr)
+		}
+		return nil, fmt.Errorf("%w: direct connection failed: %v; Relay connection failed: %v", errConnectionUnavailable, directErr, relayErr)
 	}
 	if err := network.AuthenticatePeerClient(ctx, session, 1, authenticationToken, peerID); err != nil {
 		_ = session.Close()

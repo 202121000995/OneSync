@@ -30,6 +30,7 @@ func main() {
 	privateKeyPath := flag.String("key", "", "TLS private key file for source tasks")
 	caPath := flag.String("ca", "", "optional trusted CA certificate file")
 	logPath := flag.String("log-file", "", "optional log file path")
+	syncInterval := flag.Duration("sync-interval", client.DefaultSyncInterval, "time between completed synchronization cycles")
 	flag.Parse()
 
 	logFile, err := configureLogging(*logPath)
@@ -52,9 +53,10 @@ func main() {
 		log.Fatal(err)
 	}
 	runnerFactory, err := client.NewFactory(client.Config{
-		Credentials: credentials,
-		ServerTLS:   serverTLS,
-		ClientTLS:   clientTLS,
+		Credentials:  credentials,
+		ServerTLS:    serverTLS,
+		ClientTLS:    clientTLS,
+		SyncInterval: *syncInterval,
 	})
 	if err != nil {
 		log.Fatal(err)

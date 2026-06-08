@@ -6,27 +6,33 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/202121000995/OneSync/internal/auth"
+	"github.com/202121000995/OneSync/internal/filewatch"
 	"github.com/202121000995/OneSync/internal/network"
 	"github.com/202121000995/OneSync/internal/sync"
 	"github.com/202121000995/OneSync/internal/task"
 )
 
+const DefaultSyncInterval = 30 * time.Second
+
 // Config provides shared dependencies for task runners.
 type Config struct {
-	Credentials *auth.CredentialStore
-	ServerTLS   *tls.Config
-	ClientTLS   *tls.Config
-	MaxPayload  uint32
+	Credentials  *auth.CredentialStore
+	ServerTLS    *tls.Config
+	ClientTLS    *tls.Config
+	MaxPayload   uint32
+	SyncInterval time.Duration
 }
 
 // Factory creates authenticated synchronization runners.
 type Factory struct {
-	credentials *auth.CredentialStore
-	serverTLS   *tls.Config
-	clientTLS   *tls.Config
-	maxPayload  uint32
+	credentials  *auth.CredentialStore
+	serverTLS    *tls.Config
+	clientTLS    *tls.Config
+	maxPayload   uint32
+	syncInterval time.Duration
 }
 
 // NewFactory validates and copies runtime TLS configuration.
@@ -39,6 +45,12 @@ func NewFactory(config Config) (*Factory, error) {
 	}
 	if config.MaxPayload == 0 {
 		config.MaxPayload = network.DefaultMaxPayload
+	}
+	if config.SyncInterval == 0 {
+		config.SyncInterval = DefaultSyncInterval
+	}
+	if config.SyncInterval < 0 {
+		return nil, errors.New("sync interval cannot be negative")
 	}
 	if _, err := network.NewCodec(config.MaxPayload); err != nil {
 		return nil, err
@@ -54,10 +66,11 @@ func NewFactory(config Config) (*Factory, error) {
 		serverTLS.MinVersion = tls.VersionTLS13
 	}
 	return &Factory{
-		credentials: config.Credentials,
-		serverTLS:   serverTLS,
-		clientTLS:   clientTLS,
-		maxPayload:  config.MaxPayload,
+		credentials:  config.Credentials,
+		serverTLS:    serverTLS,
+		clientTLS:    clientTLS,
+		maxPayload:   config.MaxPayload,
+		syncInterval: config.SyncInterval,
 	}, nil
 }
 
@@ -74,36 +87,54 @@ func (f *Factory) Create(_ context.Context, definition task.Task) (task.Runner, 
 		return nil, errors.New("target credential is missing its peer identity")
 	}
 	return &runner{
-		factory:    f,
-		task:       definition,
-		credential: credential,
+		factory: f,
+		task:    definition,
 	}, nil
 }
 
 type runner struct {
-	factory    *Factory
-	task       task.Task
-	credential auth.Credential
+	factory *Factory
+	task    task.Task
 }
 
 func (r *runner) Run(ctx context.Context, taskID string) error {
 	if taskID != r.task.ID {
 		return errors.New("runner task ID does not match")
 	}
-	token, err := base64.RawURLEncoding.DecodeString(r.credential.Token)
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := r.runCycle(ctx, taskID); err != nil {
+			if !errors.Is(err, errConnectionUnavailable) {
+				return err
+			}
+		}
+		if err := filewatch.WaitPeriodic(ctx, r.factory.syncInterval); err != nil {
+			return err
+		}
+	}
+}
+
+func (r *runner) runCycle(ctx context.Context, taskID string) error {
+	credential, err := r.factory.credentials.Load(r.task.ID)
+	if err != nil {
+		return fmt.Errorf("load task credential: %w", err)
+	}
+	token, err := base64.RawURLEncoding.DecodeString(credential.Token)
 	if err != nil || len(token) != 32 {
 		return errors.New("task credential token is invalid")
 	}
 	if r.task.Role == task.RoleSource {
 		expectedPeerID := ""
-		if r.credential.Used {
-			expectedPeerID = r.credential.PeerID
+		if credential.Used {
+			expectedPeerID = credential.PeerID
 		}
 		connection, err := connectSource(
 			ctx,
-			r.credential,
+			credential,
 			token,
-			[]byte(r.credential.Token),
+			[]byte(credential.Token),
 			expectedPeerID,
 			r.factory.serverTLS,
 			r.factory.clientTLS,
@@ -113,7 +144,7 @@ func (r *runner) Run(ctx context.Context, taskID string) error {
 			return err
 		}
 		defer connection.session.Close()
-		if _, err := r.factory.credentials.Claim(r.task.ID, r.credential.Token, connection.peerID); err != nil {
+		if _, err := r.factory.credentials.Claim(r.task.ID, credential.Token, connection.peerID); err != nil {
 			return fmt.Errorf("claim target identity: %w", err)
 		}
 		engine, err := sync.DefaultSourceEngine(r.task.SourcePath, connection.session)
@@ -125,10 +156,10 @@ func (r *runner) Run(ctx context.Context, taskID string) error {
 
 	session, err := connectTarget(
 		ctx,
-		r.credential,
+		credential,
 		token,
-		[]byte(r.credential.Token),
-		r.credential.PeerID,
+		[]byte(credential.Token),
+		credential.PeerID,
 		r.factory.clientTLS,
 		r.factory.maxPayload,
 	)
