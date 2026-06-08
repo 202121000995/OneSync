@@ -596,3 +596,41 @@
 剩余风险：
 
 - 当前状态仍是任务级状态，没有展示单个文件进度、速度或下一轮倒计时。
+
+## 可用性验收包审核
+
+审核分支：`feature/acceptance-kit`
+
+审核结论：通过。
+
+审核说明：
+
+- 新增 `cmd/onesync-cert`，用于生成本地 TLS 证书和私钥。
+- 生成证书支持 DNS 名称和 IP 地址 SAN，适配 `192.168.x.x:端口`、`localhost` 和 `127.0.0.1` 等验收场景。
+- 私钥按 `0600` 写入，证书按 `0644` 写入，输出目录自动创建。
+- 生成证书可作为本地信任锚通过 `-ca` 显式信任，客户端仍强制执行证书验证。
+- 新增 `packaging/quickstart.md`，说明两台电脑直连、Relay 中转、CA bundle 合并和管理页地址区别。
+- 更新 systemd 文档，补充 `onesync-cert` 安装和 Relay 证书生成示例。
+- 更新架构文档，明确 `onesync-cert` 仅是测试或小型私有部署辅助工具，不承担生产证书签发、吊销或轮换。
+- 未引入第三方依赖。
+
+审核中修复：
+
+- 将自签证书明确设置为可本地信任的 CA 证书，并保留服务端认证用途。
+- 增加证书验证测试，确认生成证书可按 IP 和 DNS 名称通过 Go 标准库校验。
+
+验证结果：
+
+- `go test ./internal/certutil ./cmd/onesync-cert` 通过。
+- `go run ./cmd/onesync-cert -hosts 127.0.0.1,localhost -cert /private/tmp/onesync-test.crt -key /private/tmp/onesync-test.key -days 1` 通过。
+- `go test ./...` 通过。
+- `go vet ./...` 通过。
+- `go test -race -count=5 ./internal/certutil ./internal/client` 通过。
+- Windows amd64 主程序和证书工具构建通过。
+- Linux amd64 主程序、Relay 和证书工具构建通过。
+
+剩余风险：
+
+- 该工具不是 Windows 安装器、托盘程序或 Linux 打包器，只补齐最小验收运行能力。
+- 生成证书没有自动轮换、吊销和集中分发能力，生产部署仍应接入正式证书管理流程。
+- 真实两机直连和 Relay 验收仍需要在目标 Windows/Linux 设备上手动执行。

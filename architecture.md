@@ -48,14 +48,16 @@ V1 不支持：
 ├── architecture.md
 ├── go.mod
 ├── cmd/
+│   ├── onesync-cert/
 │   ├── onesync/
 │   └── relay/
 ├── backend/
-├── frontend/
+│   └── web/
 ├── packaging/
 │   └── systemd/
 ├── internal/
 │   ├── auth/
+│   ├── certutil/
 │   ├── config/
 │   ├── filewatch/
 │   ├── logger/
@@ -72,8 +74,9 @@ V1 不支持：
 
 - `cmd/onesync`：OneSync 主程序入口，负责组装组件。
 - `cmd/relay`：Relay 服务入口。
+- `cmd/onesync-cert`：本地 TLS 证书生成辅助工具，用于测试或小型私有部署。
 - `backend`：Web API 与静态资源服务，不包含同步算法。
-- `frontend`：Web 管理后台。
+- `backend/web`：Web 管理后台静态资源。
 - `packaging/systemd`：Linux systemd 服务模板和部署说明。
 - `internal/scanner`：目录遍历与文件快照生成。
 - `internal/filewatch`：后续增量事件监听；V1 初期可由周期扫描驱动。
@@ -84,6 +87,7 @@ V1 不支持：
 - `internal/task`：同步任务生命周期与状态管理。
 - `internal/config`：配置读取、校验和持久化。
 - `internal/auth`：同步链接令牌和会话认证，不扩展为用户权限系统。
+- `internal/certutil`：生成本地自签 TLS 证书；不承担生产证书签发、吊销或轮换管理。
 - `internal/logger`：统一日志接口和标准库实现。
 - `tests`：跨模块集成测试与回归测试。
 
@@ -275,6 +279,7 @@ V1 消息类型：
 
 - TCP 与 Relay 会话必须使用 TLS 1.3；客户端必须校验证书，禁止跳过验证。
 - TLS 证书、私钥和信任根由配置层提供，网络层不自动生成或持久化密钥。
+- `onesync-cert` 可生成带 DNS/IP SAN 的本地自签证书；客户端通过 `-ca` 显式信任该证书或 CA bundle，证书验证仍不可关闭。
 - 每个消息必须有最大长度限制。
 - 文件分块传输，禁止整文件读入内存。
 - V1 文件块最大为 256 KiB，接收端必须逐块确认已落盘偏移。
@@ -392,6 +397,7 @@ V1 的持续触发由 `internal/filewatch` 的周期等待实现，默认间隔 
 
 - `-cert` 与 `-key` 提供源端直连监听证书和私钥。
 - `-ca` 可追加自建 CA；未提供时使用操作系统信任库。
+- 本地验收可使用 `onesync-cert` 生成源端或 Relay 证书；若直连证书和 Relay 证书不同，可把多个 PEM 证书合并到同一个 `-ca` 文件。
 - 禁止关闭服务端证书验证。
 
 ## 11. Linux 服务
@@ -500,6 +506,8 @@ V1 不引入数据库。配置与任务状态使用本地文件持久化：
     - 集成 Windows 启动与托盘能力。
 11. `feature/linux-service`
     - 集成 Linux 服务启动、停止和日志。
+12. `feature/acceptance-kit`
+    - 增加本地 TLS 证书生成工具和两机验收说明。
 
 ## 16. 待确认项
 
