@@ -75,10 +75,11 @@ async function taskAction(id, action) {
 async function issueLink(taskId) {
   const endpoint = prompt("请输入其他设备可以访问的 TLS 地址，例如 192.168.1.10:7443");
   if (!endpoint) return;
+  const relayEndpoint = prompt("可选：请输入 Relay TLS 地址；不使用可留空", "") || "";
   try {
     const result = await api("/api/links", {
       method: "POST",
-      body: JSON.stringify({ task_id: taskId, endpoint }),
+      body: JSON.stringify({ task_id: taskId, endpoint, relay_endpoint: relayEndpoint }),
     });
     generatedLink.value = result.link;
     dialog.showModal();

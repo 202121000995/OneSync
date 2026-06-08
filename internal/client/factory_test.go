@@ -1,0 +1,252 @@
+package client
+
+import (
+	"bytes"
+	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/base64"
+	"encoding/pem"
+	"math/big"
+	"net"
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
+
+	"github.com/202121000995/OneSync/internal/auth"
+	"github.com/202121000995/OneSync/internal/relay"
+	"github.com/202121000995/OneSync/internal/task"
+)
+
+func TestRunnersSynchronizeDirectlyAndReconnectBoundPeer(t *testing.T) {
+	serverTLS, clientTLS := clientTestTLS(t)
+	endpoint := availableAddress(t)
+	sourceRoot := t.TempDir()
+	targetRoot := t.TempDir()
+	sourceStore := credentialStore(t)
+	targetStore := credentialStore(t)
+	token := testToken()
+	peerID, err := auth.NewPeerID()
+	if err != nil {
+		t.Fatalf("NewPeerID() error = %v", err)
+	}
+	saveCredential(t, sourceStore, "source", auth.Credential{
+		SessionID: "session", Endpoint: endpoint, Token: token, OneTime: true,
+	})
+	saveCredential(t, targetStore, "target", auth.Credential{
+		SessionID: "session", Endpoint: endpoint, Token: token, PeerID: peerID,
+	})
+	sourceFactory := testFactory(t, sourceStore, serverTLS, clientTLS)
+	targetFactory := testFactory(t, targetStore, nil, clientTLS)
+	sourceTask := task.Task{ID: "source", Role: task.RoleSource, SourcePath: sourceRoot}
+	targetTask := task.Task{ID: "target", Role: task.RoleTarget, TargetPath: targetRoot}
+
+	writeTestFile(t, filepath.Join(sourceRoot, "folder", "file.txt"), "first")
+	runRunnerPair(t, sourceFactory, targetFactory, sourceTask, targetTask)
+	assertTestFile(t, filepath.Join(targetRoot, "folder", "file.txt"), "first")
+
+	claimed, err := sourceStore.Load("source")
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if !claimed.Used || claimed.PeerID != peerID {
+		t.Fatalf("source credential was not bound to target: %+v", claimed)
+	}
+
+	writeTestFile(t, filepath.Join(sourceRoot, "folder", "file.txt"), "second")
+	runRunnerPair(t, sourceFactory, targetFactory, sourceTask, targetTask)
+	assertTestFile(t, filepath.Join(targetRoot, "folder", "file.txt"), "second")
+}
+
+func TestRunnersSynchronizeThroughRelayAfterDirectFailure(t *testing.T) {
+	serverTLS, clientTLS := clientTestTLS(t)
+	broker, err := relay.NewBroker(relay.Config{
+		WaitTimeout: time.Second,
+		IdleTimeout: time.Second,
+		MaxWaiting:  10,
+		MaxActive:   10,
+		MaxBytes:    16 << 20,
+	})
+	if err != nil {
+		t.Fatalf("NewBroker() error = %v", err)
+	}
+	relayServer, err := relay.Listen("127.0.0.1:0", serverTLS, broker)
+	if err != nil {
+		t.Fatalf("relay.Listen() error = %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	serveResult := make(chan error, 1)
+	go func() { serveResult <- relayServer.Serve(ctx) }()
+	t.Cleanup(func() {
+		cancel()
+		_ = relayServer.Close()
+		<-serveResult
+	})
+
+	sourceRoot := t.TempDir()
+	targetRoot := t.TempDir()
+	sourceStore := credentialStore(t)
+	targetStore := credentialStore(t)
+	token := testToken()
+	peerID, err := auth.NewPeerID()
+	if err != nil {
+		t.Fatalf("NewPeerID() error = %v", err)
+	}
+	credential := auth.Credential{
+		SessionID:     "relay-session",
+		Endpoint:      "127.0.0.1:1",
+		RelayEndpoint: relayServer.Addr().String(),
+		Token:         token,
+	}
+	sourceCredential := credential
+	sourceCredential.OneTime = true
+	saveCredential(t, sourceStore, "source", sourceCredential)
+	targetCredential := credential
+	targetCredential.PeerID = peerID
+	saveCredential(t, targetStore, "target", targetCredential)
+
+	sourceFactory := testFactory(t, sourceStore, nil, clientTLS)
+	targetFactory := testFactory(t, targetStore, nil, clientTLS)
+	sourceTask := task.Task{ID: "source", Role: task.RoleSource, SourcePath: sourceRoot}
+	targetTask := task.Task{ID: "target", Role: task.RoleTarget, TargetPath: targetRoot}
+	writeTestFile(t, filepath.Join(sourceRoot, "relay.txt"), "through Relay")
+	runRunnerPair(t, sourceFactory, targetFactory, sourceTask, targetTask)
+	assertTestFile(t, filepath.Join(targetRoot, "relay.txt"), "through Relay")
+}
+
+func runRunnerPair(
+	t *testing.T,
+	sourceFactory, targetFactory *Factory,
+	sourceTask, targetTask task.Task,
+) {
+	t.Helper()
+	sourceRunner, err := sourceFactory.Create(context.Background(), sourceTask)
+	if err != nil {
+		t.Fatalf("create source runner: %v", err)
+	}
+	targetRunner, err := targetFactory.Create(context.Background(), targetTask)
+	if err != nil {
+		t.Fatalf("create target runner: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	results := make(chan error, 2)
+	go func() { results <- sourceRunner.Run(ctx, sourceTask.ID) }()
+	time.Sleep(20 * time.Millisecond)
+	go func() { results <- targetRunner.Run(ctx, targetTask.ID) }()
+	for range 2 {
+		if err := <-results; err != nil {
+			t.Fatalf("runner error = %v", err)
+		}
+	}
+}
+
+func clientTestTLS(t *testing.T) (*tls.Config, *tls.Config) {
+	t.Helper()
+	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("GenerateKey() error = %v", err)
+	}
+	template := &x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject:      pkix.Name{CommonName: "OneSync Test"},
+		NotBefore:    time.Now().Add(-time.Minute),
+		NotAfter:     time.Now().Add(time.Hour),
+		KeyUsage:     x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		IPAddresses:  []net.IP{net.ParseIP("127.0.0.1")},
+	}
+	certificateDER, err := x509.CreateCertificate(rand.Reader, template, template, &privateKey.PublicKey, privateKey)
+	if err != nil {
+		t.Fatalf("CreateCertificate() error = %v", err)
+	}
+	privateKeyDER, err := x509.MarshalPKCS8PrivateKey(privateKey)
+	if err != nil {
+		t.Fatalf("MarshalPKCS8PrivateKey() error = %v", err)
+	}
+	certificatePEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certificateDER})
+	privateKeyPEM := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: privateKeyDER})
+	certificate, err := tls.X509KeyPair(certificatePEM, privateKeyPEM)
+	if err != nil {
+		t.Fatalf("X509KeyPair() error = %v", err)
+	}
+	roots := x509.NewCertPool()
+	roots.AppendCertsFromPEM(certificatePEM)
+	return &tls.Config{
+			Certificates: []tls.Certificate{certificate},
+			MinVersion:   tls.VersionTLS13,
+		}, &tls.Config{
+			RootCAs:    roots,
+			MinVersion: tls.VersionTLS13,
+		}
+}
+
+func availableAddress(t *testing.T) string {
+	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("net.Listen() error = %v", err)
+	}
+	address := listener.Addr().String()
+	_ = listener.Close()
+	return address
+}
+
+func credentialStore(t *testing.T) *auth.CredentialStore {
+	t.Helper()
+	store, err := auth.NewCredentialStore(filepath.Join(t.TempDir(), "credentials"))
+	if err != nil {
+		t.Fatalf("NewCredentialStore() error = %v", err)
+	}
+	return store
+}
+
+func testFactory(t *testing.T, store *auth.CredentialStore, serverTLS, clientTLS *tls.Config) *Factory {
+	t.Helper()
+	factory, err := NewFactory(Config{
+		Credentials: store,
+		ServerTLS:   serverTLS,
+		ClientTLS:   clientTLS,
+	})
+	if err != nil {
+		t.Fatalf("NewFactory() error = %v", err)
+	}
+	return factory
+}
+
+func saveCredential(t *testing.T, store *auth.CredentialStore, taskID string, credential auth.Credential) {
+	t.Helper()
+	if err := store.Save(taskID, credential); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+}
+
+func testToken() string {
+	return base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{0x42}, 32))
+}
+
+func writeTestFile(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+}
+
+func assertTestFile(t *testing.T, path, want string) {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	if string(data) != want {
+		t.Fatalf("file = %q, want %q", data, want)
+	}
+}

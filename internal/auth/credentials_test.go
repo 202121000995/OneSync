@@ -46,15 +46,26 @@ func TestCredentialStoreConsumesOneTimeTokenPersistently(t *testing.T) {
 	if err := store.Save("task", credential); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
-	if _, err := store.Consume("task", token); err != nil {
-		t.Fatalf("Consume() error = %v", err)
+	peerID, err := NewPeerID()
+	if err != nil {
+		t.Fatalf("NewPeerID() error = %v", err)
+	}
+	if _, err := store.Claim("task", token, peerID); err != nil {
+		t.Fatalf("Claim() error = %v", err)
 	}
 
 	reloaded, err := NewCredentialStore(store.directory)
 	if err != nil {
 		t.Fatalf("NewCredentialStore(reload) error = %v", err)
 	}
-	if _, err := reloaded.Consume("task", token); err == nil {
-		t.Fatal("Consume() accepted an already used credential after reload")
+	if _, err := reloaded.Claim("task", token, peerID); err != nil {
+		t.Fatalf("Claim() rejected the bound peer after reload: %v", err)
+	}
+	otherPeerID, err := NewPeerID()
+	if err != nil {
+		t.Fatalf("NewPeerID() error = %v", err)
+	}
+	if _, err := reloaded.Claim("task", token, otherPeerID); err == nil {
+		t.Fatal("Claim() accepted a different peer after reload")
 	}
 }

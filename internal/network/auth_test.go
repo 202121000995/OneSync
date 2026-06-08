@@ -49,6 +49,48 @@ func TestAuthenticationRejectsShortTokens(t *testing.T) {
 	}
 }
 
+func TestPeerAuthenticationBindsIdentity(t *testing.T) {
+	client, server := sessionPair(t)
+	token := bytes.Repeat([]byte{0x42}, minimumTokenLength)
+	type serverResult struct {
+		peerID string
+		err    error
+	}
+	results := make(chan serverResult, 1)
+	go func() {
+		peerID, err := AuthenticatePeerServer(context.Background(), server, token, "")
+		results <- serverResult{peerID: peerID, err: err}
+	}()
+
+	if err := AuthenticatePeerClient(context.Background(), client, 7, token, "stable-peer"); err != nil {
+		t.Fatalf("AuthenticatePeerClient() error = %v", err)
+	}
+	result := <-results
+	if result.err != nil {
+		t.Fatalf("AuthenticatePeerServer() error = %v", result.err)
+	}
+	if result.peerID != "stable-peer" {
+		t.Fatalf("peer ID = %q, want stable-peer", result.peerID)
+	}
+}
+
+func TestPeerAuthenticationRejectsDifferentIdentity(t *testing.T) {
+	client, server := sessionPair(t)
+	token := bytes.Repeat([]byte{0x42}, minimumTokenLength)
+	serverErrors := make(chan error, 1)
+	go func() {
+		_, err := AuthenticatePeerServer(context.Background(), server, token, "expected-peer")
+		serverErrors <- err
+	}()
+
+	if err := AuthenticatePeerClient(context.Background(), client, 7, token, "different-peer"); !errors.Is(err, errAuthenticationFailed) {
+		t.Fatalf("AuthenticatePeerClient() error = %v, want authentication failure", err)
+	}
+	if err := <-serverErrors; !errors.Is(err, errAuthenticationFailed) {
+		t.Fatalf("AuthenticatePeerServer() error = %v, want authentication failure", err)
+	}
+}
+
 func sessionPair(t *testing.T) (Session, Session) {
 	t.Helper()
 	clientConnection, serverConnection := net.Pipe()

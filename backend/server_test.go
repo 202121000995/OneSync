@@ -108,7 +108,7 @@ func TestLinkIssueAndJoinStoresCredentialSeparately(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
-	if credential.Token == "" || credential.Endpoint != "192.168.1.10:7443" {
+	if credential.Token == "" || credential.Endpoint != "192.168.1.10:7443" || credential.PeerID == "" {
 		t.Fatalf("credential = %+v", credential)
 	}
 	if manager.tasks["target"].PeerAddress != "192.168.1.10:7443" {

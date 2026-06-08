@@ -200,6 +200,11 @@ func (s *Server) joinLink(writer http.ResponseWriter, request *http.Request) {
 	if input.TaskID == "" {
 		input.TaskID = link.SessionID + "-target"
 	}
+	peerID, err := auth.NewPeerID()
+	if err != nil {
+		writeAPIError(writer, http.StatusInternalServerError, err)
+		return
+	}
 	if _, err := s.manager.Get(request.Context(), input.TaskID); err == nil {
 		writeAPIError(writer, http.StatusBadRequest, errors.New("task ID already exists"))
 		return
@@ -213,7 +218,7 @@ func (s *Server) joinLink(writer http.ResponseWriter, request *http.Request) {
 	}
 	if err := s.credentials.Save(input.TaskID, auth.Credential{
 		SessionID: link.SessionID, Endpoint: link.Endpoint,
-		RelayEndpoint: link.RelayEndpoint, Token: link.Token,
+		RelayEndpoint: link.RelayEndpoint, Token: link.Token, PeerID: peerID,
 	}); err != nil {
 		writeAPIError(writer, http.StatusInternalServerError, err)
 		return

@@ -2,6 +2,7 @@ package auth
 
 import (
 	"bytes"
+	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
@@ -22,6 +23,7 @@ type Credential struct {
 	Endpoint      string `json:"endpoint"`
 	RelayEndpoint string `json:"relay_endpoint,omitempty"`
 	Token         string `json:"token"`
+	PeerID        string `json:"peer_id,omitempty"`
 	OneTime       bool   `json:"one_time,omitempty"`
 	Used          bool   `json:"used,omitempty"`
 }
@@ -131,8 +133,8 @@ func (s *CredentialStore) loadLocked(taskID string) (Credential, error) {
 	return credential, nil
 }
 
-// Consume verifies and marks a one-time source credential as used.
-func (s *CredentialStore) Consume(taskID, token string) (Credential, error) {
+// Claim binds a one-time credential to the first authenticated peer.
+func (s *CredentialStore) Claim(taskID, token, peerID string) (Credential, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	credential, err := s.loadLocked(taskID)
@@ -141,16 +143,36 @@ func (s *CredentialStore) Consume(taskID, token string) (Credential, error) {
 	}
 	expected := sha256.Sum256([]byte(credential.Token))
 	actual := sha256.Sum256([]byte(token))
-	if credential.Used || subtle.ConstantTimeCompare(expected[:], actual[:]) != 1 {
+	if subtle.ConstantTimeCompare(expected[:], actual[:]) != 1 {
 		return Credential{}, errors.New("credential is invalid or already used")
 	}
+	if credential.Used {
+		if peerID == "" || credential.PeerID == "" ||
+			subtle.ConstantTimeCompare([]byte(peerID), []byte(credential.PeerID)) != 1 {
+			return Credential{}, errors.New("credential is invalid or already used")
+		}
+		return credential, nil
+	}
 	if credential.OneTime {
+		if err := validatePeerID(peerID); err != nil {
+			return Credential{}, err
+		}
 		credential.Used = true
+		credential.PeerID = peerID
 		if err := s.saveLocked(taskID, credential); err != nil {
 			return Credential{}, err
 		}
 	}
 	return credential, nil
+}
+
+// NewPeerID creates a stable high-entropy identity for one target task.
+func NewPeerID() (string, error) {
+	data := make([]byte, 32)
+	if _, err := rand.Read(data); err != nil {
+		return "", fmt.Errorf("generate peer identity: %w", err)
+	}
+	return base64.RawURLEncoding.EncodeToString(data), nil
 }
 
 // Delete removes a task credential.
@@ -176,6 +198,22 @@ func validateCredential(credential Credential) error {
 	token, err := base64Token(credential.Token)
 	if err != nil || len(token) != linkTokenBytes {
 		return errors.New("credential token is invalid")
+	}
+	if credential.PeerID != "" {
+		if err := validatePeerID(credential.PeerID); err != nil {
+			return err
+		}
+	}
+	if credential.Used && credential.PeerID == "" {
+		return errors.New("used credential requires a peer identity")
+	}
+	return nil
+}
+
+func validatePeerID(peerID string) error {
+	decoded, err := base64.RawURLEncoding.DecodeString(peerID)
+	if err != nil || len(decoded) != 32 {
+		return errors.New("peer identity is invalid")
 	}
 	return nil
 }
