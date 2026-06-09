@@ -19,6 +19,7 @@ Use this template for real Windows/Linux multi-machine acceptance runs. Keep one
 
 Record the exact binaries used during the run.
 When using `packaging/build-acceptance.sh`, attach or paste `SHA256SUMS.txt`.
+When using `packaging/package-acceptance.sh`, attach or paste `PACKAGE-SHA256SUMS.txt`.
 
 | Program | Platform | Path or filename | Version/commit | SHA-256 |
 | --- | --- | --- | --- | --- |

@@ -568,6 +568,8 @@ V1 不引入数据库。配置与任务状态使用本地文件持久化：
     - 增加真实多机器验收报告模板。
 26. `feature/acceptance-build-script`
     - 增加验收构建脚本和 SHA-256 清单生成。
+27. `feature/acceptance-package`
+    - 增加 Windows/Linux 验收包打包脚本和包级校验清单。
 
 ## 16. 待确认项
 

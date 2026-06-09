@@ -1058,3 +1058,28 @@
 
 - 脚本当前只构建 Windows amd64 和 Linux amd64 验收产物，不生成安装器或压缩包。
 - 输出目录若已有旧产物会被同名文件覆盖；正式发布前仍需清理或使用新的输出目录。
+
+## 验收包打包脚本审核
+
+审核分支：`feature/acceptance-package`
+
+审核结论：通过。
+
+审核说明：
+
+- 新增 `packaging/package-acceptance.sh`，先调用验收构建脚本，再生成 Windows zip 和 Linux tar.gz。
+- Windows 包包含 `onesync.exe`、`onesync-cert.exe`、quickstart、验收报告模板、构建信息和二进制校验清单。
+- Linux 包包含 `onesync`、`onesync-cert`、`onesync-relay`、quickstart、验收报告模板、构建信息和二进制校验清单。
+- 打包目录输出 `MANIFEST.txt` 和 `PACKAGE-SHA256SUMS.txt`，便于跨机器复制后核对。
+- Quickstart 和验收报告模板已补充包级校验记录要求。
+
+验证结果：
+
+- `GO_BIN=/Users/apple/Library/Go/sdk/go1.26.3/bin/go packaging/package-acceptance.sh /private/tmp/onesync-acceptance-artifacts-3 /private/tmp/onesync-acceptance-packages` 通过。
+- `go test ./...` 通过。
+- `go vet ./...` 通过。
+
+剩余风险：
+
+- 脚本当前只生成 Windows amd64 和 Linux amd64 验收包，不替代 Windows 安装器。
+- 打包依赖本机已有 `zip`、`tar` 和 SHA-256 工具。

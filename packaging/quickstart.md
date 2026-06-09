@@ -35,6 +35,14 @@ packaging/build-acceptance.sh dist/acceptance
 
 Copy the needed binaries from `dist/acceptance` to the source, target, and Relay computers. Record `dist/acceptance/SHA256SUMS.txt` in the acceptance report.
 
+To create ready-to-copy Windows and Linux acceptance packages:
+
+```sh
+packaging/package-acceptance.sh dist/acceptance dist/acceptance-packages
+```
+
+Copy the Windows zip to Windows source or target computers. Copy the Linux tar.gz to Linux source, target, or Relay computers. Record `dist/acceptance-packages/PACKAGE-SHA256SUMS.txt` in the acceptance report.
+
 Build the three programs:
 
 ```sh
