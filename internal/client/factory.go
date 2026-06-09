@@ -132,10 +132,21 @@ func (r *runner) run(ctx context.Context, taskID string, reporter task.StateRepo
 		if err := reportState(ctx, reporter, task.StateIdle); err != nil {
 			return err
 		}
-		if err := filewatch.WaitPeriodic(ctx, r.factory.syncInterval); err != nil {
+		changed, err := filewatch.WaitForChangeOrPeriodic(ctx, r.localRoot(), r.task.IgnoreRules, r.factory.syncInterval)
+		if err != nil {
 			return err
 		}
+		if changed {
+			addLog(ctx, reporter, "info", "检测到同步目录变化，提前开始下一轮同步")
+		}
 	}
+}
+
+func (r *runner) localRoot() string {
+	if r.task.Role == task.RoleSource {
+		return r.task.SourcePath
+	}
+	return r.task.TargetPath
 }
 
 func (r *runner) runCycle(ctx context.Context, taskID string, reporter task.StateReporter) error {

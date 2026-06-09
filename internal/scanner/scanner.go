@@ -32,6 +32,13 @@ type Snapshot struct {
 	Files       map[string]FileEntry
 }
 
+// IgnoredEntry describes one path excluded by ignore rules during a preview.
+type IgnoredEntry struct {
+	Path  string `json:"path"`
+	IsDir bool   `json:"is_dir"`
+	Rule  string `json:"rule"`
+}
+
 // Scanner creates filesystem snapshots.
 type Scanner interface {
 	Scan(ctx context.Context, root string) (Snapshot, error)
@@ -169,6 +176,7 @@ func (s *filesystemScanner) Scan(ctx context.Context, root string) (Snapshot, er
 type ignoreRule struct {
 	pattern string
 	dirOnly bool
+	raw     string
 }
 
 func parseIgnoreRules(rules []string) []ignoreRule {
@@ -185,31 +193,113 @@ func parseIgnoreRules(rules []string) []ignoreRule {
 		if rule == "" {
 			continue
 		}
-		parsed = append(parsed, ignoreRule{pattern: rule, dirOnly: dirOnly})
+		parsed = append(parsed, ignoreRule{pattern: rule, dirOnly: dirOnly, raw: strings.TrimSpace(raw)})
 	}
 	return parsed
 }
 
 func (s *filesystemScanner) ignored(relativePath string, isDir bool) bool {
-	for _, rule := range s.ignoreRules {
+	return matchedIgnoreRule(s.ignoreRules, relativePath, isDir) != ""
+}
+
+func matchedIgnoreRule(rules []ignoreRule, relativePath string, isDir bool) string {
+	for _, rule := range rules {
 		if rule.dirOnly && !isDir && !strings.HasPrefix(relativePath, rule.pattern+"/") {
 			continue
 		}
 		if relativePath == rule.pattern || strings.HasPrefix(relativePath, rule.pattern+"/") {
-			return true
+			return rule.raw
 		}
 		if !strings.Contains(rule.pattern, "/") {
 			matched, err := path.Match(rule.pattern, path.Base(relativePath))
 			if err == nil && matched {
-				return true
+				return rule.raw
 			}
 		}
 		matched, err := path.Match(rule.pattern, relativePath)
 		if err == nil && matched {
-			return true
+			return rule.raw
 		}
 	}
-	return false
+	return ""
+}
+
+// MatchIgnoreRule returns the first ignore rule that matches a path.
+func MatchIgnoreRule(rules []string, relativePath string, isDir bool) string {
+	relativePath = filepath.ToSlash(strings.TrimSpace(relativePath))
+	relativePath = strings.TrimPrefix(relativePath, "/")
+	if relativePath == "" || relativePath == "." {
+		return ""
+	}
+	return matchedIgnoreRule(parseIgnoreRules(rules), relativePath, isDir)
+}
+
+// PreviewIgnored walks a root and returns ignored paths with the matching rule.
+func PreviewIgnored(ctx context.Context, root string, rules []string, limit int) ([]IgnoredEntry, int, bool, error) {
+	if limit <= 0 {
+		limit = 200
+	}
+	parsed := parseIgnoreRules(rules)
+	if len(parsed) == 0 {
+		return nil, 0, false, nil
+	}
+	absoluteRoot, err := filepath.Abs(root)
+	if err != nil {
+		return nil, 0, false, fmt.Errorf("resolve scan root: %w", err)
+	}
+	absoluteRoot = filepath.Clean(absoluteRoot)
+	info, err := os.Lstat(absoluteRoot)
+	if err != nil {
+		return nil, 0, false, fmt.Errorf("stat scan root: %w", err)
+	}
+	if !info.IsDir() {
+		return nil, 0, false, fmt.Errorf("scan root %q is not a directory", root)
+	}
+
+	var entries []IgnoredEntry
+	total := 0
+	truncated := false
+	err = filepath.WalkDir(absoluteRoot, func(filePath string, entry fs.DirEntry, walkErr error) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if walkErr != nil {
+			if errors.Is(walkErr, fs.ErrNotExist) {
+				return nil
+			}
+			return fmt.Errorf("walk %q: %w", filePath, walkErr)
+		}
+		if filePath == absoluteRoot {
+			return nil
+		}
+		relativePath, err := filepath.Rel(absoluteRoot, filePath)
+		if err != nil {
+			return fmt.Errorf("make %q relative to scan root: %w", filePath, err)
+		}
+		relativePath = filepath.ToSlash(relativePath)
+		isDir := entry.IsDir()
+		if isDir && entry.Name() == reservedTransferDirectory {
+			return filepath.SkipDir
+		}
+		rule := matchedIgnoreRule(parsed, relativePath, isDir)
+		if rule == "" {
+			return nil
+		}
+		total++
+		if len(entries) < limit {
+			entries = append(entries, IgnoredEntry{Path: relativePath, IsDir: isDir, Rule: rule})
+		} else {
+			truncated = true
+		}
+		if isDir {
+			return filepath.SkipDir
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, 0, false, err
+	}
+	return entries, total, truncated, nil
 }
 
 func rootID(absoluteRoot string) string {

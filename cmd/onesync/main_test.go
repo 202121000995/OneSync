@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/202121000995/OneSync/internal/certutil"
+	"github.com/202121000995/OneSync/internal/config"
 )
 
 func TestConfigureLoggingWritesPrivateFile(t *testing.T) {
@@ -66,7 +67,11 @@ func TestServerCertificateHosts(t *testing.T) {
 
 func TestLoadOrCreateServerTLSGeneratesAutomaticCertificate(t *testing.T) {
 	root := t.TempDir()
-	config, err := loadOrCreateServerTLS("", "", root, 7443)
+	paths, err := config.NewPaths(root)
+	if err != nil {
+		t.Fatalf("NewPaths() error = %v", err)
+	}
+	config, err := loadOrCreateServerTLS("", "", paths, 7443)
 	if err != nil {
 		t.Fatalf("loadOrCreateServerTLS() error = %v", err)
 	}

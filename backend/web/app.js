@@ -27,6 +27,10 @@ const settingsButton = document.querySelector("#toolbar-settings");
 const deleteButton = document.querySelector("#toolbar-delete");
 const settingsSummary = document.querySelector("#settings-summary");
 const logsList = document.querySelector("#logs-list");
+const ignoreTemplate = document.querySelector("#ignore-template");
+const ignoreSamplePath = document.querySelector("#ignore-sample-path");
+const ignorePreviewResult = document.querySelector("#ignore-preview-result");
+const ignoredList = document.querySelector("#ignored-list");
 const devicesTitle = document.querySelector("#devices-title");
 const devicesBody = document.querySelector("#devices-body");
 const aboutVersion = document.querySelector("#about-version");
@@ -37,6 +41,7 @@ let tasksCache = [];
 let selectedTaskId = "";
 let trafficSnapshot = { time: Date.now(), tasks: {} };
 let authState = { enabled: false, configured: false, authenticated: true };
+let ignoreTemplates = [];
 
 async function api(path, options = {}) {
   const response = await fetch(path, {
@@ -409,6 +414,10 @@ function openSettingsForSelectedTask() {
   if (!task) return;
   settingsSummary.textContent = `当前任务：${task.id} · ${roleLabel(task)} · ${task.role === "source" ? task.source_path : task.target_path}`;
   settingsForm.elements.ignore_rules.value = (task.ignore_rules || []).join("\n");
+  ignoreSamplePath.value = "";
+  ignorePreviewResult.textContent = "保存前可以先测试规则，查看哪些文件会被忽略。";
+  ignoredList.textContent = "暂无预览。";
+  loadIgnoreTemplates();
   settingsDialog.showModal();
 }
 
@@ -416,10 +425,7 @@ async function saveSettings(event) {
   event.preventDefault();
   const task = selectedTask();
   if (!task) return;
-  const rules = settingsForm.elements.ignore_rules.value
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => line && !line.startsWith("#"));
+  const rules = currentIgnoreRules();
   try {
     await api(`/api/tasks/${encodeURIComponent(task.id)}`, {
       method: "PATCH",
@@ -431,11 +437,132 @@ async function saveSettings(event) {
   } catch (error) { notify(error.message); }
 }
 
+function currentIgnoreRules() {
+  return settingsForm.elements.ignore_rules.value
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith("#"));
+}
+
+async function loadIgnoreTemplates() {
+  if (ignoreTemplates.length) return;
+  try {
+    const result = await api("/api/ignore/templates", { headers: {} });
+    ignoreTemplates = result.templates || [];
+    ignoreTemplate.replaceChildren(
+      optionNode("", "选择模板后追加到规则"),
+      ...ignoreTemplates.map((template) => optionNode(template.id, template.name)),
+    );
+  } catch (error) {
+    notify(error.message);
+  }
+}
+
+function optionNode(value, label) {
+  const option = document.createElement("option");
+  option.value = value;
+  option.textContent = label;
+  return option;
+}
+
+function applyIgnoreTemplate() {
+  const template = ignoreTemplates.find((item) => item.id === ignoreTemplate.value);
+  if (!template) {
+    notify("请先选择一个模板");
+    return;
+  }
+  const existing = currentIgnoreRules();
+  const merged = [...new Set([...existing, ...(template.rules || [])])];
+  settingsForm.elements.ignore_rules.value = merged.join("\n");
+  notify(`已追加模板：${template.name}`);
+}
+
+async function previewIgnoreRules() {
+  const task = selectedTask();
+  if (!task) return;
+  ignorePreviewResult.className = "hint";
+  ignorePreviewResult.textContent = "正在测试忽略规则";
+  ignoredList.textContent = "正在扫描...";
+  try {
+    const result = await api(`/api/tasks/${encodeURIComponent(task.id)}/ignore-preview`, {
+      method: "POST",
+      body: JSON.stringify({
+        ignore_rules: currentIgnoreRules(),
+        sample_path: ignoreSamplePath.value.trim(),
+        sample_is_dir: ignoreSamplePath.value.trim().endsWith("/"),
+        limit: 200,
+      }),
+    });
+    const sample = ignoreSamplePath.value.trim()
+      ? (result.sample_match ? `测试路径会被忽略，命中规则：${result.sample_match}。` : "测试路径不会被当前规则忽略。")
+      : "";
+    ignorePreviewResult.textContent = `${sample}${sample ? " " : ""}当前目录共有 ${result.total || 0} 个路径会被忽略${result.truncated ? "，列表只显示前 200 个" : ""}。`;
+    const entries = result.entries || [];
+    ignoredList.replaceChildren(...(entries.length ? entries.map(renderIgnoredEntry) : [plainHint("没有发现会被忽略的文件。")]));
+  } catch (error) {
+    ignorePreviewResult.textContent = error.message;
+    ignorePreviewResult.className = "hint error";
+    ignoredList.textContent = "预览失败。";
+  }
+}
+
+function renderIgnoredEntry(entry) {
+  const row = document.createElement("p");
+  row.className = "log-entry";
+  row.textContent = `${entry.is_dir ? "目录" : "文件"} · ${entry.path} · 规则：${entry.rule}`;
+  return row;
+}
+
+function plainHint(text) {
+  const row = document.createElement("p");
+  row.className = "hint";
+  row.textContent = text;
+  return row;
+}
+
 function openLogsDialog() {
   const task = selectedTask();
   const logs = task ? (task.logs || []) : tasksCache.flatMap((item) => (item.logs || []).map((entry) => ({ ...entry, task_id: item.id })));
   logsList.replaceChildren(...(logs.length ? logs.slice(-200).reverse().map(renderLogEntry) : [emptyLogEntry()]));
   logsDialog.showModal();
+}
+
+async function fetchDiagnosticsText() {
+  const task = selectedTask();
+  const path = task ? `/api/tasks/${encodeURIComponent(task.id)}/diagnostics` : "/api/diagnostics";
+  const response = await fetch(path);
+  if (!response.ok) {
+    let message = "诊断日志导出失败";
+    try {
+      const body = await response.json();
+      message = body.error || message;
+    } catch {}
+    throw new Error(message);
+  }
+  return response.text();
+}
+
+async function copyDiagnostics() {
+  try {
+    const text = await fetchDiagnosticsText();
+    await navigator.clipboard.writeText(text);
+    notify("诊断日志已复制");
+  } catch (error) { notify(error.message); }
+}
+
+async function downloadDiagnostics() {
+  try {
+    const text = await fetchDiagnosticsText();
+    const task = selectedTask();
+    const name = `onesync-diagnostics-${task ? task.id : "all"}-${new Date().toISOString().replace(/[:.]/g, "-")}.txt`;
+    const url = URL.createObjectURL(new Blob([text], { type: "text/plain;charset=utf-8" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = name;
+    link.click();
+    URL.revokeObjectURL(url);
+    notify("诊断日志已下载");
+  } catch (error) { notify(error.message); }
 }
 
 function openDevicesDialog(task) {
@@ -819,6 +946,10 @@ document.querySelector("#close-join-dialog").addEventListener("click", () => joi
 document.querySelector("#close-settings-dialog").addEventListener("click", () => settingsDialog.close());
 document.querySelector("#open-logs").addEventListener("click", openLogsDialog);
 document.querySelector("#open-about").addEventListener("click", () => aboutDialog.showModal());
+document.querySelector("#apply-ignore-template").addEventListener("click", applyIgnoreTemplate);
+document.querySelector("#preview-ignore").addEventListener("click", previewIgnoreRules);
+document.querySelector("#copy-diagnostics").addEventListener("click", copyDiagnostics);
+document.querySelector("#download-diagnostics").addEventListener("click", downloadDiagnostics);
 settingsForm.addEventListener("submit", saveSettings);
 startStopButton.addEventListener("click", toggleSelectedTask);
 rescanButton.addEventListener("click", rescanSelectedTask);

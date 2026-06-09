@@ -23,6 +23,7 @@ import (
 	syncauth "github.com/202121000995/OneSync/internal/auth"
 	"github.com/202121000995/OneSync/internal/diagnostic"
 	"github.com/202121000995/OneSync/internal/netutil"
+	"github.com/202121000995/OneSync/internal/scanner"
 	"github.com/202121000995/OneSync/internal/task"
 	"github.com/202121000995/OneSync/internal/webauth"
 )
@@ -188,11 +189,15 @@ func NewServerWithOptions(manager taskManager, links *syncauth.LinkService, cred
 	mux.HandleFunc("POST /api/auth/logout", server.authLogout)
 	mux.HandleFunc("GET /api/tasks", server.listTasks)
 	mux.HandleFunc("GET /api/config", server.config)
+	mux.HandleFunc("GET /api/diagnostics", server.allDiagnostics)
+	mux.HandleFunc("GET /api/ignore/templates", server.ignoreTemplates)
 	mux.HandleFunc("GET /api/endpoint-suggestions", server.endpointSuggestions)
 	mux.HandleFunc("POST /api/tasks", server.createTask)
 	mux.HandleFunc("POST /api/tasks/{id}/start", server.startTask)
 	mux.HandleFunc("POST /api/tasks/{id}/stop", server.stopTask)
 	mux.HandleFunc("PATCH /api/tasks/{id}", server.updateTask)
+	mux.HandleFunc("POST /api/tasks/{id}/ignore-preview", server.previewIgnored)
+	mux.HandleFunc("GET /api/tasks/{id}/diagnostics", server.taskDiagnostics)
 	mux.HandleFunc("DELETE /api/tasks/{id}", server.deleteTask)
 	mux.HandleFunc("POST /api/links", server.issueLink)
 	mux.HandleFunc("POST /api/links/join", server.joinLink)
@@ -439,6 +444,88 @@ func (s *Server) updateTask(writer http.ResponseWriter, request *http.Request) {
 	writeJSON(writer, http.StatusOK, map[string]string{"status": "updated"})
 }
 
+func (s *Server) ignoreTemplates(writer http.ResponseWriter, _ *http.Request) {
+	writeJSON(writer, http.StatusOK, map[string]any{
+		"templates": []map[string]any{
+			{
+				"id":   "common",
+				"name": "常用临时文件",
+				"rules": []string{
+					"*.tmp",
+					"*.temp",
+					"*.bak",
+					"~$*",
+					".DS_Store",
+					"Thumbs.db",
+					".onesync-part/",
+				},
+			},
+			{
+				"id":   "dev",
+				"name": "开发项目",
+				"rules": []string{
+					".git/",
+					"node_modules/",
+					"dist/",
+					"build/",
+					".cache/",
+					"*.log",
+				},
+			},
+			{
+				"id":   "media",
+				"name": "照片视频缓存",
+				"rules": []string{
+					"*.tmp",
+					"*.partial",
+					"@eaDir/",
+					".thumbnails/",
+					"cache/",
+				},
+			},
+		},
+	})
+}
+
+func (s *Server) previewIgnored(writer http.ResponseWriter, request *http.Request) {
+	var input struct {
+		IgnoreRules []string `json:"ignore_rules"`
+		SamplePath  string   `json:"sample_path"`
+		SampleIsDir bool     `json:"sample_is_dir"`
+		Limit       int      `json:"limit"`
+	}
+	if err := decodeJSON(writer, request, &input); err != nil {
+		return
+	}
+	current, err := s.manager.Get(request.Context(), request.PathValue("id"))
+	if err != nil {
+		writeAPIError(writer, statusForTaskError(err), err)
+		return
+	}
+	if input.IgnoreRules == nil {
+		input.IgnoreRules = current.IgnoreRules
+	}
+	root := current.SourcePath
+	if current.Role == task.RoleTarget {
+		root = current.TargetPath
+	}
+	entries, total, truncated, err := scanner.PreviewIgnored(request.Context(), root, input.IgnoreRules, input.Limit)
+	if err != nil {
+		writeAPIError(writer, http.StatusBadRequest, err)
+		return
+	}
+	sampleRule := ""
+	if strings.TrimSpace(input.SamplePath) != "" {
+		sampleRule = scanner.MatchIgnoreRule(input.IgnoreRules, input.SamplePath, input.SampleIsDir)
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{
+		"entries":      entries,
+		"total":        total,
+		"truncated":    truncated,
+		"sample_match": sampleRule,
+	})
+}
+
 func (s *Server) deleteTask(writer http.ResponseWriter, request *http.Request) {
 	taskID := request.PathValue("id")
 	if err := s.manager.Delete(request.Context(), taskID); err != nil {
@@ -450,6 +537,24 @@ func (s *Server) deleteTask(writer http.ResponseWriter, request *http.Request) {
 		return
 	}
 	writeJSON(writer, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
+func (s *Server) taskDiagnostics(writer http.ResponseWriter, request *http.Request) {
+	current, err := s.manager.Get(request.Context(), request.PathValue("id"))
+	if err != nil {
+		writeAPIError(writer, statusForTaskError(err), err)
+		return
+	}
+	writeText(writer, http.StatusOK, s.diagnosticText([]task.Task{current}))
+}
+
+func (s *Server) allDiagnostics(writer http.ResponseWriter, request *http.Request) {
+	tasks, err := s.manager.List(request.Context())
+	if err != nil {
+		writeAPIError(writer, http.StatusInternalServerError, err)
+		return
+	}
+	writeText(writer, http.StatusOK, s.diagnosticText(tasks))
 }
 
 func (s *Server) issueLink(writer http.ResponseWriter, request *http.Request) {
@@ -709,6 +814,12 @@ func writeJSON(writer http.ResponseWriter, status int, value any) {
 	_ = json.NewEncoder(writer).Encode(value)
 }
 
+func writeText(writer http.ResponseWriter, status int, value string) {
+	writer.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	writer.WriteHeader(status)
+	_, _ = writer.Write([]byte(value))
+}
+
 func writeAPIError(writer http.ResponseWriter, status int, err error) {
 	writeJSON(writer, status, map[string]string{"error": err.Error()})
 }
@@ -718,4 +829,108 @@ func statusForTaskError(err error) int {
 		return http.StatusNotFound
 	}
 	return http.StatusBadRequest
+}
+
+func (s *Server) diagnosticText(tasks []task.Task) string {
+	var builder strings.Builder
+	fmt.Fprintf(&builder, "OneSync 诊断日志\n")
+	fmt.Fprintf(&builder, "生成时间: %s\n", time.Now().UTC().Format(time.RFC3339))
+	fmt.Fprintf(&builder, "版本: %s\n", s.version)
+	fmt.Fprintf(&builder, "同步端口: %d\n", s.syncPort)
+	fmt.Fprintf(&builder, "源端直连 TLS: %s\n", yesNo(s.directTLSConfigured))
+	fmt.Fprintf(&builder, "任务数量: %d\n\n", len(tasks))
+	for _, item := range tasks {
+		fmt.Fprintf(&builder, "任务: %s\n", item.ID)
+		fmt.Fprintf(&builder, "  类型: %s\n", roleName(item.Role))
+		fmt.Fprintf(&builder, "  状态: %s\n", item.State)
+		fmt.Fprintf(&builder, "  错误分类: %s\n", errorCategory(item.LastError))
+		if item.LastError != "" {
+			fmt.Fprintf(&builder, "  最近错误: %s\n", item.LastError)
+		}
+		if item.Role == task.RoleSource {
+			fmt.Fprintf(&builder, "  本地目录: %s\n", item.SourcePath)
+		} else {
+			fmt.Fprintf(&builder, "  本地目录: %s\n", item.TargetPath)
+		}
+		fmt.Fprintf(&builder, "  源端地址: %s\n", emptyText(item.PeerAddress))
+		fmt.Fprintf(&builder, "  Relay 地址: %s\n", emptyText(item.RelayURL))
+		fmt.Fprintf(&builder, "  本地大小: %d 字节 / %d 文件\n", item.Size.LocalBytes, item.Size.LocalFiles)
+		fmt.Fprintf(&builder, "  全局大小: %d 字节 / %d 文件\n", item.Size.StandardBytes, item.Size.StandardFiles)
+		fmt.Fprintf(&builder, "  累计接收: %d 字节\n", item.Traffic.ReceivedBytes)
+		fmt.Fprintf(&builder, "  累计发送: %d 字节\n", item.Traffic.SentBytes)
+		fmt.Fprintf(&builder, "  同步设备: %d / %d\n", item.Devices.Connected, item.Devices.Total)
+		fmt.Fprintf(&builder, "  连接方式: %s\n", emptyText(item.Devices.Connection))
+		fmt.Fprintf(&builder, "  设备详情源端地址: %s\n", emptyText(item.Devices.Endpoint))
+		fmt.Fprintf(&builder, "  设备详情 Relay: %s\n", emptyText(item.Devices.RelayEndpoint))
+		fmt.Fprintf(&builder, "  加密: %s\n", emptyText(item.Devices.TLS))
+		fmt.Fprintf(&builder, "  最近连接: %s\n", timeText(item.Devices.LastSeen))
+		fmt.Fprintf(&builder, "  忽略规则: %d 条\n", len(item.IgnoreRules))
+		for _, rule := range item.IgnoreRules {
+			fmt.Fprintf(&builder, "    - %s\n", rule)
+		}
+		fmt.Fprintf(&builder, "  任务日志:\n")
+		if len(item.Logs) == 0 {
+			fmt.Fprintf(&builder, "    - 暂无日志\n")
+		}
+		for _, entry := range item.Logs {
+			fmt.Fprintf(&builder, "    - [%s] %s %s\n", entry.Level, timeText(entry.Time), entry.Message)
+		}
+		builder.WriteByte('\n')
+	}
+	return builder.String()
+}
+
+func roleName(role string) string {
+	if role == task.RoleSource {
+		return "发送"
+	}
+	if role == task.RoleTarget {
+		return "接收"
+	}
+	return role
+}
+
+func yesNo(value bool) string {
+	if value {
+		return "是"
+	}
+	return "否"
+}
+
+func emptyText(value string) string {
+	if strings.TrimSpace(value) == "" {
+		return "-"
+	}
+	return value
+}
+
+func timeText(value time.Time) string {
+	if value.IsZero() {
+		return "-"
+	}
+	return value.UTC().Format(time.RFC3339)
+}
+
+func errorCategory(message string) string {
+	text := strings.ToLower(message)
+	switch {
+	case text == "":
+		return "-"
+	case strings.Contains(text, "credential"):
+		return "同步链接/凭据"
+	case strings.Contains(text, "certificate") || strings.Contains(text, "tls") || strings.Contains(text, "x509"):
+		return "TLS 证书"
+	case strings.Contains(text, "relay"):
+		return "Relay 连接"
+	case strings.Contains(text, "connect") || strings.Contains(text, "connection") || strings.Contains(text, "timeout"):
+		return "网络连接"
+	case strings.Contains(text, "scan") || strings.Contains(text, "stat") || strings.Contains(text, "permission") || strings.Contains(text, "path"):
+		return "本地文件/权限"
+	case strings.Contains(text, "disk") || strings.Contains(text, "space"):
+		return "磁盘空间"
+	case strings.Contains(text, "authentication"):
+		return "同步认证"
+	default:
+		return "其他"
+	}
 }

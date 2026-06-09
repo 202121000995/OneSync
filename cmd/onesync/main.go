@@ -20,6 +20,7 @@ import (
 	"github.com/202121000995/OneSync/internal/auth"
 	"github.com/202121000995/OneSync/internal/certutil"
 	"github.com/202121000995/OneSync/internal/client"
+	"github.com/202121000995/OneSync/internal/config"
 	"github.com/202121000995/OneSync/internal/diagnostic"
 	"github.com/202121000995/OneSync/internal/netutil"
 	"github.com/202121000995/OneSync/internal/platform"
@@ -30,7 +31,7 @@ import (
 var version = "dev"
 
 func main() {
-	defaultDataDir, err := dataDirectory()
+	defaultDataDir, err := config.DefaultDataDir()
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -53,7 +54,11 @@ func main() {
 	if logFile != nil {
 		defer logFile.Close()
 	}
-	serverTLS, err := loadOrCreateServerTLS(*certificatePath, *privateKeyPath, *dataDir, *syncPort)
+	paths, err := config.NewPaths(*dataDir)
+	if err != nil {
+		log.Fatal(err)
+	}
+	serverTLS, err := loadOrCreateServerTLS(*certificatePath, *privateKeyPath, paths, *syncPort)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -65,7 +70,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	credentials, err := auth.NewCredentialStore(filepath.Join(*dataDir, "credentials"))
+	credentials, err := auth.NewCredentialStore(paths.CredentialDir)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -79,13 +84,13 @@ func main() {
 		log.Fatal(err)
 	}
 	manager, err := task.NewManager(
-		filepath.Join(*dataDir, "tasks.json"),
+		paths.TaskStore,
 		runnerFactory,
 	)
 	if err != nil {
 		log.Fatal(err)
 	}
-	webAuthStore, err := webAuthStore(*dataDir, *webBind, *webAuthEnabled)
+	webAuthStore, err := webAuthStore(paths, *webBind, *webAuthEnabled)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -120,9 +125,9 @@ func main() {
 	}
 }
 
-func webAuthStore(dataDir, webBind string, enabled bool) (*webauth.Store, error) {
+func webAuthStore(paths config.Paths, webBind string, enabled bool) (*webauth.Store, error) {
 	if enabled || webBind != "127.0.0.1" {
-		return webauth.NewStore(filepath.Join(dataDir, "web-auth.json"))
+		return webauth.NewStore(paths.WebAuthStore)
 	}
 	return nil, nil
 }
@@ -156,7 +161,7 @@ func loadServerTLS(certificatePath, privateKeyPath string) (*tls.Config, error) 
 	}, nil
 }
 
-func loadOrCreateServerTLS(certificatePath, privateKeyPath, dataDir string, syncPort int) (*tls.Config, error) {
+func loadOrCreateServerTLS(certificatePath, privateKeyPath string, paths config.Paths, syncPort int) (*tls.Config, error) {
 	if certificatePath != "" || privateKeyPath != "" {
 		return loadServerTLS(certificatePath, privateKeyPath)
 	}
@@ -164,8 +169,8 @@ func loadOrCreateServerTLS(certificatePath, privateKeyPath, dataDir string, sync
 	if err != nil {
 		return nil, err
 	}
-	certificatePath = filepath.Join(dataDir, "certs", "source.crt")
-	privateKeyPath = filepath.Join(dataDir, "certs", "source.key")
+	certificatePath = paths.AutomaticCertPath
+	privateKeyPath = paths.AutomaticPrivateKeyPath
 	if !automaticCertificateReady(certificatePath, privateKeyPath, hosts, time.Now()) {
 		if err := certutil.Generate(certutil.Options{
 			Hosts:    hosts,
@@ -268,12 +273,4 @@ func serverCertificatePEM(config *tls.Config) string {
 		return ""
 	}
 	return string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: config.Certificates[0].Certificate[0]}))
-}
-
-func dataDirectory() (string, error) {
-	root, err := os.UserConfigDir()
-	if err != nil {
-		return "", fmt.Errorf("find user config directory: %w", err)
-	}
-	return filepath.Join(root, "OneSync"), nil
 }

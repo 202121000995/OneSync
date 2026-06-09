@@ -82,6 +82,7 @@ button.suggestion:hover { background: #dcebdd; }
 .source-link p { margin-bottom: 10px; color: #334239; }
 .inline-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .logs-list { max-height: 360px; overflow: auto; border: 1px solid #dfe8df; border-radius: 12px; padding: 10px 12px; background: #fbfdfb; }
+.logs-list.compact-list { max-height: 180px; margin-top: 8px; }
 .log-entry { margin: 0; padding: 8px 0; border-bottom: 1px solid #edf1ed; color: #334239; font-size: 13px; }
 .log-entry:last-child { border-bottom: 0; }
 .log-entry.error { color: #b42318; }

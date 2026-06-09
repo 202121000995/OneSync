@@ -608,6 +608,8 @@ V1 不引入数据库。配置与任务状态使用本地文件持久化：
    - Linux 客户端安装后提供 `onesync` 中文命令菜单，Relay 安装后提供 `onesyncr` 中文命令菜单，解释各自的状态、日志、重启、升级和卸载命令。
 46. `feature/linux-client-deploy-and-relay-menu-split`
    - 新增 Linux 客户端一键部署脚本，支持 `GH_PROXY`，并将客户端和 Relay 的简约菜单命令拆分为 `onesync` 与 `onesyncr`。
+47. `feature/task-params-diagnostics-watch-config`
+   - 增强任务参数，支持忽略规则模板、规则测试和被忽略文件预览；增加诊断日志复制/下载；同步完成后通过轻量目录变化检测提前触发下一轮；新增统一配置路径模块。
 
 ## 16. 待确认项
 

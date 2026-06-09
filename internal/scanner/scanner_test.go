@@ -83,6 +83,44 @@ func TestScanAppliesIgnoreRules(t *testing.T) {
 	}
 }
 
+func TestPreviewIgnoredReportsMatchingRules(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "keep.txt"), "keep")
+	writeFile(t, filepath.Join(root, "skip.tmp"), "skip")
+	writeFile(t, filepath.Join(root, "cache", "nested.txt"), "skip")
+
+	entries, total, truncated, err := PreviewIgnored(context.Background(), root, []string{"*.tmp", "cache/"}, 10)
+	if err != nil {
+		t.Fatalf("PreviewIgnored() error = %v", err)
+	}
+	if total != 2 || truncated {
+		t.Fatalf("PreviewIgnored() total=%d truncated=%t, want 2 false", total, truncated)
+	}
+	got := map[string]string{}
+	for _, entry := range entries {
+		got[entry.Path] = entry.Rule
+	}
+	if got["skip.tmp"] != "*.tmp" {
+		t.Fatalf("skip.tmp rule = %q, want *.tmp", got["skip.tmp"])
+	}
+	if got["cache"] != "cache/" {
+		t.Fatalf("cache rule = %q, want cache/", got["cache"])
+	}
+}
+
+func TestMatchIgnoreRule(t *testing.T) {
+	rules := []string{"*.tmp", "cache/"}
+	if got := MatchIgnoreRule(rules, "nested/file.tmp", false); got != "*.tmp" {
+		t.Fatalf("MatchIgnoreRule(file.tmp) = %q, want *.tmp", got)
+	}
+	if got := MatchIgnoreRule(rules, "cache/item.txt", false); got != "cache/" {
+		t.Fatalf("MatchIgnoreRule(cache item) = %q, want cache/", got)
+	}
+	if got := MatchIgnoreRule(rules, "keep.txt", false); got != "" {
+		t.Fatalf("MatchIgnoreRule(keep.txt) = %q, want empty", got)
+	}
+}
+
 func TestScanRootIDIsStableAndDoesNotExposeRoot(t *testing.T) {
 	root := t.TempDir()
 	scanner := New(Options{})

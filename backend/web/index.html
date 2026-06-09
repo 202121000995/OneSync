@@ -132,9 +132,19 @@
       <form id="settings-form">
         <h2>任务参数</h2>
         <p id="settings-summary" class="hint">请选择一个同步任务。</p>
+        <label>默认模板
+          <select id="ignore-template">
+            <option value="">选择模板后追加到规则</option>
+          </select>
+        </label>
         <label>忽略文件<textarea name="ignore_rules" rows="7" placeholder="一行一个规则，例如：&#10;*.tmp&#10;cache/&#10;logs/debug.txt"></textarea></label>
         <p class="hint">空行和 # 开头的注释会被忽略；目录规则用 / 结尾，例如 cache/。</p>
+        <label>测试路径<input id="ignore-sample-path" placeholder="例如：cache/a.tmp 或 logs/debug.txt"></label>
+        <p id="ignore-preview-result" class="hint">保存前可以先测试规则，查看哪些文件会被忽略。</p>
+        <div id="ignored-list" class="logs-list compact-list">暂无预览。</div>
         <div class="dialog-actions">
+          <button id="apply-ignore-template" class="secondary" type="button">套用模板</button>
+          <button id="preview-ignore" class="secondary" type="button">测试规则</button>
           <button type="submit">保存参数</button>
           <button id="close-settings-dialog" class="secondary" type="button">关闭</button>
         </div>
@@ -146,6 +156,8 @@
         <h2>任务日志</h2>
         <div id="logs-list" class="logs-list">暂无日志。</div>
         <div class="dialog-actions">
+          <button id="copy-diagnostics" type="button">复制诊断</button>
+          <button id="download-diagnostics" class="secondary" type="button">下载诊断</button>
           <button class="secondary" type="submit">关闭</button>
         </div>
       </form>

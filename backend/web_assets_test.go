@@ -63,6 +63,9 @@ func TestWebScriptKeepsReadinessRegressionsCovered(t *testing.T) {
 		"设备详情",
 		"删除",
 		"不会删除你的同步目录文件",
+		"/api/ignore/templates",
+		"/ignore-preview",
+		"诊断日志已复制",
 	}
 	for _, text := range required {
 		if !strings.Contains(script, text) {
@@ -84,7 +87,12 @@ func TestWebPageKeepsTaskTableAsMainSurface(t *testing.T) {
 		"设置",
 		"删除",
 		"忽略文件",
+		"默认模板",
+		"测试路径",
+		"测试规则",
 		"任务日志",
+		"复制诊断",
+		"下载诊断",
 		"关于 OneSync",
 		"版本号",
 		"类型",
