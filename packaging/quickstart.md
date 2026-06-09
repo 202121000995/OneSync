@@ -74,6 +74,7 @@ For a Linux Relay server, set the Relay certificate hosts to the exact domain or
 
 ```sh
 sudo RELAY_HOSTS=relay.example.com,203.0.113.10 ./onesync-relayctl install
+sudo RELAY_HOSTS=203.0.113.10 RELAY_PORT=443 ./onesync-relayctl install
 sudo onesync-relayctl start
 sudo onesync-relayctl status
 sudo onesync-relayctl logs
@@ -82,6 +83,10 @@ sudo onesync-relayctl restart
 sudo onesync-relayctl upgrade
 sudo onesync-relayctl uninstall
 ```
+
+`RELAY_HOSTS` is written into the Relay TLS certificate. It should contain the Relay domain or public IP, without the port. `RELAY_PORT` controls the listening port. When creating a synchronization link, enter the Relay TLS address as `host:port`, for example `203.0.113.10:443`.
+
+By default, `onesync-relayctl install` generates a private self-signed Relay TLS certificate under `/etc/onesync/relay.crt` and `/etc/onesync/relay.key`. To use your own certificate, install with `ONESYNC_RELAY_CERT=/path/fullchain.crt ONESYNC_RELAY_KEY=/path/private.key`.
 
 Build the three programs:
 
@@ -159,6 +164,7 @@ On the Relay server:
 ```sh
 onesync-cert -hosts relay.example.com,203.0.113.10 -cert relay.crt -key relay.key
 onesync-relay -listen :7443 -cert relay.crt -key relay.key
+onesync-relay -listen :443 -cert relay.crt -key relay.key
 ```
 
 The Relay certificate must contain the Relay address used by source and target computers. Use a public CA certificate for a public production Relay when possible. For private testing, a self-signed Relay certificate is acceptable; OneSync reads the Relay public certificate while generating the synchronization link and carries it in the link automatically.
@@ -167,6 +173,7 @@ When generating the source link, keep the source TLS endpoint as the direct endp
 
 ```text
 relay.example.com:7443
+203.0.113.10:443
 ```
 
 Click "生成链接并启动源端" before testing the link on the target computer. In Relay mode, the source task registers with Relay and waits for the matching target.

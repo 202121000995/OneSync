@@ -5,7 +5,8 @@ SERVICE=onesync-relay.service
 INSTALL_DIR=${ONESYNC_INSTALL_DIR:-/usr/local/bin}
 CONFIG_DIR=${ONESYNC_RELAY_CONFIG_DIR:-/etc/onesync}
 LOG_DIR=${ONESYNC_LOG_DIR:-/var/log/onesync}
-LISTEN=${ONESYNC_RELAY_LISTEN:-:7443}
+RELAY_PORT=${RELAY_PORT:-7443}
+LISTEN=${ONESYNC_RELAY_LISTEN:-:$RELAY_PORT}
 CERT=${ONESYNC_RELAY_CERT:-$CONFIG_DIR/relay.crt}
 KEY=${ONESYNC_RELAY_KEY:-$CONFIG_DIR/relay.key}
 REPO=${ONESYNC_REPO:-202121000995/OneSync}
@@ -42,6 +43,8 @@ install_service() {
 		"$INSTALL_DIR/onesync-cert" -hosts "$hosts" -cert "$CERT" -key "$KEY"
 		chmod 0600 "$KEY"
 		printf 'Generated Relay TLS certificate for: %s\n' "$hosts"
+	else
+		printf 'Using existing Relay TLS certificate: %s and %s\n' "$CERT" "$KEY"
 	fi
 	cat > /etc/systemd/system/$SERVICE <<EOF
 [Unit]
@@ -60,7 +63,9 @@ WantedBy=multi-user.target
 EOF
 	systemctl daemon-reload
 	systemctl enable "$SERVICE"
-	printf 'OneSync Relay installed. Use: onesync-relayctl start|stop|restart|status|logs|upgrade|uninstall\n'
+	printf 'OneSync Relay installed on %s.\n' "$LISTEN"
+	printf 'Use Relay TLS address: <Relay domain or IP>:%s\n' "${LISTEN##*:}"
+	printf 'Use: onesync-relayctl start|stop|restart|status|logs|upgrade|uninstall\n'
 }
 
 upgrade_service() {
@@ -139,6 +144,7 @@ case "${1:-status}" in
 		;;
 	*)
 		printf 'Usage: onesync-relayctl install|start|run|stop|restart|status|logs|upgrade|uninstall\n' >&2
+		printf 'Install options: RELAY_HOSTS=domain-or-ip RELAY_PORT=7443 ONESYNC_RELAY_CERT=/path/cert ONESYNC_RELAY_KEY=/path/key\n' >&2
 		exit 2
 		;;
 esac

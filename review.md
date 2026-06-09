@@ -1451,3 +1451,27 @@
 
 - 当前远程管理页使用 HTTP 加账号登录，适合内网或自行加反向代理 HTTPS；公网正式发布建议配合 HTTPS 或后续内置管理页 TLS。
 - 升级命令依赖 GitHub Latest Release 和 `curl`/`tar`，离线环境仍需手动替换包。
+
+## Relay 端口与证书安装选项审核
+
+审核分支：`feature/relay-port-and-cert-options`
+
+审核结论：通过。
+
+审核说明：
+
+- `onesync-relayctl install` 新增直观的 `RELAY_PORT` 安装参数，默认仍为 `7443`。
+- 保留底层 `ONESYNC_RELAY_LISTEN`，高级用户仍可指定完整监听地址。
+- Relay 安装完成后会输出应在同步链接里填写的 `host:port` 格式提示。
+- Relay 证书默认在安装时自动生成，写入 `/etc/onesync/relay.crt` 和 `/etc/onesync/relay.key`。
+- 如果用户提前提供 `ONESYNC_RELAY_CERT` 和 `ONESYNC_RELAY_KEY`，安装脚本会使用用户自带证书，不覆盖生成。
+- Quickstart 已补充 `RELAY_PORT=443`、自带证书和链接填写示例。
+
+验证结果：
+
+- Linux Relay 控制脚本 `sh -n` 语法检查通过。
+
+剩余风险：
+
+- 自定义端口仍需要用户在服务器防火墙和云安全组放行。
+- 使用用户自带证书时，证书必须覆盖同步链接里填写的 Relay 域名或 IP。

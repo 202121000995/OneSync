@@ -598,6 +598,8 @@ V1 不引入数据库。配置与任务状态使用本地文件持久化：
    - 调整源端/目标端状态文案，增强连接日志，并为 Linux 客户端和 Relay 增加安装及控制命令。
 41. `feature/remote-web-auth-and-upgrade`
    - Linux service 支持远程管理页访问、首次设置管理账号密码，并为 Linux 客户端和 Relay 控制命令增加 GitHub 升级能力。
+42. `feature/relay-port-and-cert-options`
+   - Relay 安装脚本支持 `RELAY_PORT` 自定义端口，并明确自动生成证书与用户自带证书两种安装方式。
 
 ## 16. 待确认项
 
