@@ -100,6 +100,9 @@ sync_token:       bytes
 
 目标端流程：
 
+0. 通过直连源端或 Relay TLS 建立连接。
+0. 如果使用 Relay，发送 Relay v2 登记数据并等待 `0x01` 配对成功。
+0. 发送带稳定 `peer_id` 的 `Authenticate` 帧。
 1. 等待 `SnapshotRequest`。
 2. 扫描本地目标目录。
 3. 返回 `SnapshotResponse`，payload 为 JSON snapshot。
@@ -135,3 +138,20 @@ Win7 客户端不要依赖系统 TLS 能力，建议：
 - 不提供“跳过证书验证”开关。
 
 当前主线强制 TLS 1.3。Win7 客户端如需先做兼容验证，可以优先接 Relay TLS，并在服务端兼容策略确认后再决定是否允许兼容 TLS 1.2。
+
+## 8. 当前 Qt 接入进度
+
+已实现：
+
+- 同步链接解析。
+- 目标端稳定 `peer_id` 生成和保存。
+- 直连/Relay 地址解析。
+- TLS socket 建连。
+- Relay v2 target 登记。
+- `Authenticate` 帧发送和 `Ack` 校验。
+
+下一步：
+
+- 接收 `SnapshotRequest`。
+- 扫描目标目录并生成 OneSync snapshot JSON。
+- 接收 `SyncPlan` 和文件分块。

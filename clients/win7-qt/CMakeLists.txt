@@ -12,10 +12,18 @@ find_package(Qt5 5.12 REQUIRED COMPONENTS Widgets Network)
 
 add_executable(OneSyncWin7 WIN32
     src/main.cpp
+    src/Endpoint.cpp
+    src/Endpoint.h
     src/MainWindow.cpp
     src/MainWindow.h
+    src/PeerIdentity.cpp
+    src/PeerIdentity.h
+    src/SyncProtocol.cpp
+    src/SyncProtocol.h
     src/SyncLink.cpp
     src/SyncLink.h
+    src/TargetConnector.cpp
+    src/TargetConnector.h
 )
 
 target_compile_definitions(OneSyncWin7 PRIVATE

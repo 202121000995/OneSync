@@ -1,5 +1,7 @@
 #include "MainWindow.h"
 
+#include "TargetConnector.h"
+
 #include <QBoxLayout>
 #include <QDateTime>
 #include <QFile>
@@ -14,6 +16,7 @@
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QStandardPaths>
+#include <QThread>
 #include <QTextEdit>
 
 MainWindow::MainWindow(QWidget* parent)
@@ -51,7 +54,7 @@ MainWindow::MainWindow(QWidget* parent)
     startButton->setEnabled(false);
     auto* diagnosticsButton = new QPushButton(QStringLiteral("导出诊断"));
     connect(parseButton, &QPushButton::clicked, this, &MainWindow::parseLink);
-    connect(startButton, &QPushButton::clicked, this, &MainWindow::startPlaceholder);
+    connect(startButton, &QPushButton::clicked, this, &MainWindow::startSync);
     connect(diagnosticsButton, &QPushButton::clicked, this, &MainWindow::exportDiagnostics);
     actions->addWidget(parseButton);
     actions->addWidget(startButton);
@@ -111,7 +114,7 @@ void MainWindow::parseLink()
     appendLog(QStringLiteral("同步链接解析成功。"));
 }
 
-void MainWindow::startPlaceholder()
+void MainWindow::startSync()
 {
     if (!linkReady) {
         QMessageBox::warning(this, QStringLiteral("还不能开始"), QStringLiteral("请先解析同步链接。"));
@@ -127,12 +130,40 @@ void MainWindow::startPlaceholder()
         QMessageBox::warning(this, QStringLiteral("目录不可用"), QStringLiteral("接收文件夹不存在或不是目录。"));
         return;
     }
-    appendLog(QStringLiteral("同步协议尚未接入。本阶段已完成链接解析和接收目录校验。"));
-    QMessageBox::information(
-        this,
-        QStringLiteral("下一阶段"),
-        QStringLiteral("下一阶段会接入 Relay/TLS 连接和文件同步协议。")
-    );
+    if (connectionThread != nullptr) {
+        QMessageBox::information(this, QStringLiteral("正在连接"), QStringLiteral("当前任务正在连接，请稍候。"));
+        return;
+    }
+
+    startButton->setEnabled(false);
+    statusLabel->setText(QStringLiteral("运行-连接中"));
+    appendLog(QStringLiteral("开始连接源端。"));
+
+    connectionThread = new QThread(this);
+    auto* connector = new TargetConnector(currentLink, targetFolder);
+    connector->moveToThread(connectionThread);
+
+    connect(connectionThread, &QThread::started, connector, &TargetConnector::run);
+    connect(connector, &TargetConnector::logMessage, this, &MainWindow::appendLog);
+    connect(connector, &TargetConnector::statusChanged, statusLabel, &QLabel::setText);
+    connect(connector, &TargetConnector::finished, this, [this](bool ok, const QString& message) {
+        appendLog(message);
+        statusLabel->setText(ok ? QStringLiteral("运行-已连接源端") : QStringLiteral("失败"));
+        startButton->setEnabled(true);
+        if (!ok) {
+            QMessageBox::warning(this, QStringLiteral("连接失败"), message);
+        } else {
+            QMessageBox::information(this, QStringLiteral("连接成功"), message);
+        }
+    });
+    connect(connector, &TargetConnector::finished, connectionThread, &QThread::quit);
+    connect(connector, &TargetConnector::finished, connector, &TargetConnector::deleteLater);
+    connect(connectionThread, &QThread::finished, connectionThread, &QThread::deleteLater);
+    connect(connectionThread, &QThread::finished, this, [this]() {
+        connectionThread = nullptr;
+    });
+
+    connectionThread->start();
 }
 
 void MainWindow::exportDiagnostics()

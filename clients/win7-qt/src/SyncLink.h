@@ -17,6 +17,7 @@ struct SyncLink
     QDateTime expiresAt;
 
     bool hasRelay() const;
+    QByteArray decodedToken() const;
 };
 
 class SyncLinkParser

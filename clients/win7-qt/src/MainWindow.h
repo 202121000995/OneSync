@@ -8,6 +8,7 @@ class QLabel;
 class QLineEdit;
 class QPushButton;
 class QPlainTextEdit;
+class QThread;
 class QTextEdit;
 
 class MainWindow : public QMainWindow
@@ -20,7 +21,7 @@ public:
 private slots:
     void chooseTargetFolder();
     void parseLink();
-    void startPlaceholder();
+    void startSync();
     void exportDiagnostics();
 
 private:
@@ -37,6 +38,7 @@ private:
     QLabel* statusLabel = nullptr;
     QPlainTextEdit* logEdit = nullptr;
     QPushButton* startButton = nullptr;
+    QThread* connectionThread = nullptr;
     SyncLink currentLink;
     bool linkReady = false;
 };

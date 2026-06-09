@@ -12,9 +12,17 @@ win32 {
 
 SOURCES += \
     src/main.cpp \
+    src/Endpoint.cpp \
     src/MainWindow.cpp \
-    src/SyncLink.cpp
+    src/PeerIdentity.cpp \
+    src/SyncLink.cpp \
+    src/SyncProtocol.cpp \
+    src/TargetConnector.cpp
 
 HEADERS += \
+    src/Endpoint.h \
     src/MainWindow.h \
-    src/SyncLink.h
+    src/PeerIdentity.h \
+    src/SyncLink.h \
+    src/SyncProtocol.h \
+    src/TargetConnector.h

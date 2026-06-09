@@ -24,6 +24,14 @@ bool SyncLink::hasRelay() const
     return !relayEndpoint.trimmed().isEmpty();
 }
 
+QByteArray SyncLink::decodedToken() const
+{
+    return QByteArray::fromBase64(
+        token.toUtf8(),
+        QByteArray::Base64UrlEncoding | QByteArray::OmitTrailingEquals
+    );
+}
+
 bool SyncLinkParser::parse(const QString& encoded, SyncLink* link, QString* error)
 {
     if (link == nullptr) {
@@ -128,10 +136,7 @@ bool SyncLinkParser::validate(const SyncLink& link, QString* error)
         }
         return false;
     }
-    const QByteArray tokenBytes = QByteArray::fromBase64(
-        link.token.toUtf8(),
-        QByteArray::Base64UrlEncoding | QByteArray::OmitTrailingEquals
-    );
+    const QByteArray tokenBytes = link.decodedToken();
     if (tokenBytes.size() != kTokenLength) {
         if (error != nullptr) {
             *error = QStringLiteral("同步令牌不正确。");
