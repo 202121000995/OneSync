@@ -45,8 +45,8 @@ copy_common "$linux_stage"
 cp "$ARTIFACT_DIR/onesync-linux-amd64" "$linux_stage/onesync"
 cp "$ARTIFACT_DIR/onesync-cert-linux-amd64" "$linux_stage/onesync-cert"
 cp "$ARTIFACT_DIR/onesync-relay-linux-amd64" "$linux_stage/onesync-relay"
-cp "$ROOT"/packaging/acceptance-scripts/linux/*.sh "$linux_stage/"
-chmod +x "$linux_stage"/*.sh
+cp "$ROOT"/packaging/acceptance-scripts/linux/* "$linux_stage/"
+chmod +x "$linux_stage"/*.sh "$linux_stage"/onesyncctl "$linux_stage"/onesync-relayctl
 
 if ! command -v zip >/dev/null 2>&1; then
 	printf 'zip is required to create the Windows acceptance package\n' >&2

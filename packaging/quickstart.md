@@ -55,6 +55,30 @@ The Windows package includes `OneSync.exe` for normal use. Double-click it on so
 
 On Windows, `OneSync.exe` runs as a tray application. Closing or minimizing the browser page does not stop synchronization. Use the tray icon to open OneSync again or exit the service.
 
+For Linux service-style testing, use the included control commands from the extracted Linux package:
+
+```sh
+sudo ./onesyncctl install
+sudo onesyncctl start
+sudo onesyncctl status
+sudo onesyncctl logs
+sudo onesyncctl stop
+sudo onesyncctl restart
+sudo onesyncctl uninstall
+```
+
+For a Linux Relay server, set the Relay certificate hosts to the exact domain or IP that source and target computers will use:
+
+```sh
+sudo RELAY_HOSTS=relay.example.com,203.0.113.10 ./onesync-relayctl install
+sudo onesync-relayctl start
+sudo onesync-relayctl status
+sudo onesync-relayctl logs
+sudo onesync-relayctl stop
+sudo onesync-relayctl restart
+sudo onesync-relayctl uninstall
+```
+
 Build the three programs:
 
 ```sh

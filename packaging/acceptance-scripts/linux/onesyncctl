@@ -1,0 +1,94 @@
+#!/bin/sh
+set -eu
+
+SERVICE=onesync.service
+INSTALL_DIR=${ONESYNC_INSTALL_DIR:-/usr/local/bin}
+DATA_DIR=${ONESYNC_DATA_DIR:-/var/lib/onesync}
+LOG_DIR=${ONESYNC_LOG_DIR:-/var/log/onesync}
+PORT=${ONESYNC_PORT:-8765}
+SYNC_PORT=${ONESYNC_SYNC_PORT:-7443}
+
+need_root() {
+	if [ "$(id -u)" -ne 0 ]; then
+		printf 'Please run this command with sudo.\n' >&2
+		exit 1
+	fi
+}
+
+script_dir() {
+	cd -- "$(dirname -- "$0")" && pwd
+}
+
+install_service() {
+	need_root
+	dir=$(script_dir)
+	if [ ! -x "$dir/onesync" ]; then
+		printf 'Cannot find executable %s/onesync. Run install from the extracted Linux package.\n' "$dir" >&2
+		exit 1
+	fi
+	install -d "$INSTALL_DIR" "$DATA_DIR" "$LOG_DIR"
+	install -m 0755 "$dir/onesync" "$INSTALL_DIR/onesync"
+	if [ -x "$dir/onesync-cert" ]; then
+		install -m 0755 "$dir/onesync-cert" "$INSTALL_DIR/onesync-cert"
+	fi
+	install -m 0755 "$0" "$INSTALL_DIR/onesyncctl"
+	cat > /etc/systemd/system/$SERVICE <<EOF
+[Unit]
+Description=OneSync service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=$INSTALL_DIR/onesync -data-dir $DATA_DIR -port $PORT -sync-port $SYNC_PORT -log-file $LOG_DIR/onesync.log
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+	systemctl daemon-reload
+	systemctl enable "$SERVICE"
+	printf 'OneSync installed. Use: onesyncctl start|stop|restart|status|logs|uninstall\n'
+}
+
+uninstall_service() {
+	need_root
+	systemctl stop "$SERVICE" 2>/dev/null || true
+	systemctl disable "$SERVICE" 2>/dev/null || true
+	rm -f /etc/systemd/system/$SERVICE
+	systemctl daemon-reload
+	rm -f "$INSTALL_DIR/onesync" "$INSTALL_DIR/onesyncctl"
+	printf 'OneSync uninstalled. Data remains at %s and logs remain at %s.\n' "$DATA_DIR" "$LOG_DIR"
+}
+
+case "${1:-status}" in
+	install)
+		install_service
+		;;
+	start|run)
+		need_root
+		systemctl start "$SERVICE"
+		;;
+	stop)
+		need_root
+		systemctl stop "$SERVICE"
+		;;
+	restart)
+		need_root
+		systemctl restart "$SERVICE"
+		;;
+	status)
+		systemctl status "$SERVICE" --no-pager
+		;;
+	logs)
+		journalctl -u "$SERVICE" -n "${2:-120}" --no-pager
+		;;
+	uninstall)
+		uninstall_service
+		;;
+	*)
+		printf 'Usage: onesyncctl install|start|run|stop|restart|status|logs|uninstall\n' >&2
+		exit 2
+		;;
+esac

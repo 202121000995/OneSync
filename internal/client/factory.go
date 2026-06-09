@@ -127,6 +127,7 @@ func (r *runner) run(ctx context.Context, taskID string, reporter task.StateRepo
 			if !errors.Is(err, errConnectionUnavailable) {
 				return err
 			}
+			addLog(ctx, reporter, "warning", fmt.Sprintf("本轮连接暂不可用，%s 后重试：%v", r.factory.syncInterval, err))
 		}
 		if err := reportState(ctx, reporter, task.StateIdle); err != nil {
 			return err
@@ -151,6 +152,7 @@ func (r *runner) runCycle(ctx context.Context, taskID string, reporter task.Stat
 		if credential.Used {
 			expectedPeerID = credential.PeerID
 		}
+		addLog(ctx, reporter, "info", fmt.Sprintf("源端开始等待连接：直连地址=%s，Relay=%s，已绑定对端=%t", credential.Endpoint, emptyDash(credential.RelayEndpoint), expectedPeerID != ""))
 		clientTLS, err := clientTLSForCredential(r.factory.clientTLS, credential)
 		if err != nil {
 			return err
@@ -166,6 +168,7 @@ func (r *runner) runCycle(ctx context.Context, taskID string, reporter task.Stat
 			r.factory.maxPayload,
 		)
 		if err != nil {
+			addLog(ctx, reporter, "warning", fmt.Sprintf("源端连接失败：%v", err))
 			return err
 		}
 		session := meteredSession{base: connection.session, reporter: trafficReporter(reporter)}
@@ -180,7 +183,7 @@ func (r *runner) runCycle(ctx context.Context, taskID string, reporter task.Stat
 			TLS:           "TLS 1.3",
 			ClientVersion: "OneSync",
 		})
-		addLog(ctx, reporter, "info", "连接成功")
+		addLog(ctx, reporter, "info", fmt.Sprintf("连接成功：方式=%s，对端=%s", connectionLabel(connection.relayed), safePeerID(connection.peerID)))
 		if err := reportState(ctx, reporter, task.StateSyncing); err != nil {
 			return err
 		}
@@ -200,6 +203,7 @@ func (r *runner) runCycle(ctx context.Context, taskID string, reporter task.Stat
 	if err != nil {
 		return err
 	}
+	addLog(ctx, reporter, "info", fmt.Sprintf("目标端开始连接源端：直连地址=%s，Relay=%s，对端身份=%s", credential.Endpoint, emptyDash(credential.RelayEndpoint), safePeerID(credential.PeerID)))
 	connection, err := connectTarget(
 		ctx,
 		credential,
@@ -210,6 +214,7 @@ func (r *runner) runCycle(ctx context.Context, taskID string, reporter task.Stat
 		r.factory.maxPayload,
 	)
 	if err != nil {
+		addLog(ctx, reporter, "warning", fmt.Sprintf("目标端连接失败：%v", err))
 		return err
 	}
 	session := meteredSession{base: connection.session, reporter: trafficReporter(reporter)}
@@ -224,7 +229,7 @@ func (r *runner) runCycle(ctx context.Context, taskID string, reporter task.Stat
 		TLS:           "TLS 1.3",
 		ClientVersion: "OneSync",
 	})
-	addLog(ctx, reporter, "info", "连接成功")
+	addLog(ctx, reporter, "info", fmt.Sprintf("连接成功：方式=%s，源端=%s", connectionLabel(connection.relayed), credential.Endpoint))
 	if err := reportState(ctx, reporter, task.StateSyncing); err != nil {
 		return err
 	}
@@ -296,6 +301,20 @@ func connectionLabel(relayed bool) string {
 		return "Relay"
 	}
 	return "直连"
+}
+
+func emptyDash(value string) string {
+	if value == "" {
+		return "-"
+	}
+	return value
+}
+
+func safePeerID(peerID string) string {
+	if len(peerID) <= 12 {
+		return emptyDash(peerID)
+	}
+	return peerID[:6] + "..." + peerID[len(peerID)-6:]
 }
 
 func trafficReporter(reporter task.StateReporter) task.TrafficReporter {

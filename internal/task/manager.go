@@ -153,6 +153,7 @@ func (m *Manager) Start(ctx context.Context, taskID string) error {
 	task.State = StateConnecting
 	task.LastError = ""
 	task.Progress = nil
+	task.Devices.Connected = 0
 	task.Logs = append(task.Logs, LogEntry{Time: m.now().UTC(), Level: "info", Message: "任务正在启动"})
 	if len(task.Logs) > 200 {
 		task.Logs = append([]LogEntry(nil), task.Logs[len(task.Logs)-200:]...)
@@ -545,6 +546,7 @@ func (m *Manager) finishRun(taskID string, runtime *runtimeTask, state, lastErro
 	} else if state == StateIdle {
 		task.Logs = append(task.Logs, LogEntry{Time: m.now().UTC(), Level: "info", Message: "同步完成，等待下一轮"})
 	} else if state == StateStopped {
+		task.Devices.Connected = 0
 		task.Logs = append(task.Logs, LogEntry{Time: m.now().UTC(), Level: "info", Message: "任务已停止"})
 	}
 	if len(task.Logs) > 200 {
@@ -570,6 +572,7 @@ func (m *Manager) updateStopped(taskID string) error {
 	previous := task
 	task.State = StateStopped
 	task.LastError = ""
+	task.Devices.Connected = 0
 	task.UpdatedAt = m.now().UTC()
 	m.tasks[taskID] = task
 	if err := m.store.save(m.tasks); err != nil {

@@ -594,6 +594,8 @@ V1 不引入数据库。配置与任务状态使用本地文件持久化：
    - 生成链接时自动读取 Relay 公开证书并写入同步链接，源端和目标端无需手动复制 Relay 证书文件。
 39. `feature/task-size-devices-tray`
    - 任务表格展示本地/标准目录体积和可点击设备详情；Windows exe 使用 GUI 子系统、托盘常驻并嵌入图标资源。
+40. `feature/linux-relay-control-and-status-logs`
+   - 调整源端/目标端状态文案，增强连接日志，并为 Linux 客户端和 Relay 增加安装及控制命令。
 
 ## 16. 待确认项
 

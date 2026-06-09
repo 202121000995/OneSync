@@ -55,6 +55,8 @@ func TestWebScriptKeepsReadinessRegressionsCovered(t *testing.T) {
 		"formatRate",
 		"formatBytes",
 		"deviceCountLabel",
+		"运行-连接中",
+		"运行-已连接源端",
 		"设备详情",
 		"删除",
 		"不会删除你的同步目录文件",

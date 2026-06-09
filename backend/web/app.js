@@ -133,7 +133,7 @@ function statusCell(task) {
   box.className = "status-cell";
   const badge = document.createElement("span");
   badge.className = `badge ${task.state || "unknown"}`;
-  badge.textContent = stateLabel(task.state);
+  badge.textContent = stateLabel(task);
   box.append(badge);
   if (task.last_error) {
     const error = document.createElement("span");
@@ -237,12 +237,15 @@ function isRunningTask(task) {
 }
 
 function taskStateDetail(task) {
-  if (task.state === "connecting") return "运行中：正在等待对端连接。源端可直接复制最近链接给目标端。";
-  if (task.state === "syncing") return "运行中：正在同步文件。";
-  if (task.state === "idle") return "运行中：等待下一轮同步或新的对端连接。";
-  if (task.state === "failed") return "已失败：请查看下方错误信息。";
-  if (task.state === "stopped") return "已停止：需要时可以手动启动。";
-  return "未启动：源端请先生成链接，目标端请先加入链接。";
+  if (task.role === "source") {
+    if (isRunningTask(task)) return "源端运行中：可接受目标端连接并发送同步内容。";
+    if (task.state === "failed") return "源端失败：请查看下方错误信息和任务日志。";
+    return "源端已停止：请先生成链接并启动。";
+  }
+  if (isRunningTask(task) && deviceConnected(task)) return "目标端运行中：已连接源端。";
+  if (isRunningTask(task)) return "目标端运行中：正在连接源端。";
+  if (task.state === "failed") return "目标端失败：请查看下方错误信息和任务日志。";
+  return "目标端已停止：请先加入链接并启动。";
 }
 
 function renderSavedSourceLink(taskId, savedLink) {
@@ -280,15 +283,16 @@ function progressLabel(progress) {
   return `${base} · 正在处理 ${progress.current_path}`;
 }
 
-function stateLabel(state) {
-  return ({
-    created: "未启动",
-    connecting: "运行中：连接中",
-    syncing: "运行中：同步中",
-    idle: "运行中：等待",
-    failed: "失败",
-    stopped: "已停止",
-  })[state] || state;
+function stateLabel(task) {
+  if (task.role === "source") {
+    if (task.state === "failed") return "失败";
+    if (isRunningTask(task)) return "运行中";
+    return "停止";
+  }
+  if (task.state === "failed") return "失败";
+  if (isRunningTask(task) && deviceConnected(task)) return "运行-已连接源端";
+  if (isRunningTask(task)) return "运行-连接中";
+  return "停止";
 }
 
 function actionButton(label, action, options = {}) {
@@ -378,7 +382,7 @@ function openDevicesDialog(task) {
   devicesTitle.textContent = `设备详情 - ${task.id}`;
   const devices = task.devices || {};
   const rows = [
-    ["状态", stateLabel(task.state)],
+    ["状态", stateLabel(task)],
     ["同步设备", deviceCountLabel(task)],
     ["连接", devices.connection || "等待连接"],
     ["源端地址", devices.endpoint || task.peer_address || "-"],
@@ -426,8 +430,14 @@ function openDevicesDialog(task) {
 function deviceCountLabel(task) {
   const devices = task.devices || {};
   const total = Math.max(Number(devices.total || 0), 1);
-  const connected = Math.min(Number(devices.connected || 0), total);
+  const connected = Math.min(deviceConnected(task) ? Math.max(Number(devices.connected || 0), 1) : 0, total);
   return `${connected} / ${total}`;
+}
+
+function deviceConnected(task) {
+  const devices = task.devices || {};
+  if (Number(devices.connected || 0) > 0) return true;
+  return Boolean(devices.last_seen && isRunningTask(task) && task.role === "target");
 }
 
 function renderLogEntry(entry) {

@@ -1,0 +1,104 @@
+#!/bin/sh
+set -eu
+
+SERVICE=onesync-relay.service
+INSTALL_DIR=${ONESYNC_INSTALL_DIR:-/usr/local/bin}
+CONFIG_DIR=${ONESYNC_RELAY_CONFIG_DIR:-/etc/onesync}
+LOG_DIR=${ONESYNC_LOG_DIR:-/var/log/onesync}
+LISTEN=${ONESYNC_RELAY_LISTEN:-:7443}
+CERT=${ONESYNC_RELAY_CERT:-$CONFIG_DIR/relay.crt}
+KEY=${ONESYNC_RELAY_KEY:-$CONFIG_DIR/relay.key}
+
+need_root() {
+	if [ "$(id -u)" -ne 0 ]; then
+		printf 'Please run this command with sudo.\n' >&2
+		exit 1
+	fi
+}
+
+script_dir() {
+	cd -- "$(dirname -- "$0")" && pwd
+}
+
+default_hosts() {
+	host=$(hostname -f 2>/dev/null || hostname 2>/dev/null || printf relay.local)
+	printf '%s,127.0.0.1,localhost' "$host"
+}
+
+install_service() {
+	need_root
+	dir=$(script_dir)
+	if [ ! -x "$dir/onesync-relay" ] || [ ! -x "$dir/onesync-cert" ]; then
+		printf 'Cannot find onesync-relay and onesync-cert. Run install from the extracted Linux package.\n' >&2
+		exit 1
+	fi
+	install -d "$INSTALL_DIR" "$CONFIG_DIR" "$LOG_DIR"
+	install -m 0755 "$dir/onesync-relay" "$INSTALL_DIR/onesync-relay"
+	install -m 0755 "$dir/onesync-cert" "$INSTALL_DIR/onesync-cert"
+	install -m 0755 "$0" "$INSTALL_DIR/onesync-relayctl"
+	if [ ! -f "$CERT" ] || [ ! -f "$KEY" ]; then
+		hosts=${RELAY_HOSTS:-$(default_hosts)}
+		"$INSTALL_DIR/onesync-cert" -hosts "$hosts" -cert "$CERT" -key "$KEY"
+		chmod 0600 "$KEY"
+		printf 'Generated Relay TLS certificate for: %s\n' "$hosts"
+	fi
+	cat > /etc/systemd/system/$SERVICE <<EOF
+[Unit]
+Description=OneSync Relay service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=$INSTALL_DIR/onesync-relay -listen $LISTEN -cert $CERT -key $KEY -log-file $LOG_DIR/relay.log
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+	systemctl daemon-reload
+	systemctl enable "$SERVICE"
+	printf 'OneSync Relay installed. Use: onesync-relayctl start|stop|restart|status|logs|uninstall\n'
+}
+
+uninstall_service() {
+	need_root
+	systemctl stop "$SERVICE" 2>/dev/null || true
+	systemctl disable "$SERVICE" 2>/dev/null || true
+	rm -f /etc/systemd/system/$SERVICE
+	systemctl daemon-reload
+	rm -f "$INSTALL_DIR/onesync-relay" "$INSTALL_DIR/onesync-relayctl"
+	printf 'OneSync Relay uninstalled. Certificate remains at %s and logs remain at %s.\n' "$CONFIG_DIR" "$LOG_DIR"
+}
+
+case "${1:-status}" in
+	install)
+		install_service
+		;;
+	start|run)
+		need_root
+		systemctl start "$SERVICE"
+		;;
+	stop)
+		need_root
+		systemctl stop "$SERVICE"
+		;;
+	restart)
+		need_root
+		systemctl restart "$SERVICE"
+		;;
+	status)
+		systemctl status "$SERVICE" --no-pager
+		;;
+	logs)
+		journalctl -u "$SERVICE" -n "${2:-120}" --no-pager
+		;;
+	uninstall)
+		uninstall_service
+		;;
+	*)
+		printf 'Usage: onesync-relayctl install|start|run|stop|restart|status|logs|uninstall\n' >&2
+		exit 2
+		;;
+esac

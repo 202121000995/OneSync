@@ -1394,3 +1394,31 @@
 
 - 当前设备详情基于任务的一对一连接状态，不是完整多设备发现列表；多目标设备需要后续扩展同步协议和设备模型。
 - 托盘当前管理的是程序本体，主界面仍为本地浏览器页面；原生窗口级最小化到托盘需要后续 Windows 桌面壳。
+
+## Linux 与 Relay 控制命令及状态日志审核
+
+审核分支：`feature/linux-relay-control-and-status-logs`
+
+审核结论：通过。
+
+审核说明：
+
+- 管理页状态文案改为面向用户：源端显示停止/运行中，目标端显示停止、运行-连接中、运行-已连接源端。
+- 停止任务时会清空已连接设备数，避免停止后仍显示 `1 / 1`。
+- 连接日志增加源端等待地址、目标端连接地址、Relay 地址、对端身份缩略、连接方式和失败重试信息。
+- Linux 包新增 `onesyncctl`，支持 `install/start/run/stop/restart/status/logs/uninstall`。
+- Linux 包新增 `onesync-relayctl`，支持 Relay TLS 证书生成、systemd 安装和 `install/start/run/stop/restart/status/logs/uninstall`。
+- 打包脚本会把 Linux 控制命令放入 tar.gz，并赋予可执行权限。
+- Quickstart 已补充 Linux 客户端和 Relay 的常用安装/控制命令。
+
+验证结果：
+
+- `go test ./...` 通过。
+- `go vet ./...` 通过。
+- `git diff --check` 通过。
+- Linux 控制脚本 `sh -n` 语法检查通过。
+
+剩余风险：
+
+- Linux service 模式默认管理页仍绑定 `127.0.0.1`，远程服务器测试需要在服务器本机访问或使用 SSH 端口转发。
+- Relay 证书自动生成依赖用户正确提供 `RELAY_HOSTS`，必须包含源端和目标端实际填写的 Relay 域名或 IP。
