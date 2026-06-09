@@ -60,7 +60,7 @@ function renderTask(task) {
   actions.className = "actions";
   actions.append(actionButton("启动", () => taskAction(task.id, "start")));
   actions.append(actionButton("停止", () => taskAction(task.id, "stop"), true));
-  if (task.role === "source") actions.append(actionButton("生成链接", () => issueLink(task.id)));
+  if (task.role === "source") actions.append(actionButton("生成链接并启动", () => issueLink(task.id)));
   item.append(details, actions);
   return item;
 }
@@ -93,10 +93,14 @@ function actionButton(label, action, secondary = false) {
 
 async function taskAction(id, action) {
   try {
-    await api(`/api/tasks/${encodeURIComponent(id)}/${action}`, { method: "POST", body: "{}" });
+    await runTaskAction(id, action);
     notify(action === "start" ? "任务正在启动" : "任务已停止");
     setTimeout(loadTasks, 300);
   } catch (error) { notify(error.message); }
+}
+
+async function runTaskAction(id, action) {
+  return api(`/api/tasks/${encodeURIComponent(id)}/${action}`, { method: "POST", body: "{}" });
 }
 
 function issueLink(taskId) {
@@ -168,7 +172,9 @@ linkForm.addEventListener("submit", async (event) => {
       }),
     });
     generatedLink.value = result.link;
-    notify("同步链接已生成");
+    await runTaskAction(data.get("task_id"), "start");
+    notify("同步链接已生成，源端任务正在启动");
+    setTimeout(loadTasks, 300);
   } catch (error) { notify(error.message); }
 });
 
@@ -266,13 +272,14 @@ document.querySelector("#join-form").addEventListener("submit", async (event) =>
   const form = event.currentTarget;
   const data = new FormData(form);
   try {
-    await api("/api/links/join", {
+    const result = await api("/api/links/join", {
       method: "POST",
       body: JSON.stringify(Object.fromEntries(data)),
     });
+    await runTaskAction(result.task, "start");
     form.reset();
-    notify("已加入同步");
-    loadTasks();
+    notify("已加入同步，目标端任务正在启动");
+    setTimeout(loadTasks, 300);
   } catch (error) { notify(error.message); }
 });
 

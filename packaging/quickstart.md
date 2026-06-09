@@ -109,7 +109,7 @@ Create a source task and choose the folder to send. Click "生成链接". In the
 
 Suggested endpoints use port `7443` by default. Start `onesync` with `-sync-port 9443` if you want the management page to suggest a different synchronization port.
 
-Leave the Relay address empty for direct mode. Copy the generated link, then start the source task. The source task must be running before the target computer can test or join the direct endpoint.
+Leave the Relay address empty for direct mode. Click "生成链接并启动源端", then copy the generated link. The source task starts automatically and waits for the target computer.
 
 On the target computer:
 
@@ -119,7 +119,7 @@ onesync -ca source.crt -sync-interval 10s
 
 Open the management page, paste the link, and click "测试连接" before joining. This checks the direct TLS endpoint with the target computer's current `-ca` trust configuration. It does not consume the link or create a task.
 
-Choose the target folder and join. Start the target task. The target will create and update files from the source. Files that exist only on the target are kept.
+Choose the target folder and click "加入并启动". The target will create and update files from the source. Files that exist only on the target are kept.
 
 Expected result:
 
@@ -158,7 +158,7 @@ When generating the source link, keep the source TLS endpoint as the direct endp
 relay.example.com:7443
 ```
 
-Start the source task before testing the link on the target computer. In Relay mode, the source task registers with Relay and waits for the matching target.
+Click "生成链接并启动源端" before testing the link on the target computer. In Relay mode, the source task registers with Relay and waits for the matching target.
 
 On the target computer, "测试连接" checks both the direct source endpoint and the Relay TLS endpoint when Relay is present. The target first tries the direct source endpoint. If it cannot connect or authenticate directly, it falls back to Relay.
 
