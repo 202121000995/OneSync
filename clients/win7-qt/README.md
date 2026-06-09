@@ -13,6 +13,8 @@
 - 显示源端地址、Relay 地址、会话编号和过期时间。
 - 导出诊断文本。
 
+注意：macOS 上的 Qt 只能生成 macOS 可执行文件，不能直接生成 Windows `.exe`。Win7 `.exe` 需要在 Windows Qt 5 环境里构建，或准备 Windows 交叉编译工具链。
+
 尚未接入：
 
 - TLS/Relay 连接。
@@ -31,6 +33,29 @@
 不建议使用 Qt 6 做 Win7 客户端。
 
 ## 构建示例
+
+### Windows 生成 exe
+
+在 Windows 7/10/11 上安装 Qt 5.12/5.15 后，打开 Qt 对应的命令行环境，例如：
+
+- `Qt 5.12.12 for Desktop (MSVC)`
+- `Qt 5.12.12 for Desktop (MinGW)`
+
+建议把工程放在纯英文路径下，例如 `C:\onesync\OneSync`。Qt 5 的 qmake 对中文路径兼容不好。
+
+然后进入本目录运行：
+
+```bat
+package-win7.cmd
+```
+
+成功后会生成：
+
+```text
+clients\win7-qt\dist\OneSyncWin7-win7-qt-v0.1.0\OneSyncWin7.exe
+```
+
+这个目录会同时包含 Qt DLL，测试时直接把整个目录压缩成 zip 发给 Win7 机器即可。
 
 ### 使用 qmake
 
