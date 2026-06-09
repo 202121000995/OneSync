@@ -35,3 +35,20 @@ func TestRelayConfigureLoggingWritesPrivateFile(t *testing.T) {
 		t.Fatalf("log permissions = %o, want 0600", info.Mode().Perm())
 	}
 }
+
+func TestLoadAccessTokenFromFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "relay.token")
+	if err := os.WriteFile(path, []byte(" relay-secret \n"), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	token, err := loadAccessToken("", path)
+	if err != nil {
+		t.Fatalf("loadAccessToken() error = %v", err)
+	}
+	if token != "relay-secret" {
+		t.Fatalf("token = %q, want relay-secret", token)
+	}
+	if _, err := loadAccessToken("one", path); err == nil {
+		t.Fatal("loadAccessToken() accepted both value and file")
+	}
+}

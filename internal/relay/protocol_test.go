@@ -9,7 +9,7 @@ import (
 func TestRegistrationRoundTrip(t *testing.T) {
 	token := bytes.Repeat([]byte{0x42}, tokenSize)
 	var buffer bytes.Buffer
-	if err := writeRegistration(&buffer, "session", roleSource, token); err != nil {
+	if err := writeRegistration(&buffer, "session", roleSource, token, "relay-secret"); err != nil {
 		t.Fatalf("writeRegistration() error = %v", err)
 	}
 	got, err := readRegistration(&buffer)
@@ -17,9 +17,11 @@ func TestRegistrationRoundTrip(t *testing.T) {
 		t.Fatalf("readRegistration() error = %v", err)
 	}
 	want := registration{
-		sessionID: "session",
-		role:      roleSource,
-		tokenHash: got.tokenHash,
+		sessionID:          "session",
+		role:               roleSource,
+		tokenHash:          got.tokenHash,
+		accessTokenHash:    got.accessTokenHash,
+		accessTokenPresent: true,
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("readRegistration() = %+v, want %+v", got, want)
@@ -27,10 +29,13 @@ func TestRegistrationRoundTrip(t *testing.T) {
 }
 
 func TestRegistrationRejectsUnsafeInput(t *testing.T) {
-	if err := writeRegistration(&bytes.Buffer{}, "../session", roleSource, make([]byte, tokenSize)); err == nil {
+	if err := writeRegistration(&bytes.Buffer{}, "../session", roleSource, make([]byte, tokenSize), ""); err == nil {
 		t.Fatal("writeRegistration() accepted unsafe session ID")
 	}
-	if err := writeRegistration(&bytes.Buffer{}, "session", roleSource, []byte("short")); err == nil {
+	if err := writeRegistration(&bytes.Buffer{}, "session", roleSource, []byte("short"), ""); err == nil {
 		t.Fatal("writeRegistration() accepted short token")
+	}
+	if err := writeRegistration(&bytes.Buffer{}, "session", roleSource, make([]byte, tokenSize), string(make([]byte, maxAccessTokenLength+1))); err == nil {
+		t.Fatal("writeRegistration() accepted oversized access token")
 	}
 }

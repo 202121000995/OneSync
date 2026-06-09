@@ -46,12 +46,14 @@ Before starting Relay:
 
 - [ ] Relay certificate includes the DNS name or IP address used in the Relay endpoint.
 - [ ] Relay started with both `-cert` and `-key`.
+- [ ] Relay has an access token, shown by `sudo onesync-relayctl token` when using the service script.
 - [ ] Relay firewall allows its listen port.
-- [ ] Source and target trust the Relay certificate through `-ca` when the Relay certificate is self-signed.
+- [ ] Source link generation can read the Relay public certificate. The target does not need a separate Relay certificate file when using the generated link.
 
 Before joining through Relay:
 
 - [ ] Source link includes the Relay endpoint.
+- [ ] Source link includes the Relay token.
 - [ ] Source link was generated with "生成链接并启动源端" before target clicks "测试连接".
 - [ ] Target "测试连接" Relay result is usable.
 - [ ] If direct mode is expected to fail, record that expectation in the acceptance report.
@@ -91,7 +93,7 @@ Do not immediately change several things at once. Record the first failing step 
 2. Is the endpoint the synchronization endpoint, not the management page?
 3. Can the target reach the source or Relay port?
 4. Does the certificate include the endpoint host?
-5. For Relay with a self-signed certificate, did the target start with the correct Relay `-ca` file?
+5. Was the source link generated with the correct Relay token and current Relay certificate?
 6. Was the link already consumed or expired?
 
 After fixing one item, run "测试连接" again and record the result.

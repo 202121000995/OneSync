@@ -14,7 +14,7 @@ const (
 )
 
 // Register sends Relay pairing metadata and waits for the ready byte.
-func Register(ctx context.Context, connection net.Conn, sessionID, role string, token []byte) error {
+func Register(ctx context.Context, connection net.Conn, sessionID, role string, token []byte, accessToken string) error {
 	roleValue := byte(0)
 	switch role {
 	case RoleSource:
@@ -27,7 +27,7 @@ func Register(ctx context.Context, connection net.Conn, sessionID, role string, 
 
 	stop := applyDeadline(ctx, connection)
 	defer stop()
-	if err := writeRegistration(connection, sessionID, roleValue, token); err != nil {
+	if err := writeRegistration(connection, sessionID, roleValue, token, accessToken); err != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return ctxErr
 		}

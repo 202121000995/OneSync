@@ -88,43 +88,47 @@ curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/202121000995/O
 After installing the Linux client, run `onesync` to show the Chinese client command menu with common status, log, restart, upgrade, and uninstall commands.
 After installing the Linux Relay, run `onesyncr` to show the Chinese Relay command menu.
 
-For a Linux Relay server, use the one-command Relay TLS deployment script. `RELAY_HOSTS` is the Relay server domain or public IP without the port, and `RELAY_PORT` is the port clients will use:
+For a Linux Relay server, use the one-command Relay TLS deployment script. `RELAY_HOSTS` is the Relay server domain or public IP without the port, `RELAY_PORT` is the port clients will use, and `RELAY_TOKEN` is the Relay access token. If `RELAY_TOKEN` is omitted, the installer generates one and stores it in `/etc/onesync/relay.token`:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/202121000995/OneSync/main/packaging/acceptance-scripts/linux/deploy-relaytls.sh | sudo env RELAY_HOSTS=203.0.113.10 RELAY_PORT=443 sh
+curl -fsSL https://raw.githubusercontent.com/202121000995/OneSync/main/packaging/acceptance-scripts/linux/deploy-relaytls.sh | sudo env RELAY_HOSTS=203.0.113.10 RELAY_PORT=443 RELAY_TOKEN=your-secret sh
 ```
 
 If the server cannot reach GitHub directly, use a GitHub proxy. The proxy is used both to download the deployment script and to download the latest Linux package inside the script:
 
 ```sh
-curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/202121000995/OneSync/main/packaging/acceptance-scripts/linux/deploy-relaytls.sh | sudo env RELAY_HOSTS=203.0.113.10 RELAY_PORT=443 GH_PROXY=https://gh-proxy.org/ sh
+curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/202121000995/OneSync/main/packaging/acceptance-scripts/linux/deploy-relaytls.sh | sudo env RELAY_HOSTS=203.0.113.10 RELAY_PORT=443 RELAY_TOKEN=your-secret GH_PROXY=https://gh-proxy.org/ sh
 ```
 
 After Relay deployment, use `onesyncr` to view the Chinese Relay command menu.
 
-After deployment, enter this Relay TLS address when generating a synchronization link:
+After deployment, enter the Relay TLS address and Relay token when generating a synchronization link:
 
 ```text
-203.0.113.10:443
+Relay TLS 地址: 203.0.113.10:443
+Relay 令牌: your-secret
 ```
+
+The generated synchronization link carries the Relay address, Relay token, source public certificate, and Relay public certificate. The target computer only needs to paste the synchronization link; it does not need a separate certificate file or token file.
 
 If you already downloaded the Linux package, you can also install Relay from the extracted directory:
 
 ```sh
 sudo RELAY_HOSTS=relay.example.com,203.0.113.10 ./onesync-relayctl install
-sudo RELAY_HOSTS=203.0.113.10 RELAY_PORT=443 ./onesync-relayctl install
+sudo RELAY_HOSTS=203.0.113.10 RELAY_PORT=443 RELAY_TOKEN=your-secret ./onesync-relayctl install
 sudo onesync-relayctl start
 sudo onesync-relayctl status
 sudo onesync-relayctl logs
+sudo onesync-relayctl token
 sudo onesync-relayctl stop
 sudo onesync-relayctl restart
 sudo onesync-relayctl upgrade
 sudo onesync-relayctl uninstall
 ```
 
-`RELAY_HOSTS` is written into the Relay TLS certificate. It should contain the Relay domain or public IP, without the port. `RELAY_PORT` controls the listening port. When creating a synchronization link, enter the Relay TLS address as `host:port`, for example `203.0.113.10:443`.
+`RELAY_HOSTS` is written into the Relay TLS certificate. It should contain the Relay domain or public IP, without the port. `RELAY_PORT` controls the listening port. `RELAY_TOKEN` controls who can use the Relay server. When creating a synchronization link, enter the Relay TLS address as `host:port`, for example `203.0.113.10:443`, and enter the Relay token shown by `sudo onesync-relayctl token`.
 
-By default, `onesync-relayctl install` generates a private self-signed Relay TLS certificate under `/etc/onesync/relay.crt` and `/etc/onesync/relay.key`. To use your own certificate, install with `ONESYNC_RELAY_CERT=/path/fullchain.crt ONESYNC_RELAY_KEY=/path/private.key`.
+By default, `onesync-relayctl install` generates a private self-signed Relay TLS certificate under `/etc/onesync/relay.crt` and `/etc/onesync/relay.key`, and a Relay access token under `/etc/onesync/relay.token`. To use your own certificate, install with `ONESYNC_RELAY_CERT=/path/fullchain.crt ONESYNC_RELAY_KEY=/path/private.key`.
 
 Build the three programs:
 
@@ -201,24 +205,25 @@ On the Relay server:
 
 ```sh
 onesync-cert -hosts relay.example.com,203.0.113.10 -cert relay.crt -key relay.key
-onesync-relay -listen :7443 -cert relay.crt -key relay.key
-onesync-relay -listen :443 -cert relay.crt -key relay.key
+onesync-relay -listen :7443 -cert relay.crt -key relay.key -access-token your-secret
+onesync-relay -listen :443 -cert relay.crt -key relay.key -access-token your-secret
 ```
 
 The Relay certificate must contain the Relay address used by source and target computers. Use a public CA certificate for a public production Relay when possible. For private testing, a self-signed Relay certificate is acceptable; OneSync reads the Relay public certificate while generating the synchronization link and carries it in the link automatically.
 
-When generating the source link, keep the source TLS endpoint as the direct endpoint and enter the Relay TLS address in the optional Relay field, for example:
+When generating the source link, keep the source TLS endpoint as the direct endpoint, enter the Relay TLS address in the optional Relay field, and enter the Relay token, for example:
 
 ```text
-relay.example.com:7443
-203.0.113.10:443
+Relay TLS 地址: relay.example.com:7443
+Relay TLS 地址: 203.0.113.10:443
+Relay 令牌: your-secret
 ```
 
 Click "生成链接并启动源端" before testing the link on the target computer. In Relay mode, the source task registers with Relay and waits for the matching target.
 
-On the target computer, paste the synchronization link. The link already contains the public certificates needed for direct and Relay TLS verification. "测试连接" checks both the direct source endpoint and the Relay TLS endpoint when Relay is present. The target first tries the direct source endpoint. If it cannot connect or authenticate directly, it falls back to Relay.
+On the target computer, paste the synchronization link. The link already contains the public certificates needed for direct and Relay TLS verification, plus the Relay token needed to use your Relay server. "测试连接" checks both the direct source endpoint and the Relay TLS endpoint when Relay is present. The target first tries the direct source endpoint. If it cannot connect or authenticate directly, it falls back to Relay.
 
-For Relay acceptance, keep the direct endpoint field filled with the source address shown in the link form, and fill the Relay field with the reachable Relay TLS address. The target first tries direct mode, then falls back to Relay when direct mode is not usable.
+For Relay acceptance, keep the direct endpoint field filled with the source address shown in the link form, fill the Relay field with the reachable Relay TLS address, and fill the Relay token field. The target first tries direct mode, then falls back to Relay when direct mode is not usable.
 
 ## Troubleshooting
 
@@ -233,6 +238,7 @@ If "测试连接" fails for direct mode:
 If "测试连接" fails for Relay:
 
 - Confirm `onesync-relay` is running with `-cert` and `-key`.
+- Confirm the source link was generated with the correct Relay token.
 - Confirm the Relay address in the link is reachable from both source and target.
 - Confirm the Relay certificate contains the exact Relay address used in the link. If the Relay IP or domain changes, regenerate the Relay certificate and generate a fresh synchronization link.
 - If direct mode is intentionally unavailable, a direct failure can be acceptable as long as the Relay result is usable.

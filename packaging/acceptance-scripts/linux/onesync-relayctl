@@ -9,6 +9,7 @@ RELAY_PORT=${RELAY_PORT:-7443}
 LISTEN=${ONESYNC_RELAY_LISTEN:-:$RELAY_PORT}
 CERT=${ONESYNC_RELAY_CERT:-$CONFIG_DIR/relay.crt}
 KEY=${ONESYNC_RELAY_KEY:-$CONFIG_DIR/relay.key}
+TOKEN_FILE=${ONESYNC_RELAY_TOKEN_FILE:-$CONFIG_DIR/relay.token}
 REPO=${ONESYNC_REPO:-202121000995/OneSync}
 GH_PROXY=${GH_PROXY:-}
 
@@ -44,6 +45,48 @@ default_hosts() {
 	printf '%s,127.0.0.1,localhost' "$host"
 }
 
+generate_token() {
+	if command -v openssl >/dev/null 2>&1; then
+		openssl rand -base64 32 | tr -d '\n'
+		return
+	fi
+	if command -v od >/dev/null 2>&1; then
+		od -An -tx1 -N32 /dev/urandom | tr -d ' \n'
+		return
+	fi
+	printf 'openssl or od is required to generate RELAY_TOKEN.\n' >&2
+	exit 1
+}
+
+install_token() {
+	if [ -n "${RELAY_TOKEN:-}" ]; then
+		printf '%s\n' "$RELAY_TOKEN" > "$TOKEN_FILE"
+		chmod 0600 "$TOKEN_FILE"
+		printf 'Saved Relay access token to %s\n' "$TOKEN_FILE"
+		return
+	fi
+	if [ ! -f "$TOKEN_FILE" ]; then
+		generate_token > "$TOKEN_FILE"
+		printf '\n' >> "$TOKEN_FILE"
+		chmod 0600 "$TOKEN_FILE"
+		printf 'Generated Relay access token at %s\n' "$TOKEN_FILE"
+	else
+		chmod 0600 "$TOKEN_FILE"
+		printf 'Using existing Relay access token: %s\n' "$TOKEN_FILE"
+	fi
+}
+
+print_token() {
+	need_root
+	if [ ! -f "$TOKEN_FILE" ]; then
+		printf 'Relay token file does not exist: %s\n' "$TOKEN_FILE" >&2
+		exit 1
+	fi
+	printf 'Relay token:\n'
+	cat "$TOKEN_FILE"
+	printf '\n'
+}
+
 install_service() {
 	need_root
 	dir=$(script_dir)
@@ -69,6 +112,7 @@ install_service() {
 	else
 		printf 'Using existing Relay TLS certificate: %s and %s\n' "$CERT" "$KEY"
 	fi
+	install_token
 	cat > /etc/systemd/system/$SERVICE <<EOF
 [Unit]
 Description=OneSync Relay service
@@ -77,7 +121,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=$INSTALL_DIR/onesync-relay -listen $LISTEN -cert $CERT -key $KEY -log-file $LOG_DIR/relay.log
+ExecStart=$INSTALL_DIR/onesync-relay -listen $LISTEN -cert $CERT -key $KEY -access-token-file $TOKEN_FILE -log-file $LOG_DIR/relay.log
 Restart=on-failure
 RestartSec=5
 
@@ -88,8 +132,10 @@ EOF
 	systemctl enable "$SERVICE"
 	printf 'OneSync Relay installed on %s.\n' "$LISTEN"
 	printf 'Use Relay TLS address: <Relay domain or IP>:%s\n' "${LISTEN##*:}"
+	printf 'Use Relay token from: %s\n' "$TOKEN_FILE"
+	print_token
 	printf 'Menu command: onesyncr\n'
-	printf 'Use: onesync-relayctl start|stop|restart|status|logs|upgrade|uninstall\n'
+	printf 'Use: onesync-relayctl start|stop|restart|status|logs|token|upgrade|uninstall\n'
 }
 
 upgrade_service() {
@@ -142,7 +188,7 @@ uninstall_service() {
 	rm -f /etc/systemd/system/$SERVICE
 	systemctl daemon-reload
 	rm -f "$INSTALL_DIR/onesync-relay" "$INSTALL_DIR/onesync-relayctl" "$INSTALL_DIR/onesyncr"
-	printf 'OneSync Relay uninstalled. Certificate remains at %s and logs remain at %s.\n' "$CONFIG_DIR" "$LOG_DIR"
+	printf 'OneSync Relay uninstalled. Certificate and token remain at %s and logs remain at %s.\n' "$CONFIG_DIR" "$LOG_DIR"
 }
 
 case "${1:-status}" in
@@ -167,6 +213,9 @@ case "${1:-status}" in
 	logs)
 		journalctl -u "$SERVICE" -n "${2:-120}" --no-pager
 		;;
+	token)
+		print_token
+		;;
 	upgrade)
 		upgrade_service
 		;;
@@ -174,8 +223,8 @@ case "${1:-status}" in
 		uninstall_service
 		;;
 	*)
-		printf 'Usage: onesync-relayctl install|start|run|stop|restart|status|logs|upgrade|uninstall\n' >&2
-		printf 'Install options: RELAY_HOSTS=domain-or-ip RELAY_PORT=7443 ONESYNC_RELAY_CERT=/path/cert ONESYNC_RELAY_KEY=/path/key\n' >&2
+		printf 'Usage: onesync-relayctl install|start|run|stop|restart|status|logs|token|upgrade|uninstall\n' >&2
+		printf 'Install options: RELAY_HOSTS=domain-or-ip RELAY_PORT=7443 RELAY_TOKEN=secret ONESYNC_RELAY_CERT=/path/cert ONESYNC_RELAY_KEY=/path/key\n' >&2
 		exit 2
 		;;
 esac

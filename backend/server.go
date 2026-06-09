@@ -636,6 +636,7 @@ func (s *Server) issueLink(writer http.ResponseWriter, request *http.Request) {
 		TaskID        string `json:"task_id"`
 		Endpoint      string `json:"endpoint"`
 		RelayEndpoint string `json:"relay_endpoint"`
+		RelayToken    string `json:"relay_token"`
 	}
 	if err := decodeJSON(writer, request, &input); err != nil {
 		return
@@ -665,7 +666,7 @@ func (s *Server) issueLink(writer http.ResponseWriter, request *http.Request) {
 		}
 		caCertificate = certificateBundle(caCertificate, relayCertificate)
 	}
-	encoded, err := s.links.IssueWithCertificate(input.TaskID, input.Endpoint, input.RelayEndpoint, caCertificate)
+	encoded, err := s.links.IssueWithRelayCertificate(input.TaskID, input.Endpoint, input.RelayEndpoint, input.RelayToken, caCertificate)
 	if err != nil {
 		writeAPIError(writer, http.StatusBadRequest, err)
 		return
@@ -677,7 +678,7 @@ func (s *Server) issueLink(writer http.ResponseWriter, request *http.Request) {
 	}
 	if err := s.credentials.Save(input.TaskID, syncauth.Credential{
 		SessionID: link.SessionID, Endpoint: link.Endpoint,
-		RelayEndpoint: link.RelayEndpoint, CACertificatePEM: link.CACertificatePEM,
+		RelayEndpoint: link.RelayEndpoint, RelayToken: link.RelayToken, CACertificatePEM: link.CACertificatePEM,
 		Token: link.Token, OneTime: true,
 	}); err != nil {
 		writeAPIError(writer, http.StatusInternalServerError, err)
@@ -727,7 +728,7 @@ func (s *Server) joinLink(writer http.ResponseWriter, request *http.Request) {
 	}
 	if err := s.credentials.Save(input.TaskID, syncauth.Credential{
 		SessionID: link.SessionID, Endpoint: link.Endpoint,
-		RelayEndpoint: link.RelayEndpoint, CACertificatePEM: link.CACertificatePEM,
+		RelayEndpoint: link.RelayEndpoint, RelayToken: link.RelayToken, CACertificatePEM: link.CACertificatePEM,
 		Token: link.Token, PeerID: peerID,
 	}); err != nil {
 		writeAPIError(writer, http.StatusInternalServerError, err)

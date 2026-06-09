@@ -46,22 +46,25 @@ type Config struct {
 	MaxWaiting  int
 	MaxActive   int
 	MaxBytes    int64
+	AccessToken string
 	Logger      *slog.Logger
 }
 
 // Broker pairs source and target connections and transparently forwards bytes.
 type Broker struct {
-	mu          sync.Mutex
-	waiting     map[string]*waitingPeer
-	waitTimeout time.Duration
-	idleTimeout time.Duration
-	maxWaiting  int
-	maxActive   int
-	active      int
-	connections int
-	maxConns    int
-	maxBytes    int64
-	logger      *slog.Logger
+	mu                  sync.Mutex
+	waiting             map[string]*waitingPeer
+	waitTimeout         time.Duration
+	idleTimeout         time.Duration
+	maxWaiting          int
+	maxActive           int
+	active              int
+	connections         int
+	maxConns            int
+	maxBytes            int64
+	accessTokenHash     [sha256.Size]byte
+	accessTokenRequired bool
+	logger              *slog.Logger
 }
 
 // NewBroker validates Relay limits and creates a broker.
@@ -90,15 +93,25 @@ func NewBroker(config Config) (*Broker, error) {
 	if config.Logger == nil {
 		config.Logger = slog.New(slog.NewTextHandler(io.Discard, nil))
 	}
+	if len(config.AccessToken) > maxAccessTokenLength {
+		return nil, errors.New("Relay access token is too large")
+	}
+	accessTokenRequired := config.AccessToken != ""
+	accessTokenHash := [sha256.Size]byte{}
+	if accessTokenRequired {
+		accessTokenHash = sha256.Sum256([]byte(config.AccessToken))
+	}
 	return &Broker{
-		waiting:     make(map[string]*waitingPeer),
-		waitTimeout: config.WaitTimeout,
-		idleTimeout: config.IdleTimeout,
-		maxWaiting:  config.MaxWaiting,
-		maxActive:   config.MaxActive,
-		maxConns:    config.MaxWaiting + 2*config.MaxActive,
-		maxBytes:    config.MaxBytes,
-		logger:      config.Logger,
+		waiting:             make(map[string]*waitingPeer),
+		waitTimeout:         config.WaitTimeout,
+		idleTimeout:         config.IdleTimeout,
+		maxWaiting:          config.MaxWaiting,
+		maxActive:           config.MaxActive,
+		maxConns:            config.MaxWaiting + 2*config.MaxActive,
+		maxBytes:            config.MaxBytes,
+		accessTokenHash:     accessTokenHash,
+		accessTokenRequired: accessTokenRequired,
+		logger:              config.Logger,
 	}, nil
 }
 
@@ -121,6 +134,9 @@ func (b *Broker) Handle(ctx context.Context, connection net.Conn) error {
 			return registrationContextErr
 		}
 		return err
+	}
+	if !b.authorize(registration) {
+		return errors.New("Relay access token is invalid")
 	}
 
 	outcome, err := b.pair(ctx, connection, registration)
@@ -145,6 +161,13 @@ func (b *Broker) Handle(ctx context.Context, connection net.Conn) error {
 		return fmt.Errorf("confirm Relay peer pairing: %w", err)
 	}
 	return b.forward(ctx, connection, outcome.peer, registration.sessionID)
+}
+
+func (b *Broker) authorize(registration registration) bool {
+	if !b.accessTokenRequired {
+		return true
+	}
+	return registration.accessTokenPresent && sameToken(b.accessTokenHash, registration.accessTokenHash)
 }
 
 func (b *Broker) pair(ctx context.Context, connection net.Conn, registration registration) (pairOutcome, error) {

@@ -1666,3 +1666,36 @@
 剩余风险：
 
 - 设置页当前先展示运行信息和诊断入口，暂未支持在页面内保存需要重启服务的全局配置。
+
+## Relay 访问令牌审核
+
+审核分支：`feature/relay-access-token`
+
+审核结论：通过。
+
+审核说明：
+
+- Relay 协议新增服务器访问令牌字段，并保留未配置访问令牌时的旧协议兼容。
+- Relay 服务端支持配置访问令牌；配置后，源端和目标端连接 Relay 时都必须携带正确令牌。
+- Relay 命令入口新增 `-access-token` 和 `-access-token-file`，service 模式使用令牌文件，避免令牌出现在进程参数里。
+- 同步链接新增 `relay_token` 字段；源端生成链接时填写 Relay 地址和 Relay 令牌，目标端只粘贴同步链接即可。
+- 源端和目标端凭据会保存 Relay 令牌用于连接 Relay，但诊断日志不输出完整令牌。
+- 管理页生成链接弹窗新增“Relay 令牌”输入框，并提示目标端无需单独传证书或令牌文件。
+- Linux Relay 一键部署脚本支持 `RELAY_TOKEN`；不提供时自动生成 `/etc/onesync/relay.token`。
+- `onesync-relayctl token` 可查看当前 Relay 令牌，`onesyncr` 菜单已补充对应命令。
+- Quickstart、预检清单和验收报告已更新 Relay 令牌流程。
+
+验证结果：
+
+- `go test ./internal/relay ./internal/auth ./internal/client ./backend ./cmd/relay` 通过。
+- `go test ./...` 通过。
+- `git diff --check` 通过。
+- `sh -n packaging/acceptance-scripts/linux/onesync-relayctl` 通过。
+- `sh -n packaging/acceptance-scripts/linux/deploy-relaytls.sh` 通过。
+- `sh -n packaging/acceptance-scripts/linux/onesyncr-menu` 通过。
+- `sh -n packaging/acceptance-scripts/linux/start-relay.sh` 通过。
+- 临时管理页 `http://127.0.0.1:18768/` 验证通过：生成链接窗口显示 Relay 令牌输入框和“一段链接即可”的提示。
+
+剩余风险：
+
+- Relay 令牌目前随同步链接发给目标端；这满足“一段链接粘贴加入”，但链接泄露时也会泄露 Relay 使用权限。后续可增加 Relay 令牌轮换、按链接派生短期 Relay 令牌或服务端访问控制。

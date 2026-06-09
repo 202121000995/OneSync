@@ -381,7 +381,7 @@ function renderSavedSourceLink(taskId, savedLink) {
   const box = document.createElement("div");
   box.className = "source-link";
   const summary = document.createElement("p");
-  summary.textContent = `最近生成的源端链接：${savedLink.endpoint || "未记录地址"} · ${linkExpiryText(savedLink.expires_at)} · 重启不会改变这个链接`;
+  summary.textContent = `最近生成的源端链接：${savedLink.endpoint || "未记录地址"} · ${savedLink.relay_endpoint ? `Relay ${savedLink.relay_endpoint}${savedLink.relay_token_configured ? "（带令牌）" : ""} · ` : ""}${linkExpiryText(savedLink.expires_at)} · 重启不会改变这个链接`;
   const actions = document.createElement("div");
   actions.className = "inline-actions";
   actions.append(actionButton("复制链接", async () => {
@@ -962,8 +962,13 @@ linkForm.addEventListener("submit", async (event) => {
   const data = new FormData(linkForm);
   const endpoint = String(data.get("endpoint") || "").trim();
   const relayEndpoint = String(data.get("relay_endpoint") || "").trim();
+  const relayToken = String(data.get("relay_token") || "").trim();
   if (!appConfig.direct_tls_configured && !relayEndpoint) {
     notify("源端 TLS 证书没有自动加载成功，请重启 OneSync；临时只用 Relay 时请填写 Relay TLS 地址。");
+    return;
+  }
+  if (relayToken && !relayEndpoint) {
+    notify("填写 Relay 令牌时，也需要填写 Relay TLS 地址。");
     return;
   }
   try {
@@ -973,6 +978,7 @@ linkForm.addEventListener("submit", async (event) => {
         task_id: data.get("task_id"),
         endpoint,
         relay_endpoint: relayEndpoint,
+        relay_token: relayToken,
       }),
     });
     generatedLink.value = result.link;
@@ -980,6 +986,7 @@ linkForm.addEventListener("submit", async (event) => {
       link: result.link,
       endpoint,
       relay_endpoint: relayEndpoint,
+      relay_token_configured: Boolean(relayToken),
       expires_at: result.expires_at,
       created_at: new Date().toISOString(),
     });

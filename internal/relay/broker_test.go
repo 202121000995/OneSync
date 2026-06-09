@@ -51,15 +51,57 @@ func TestBrokerRejectsWrongToken(t *testing.T) {
 	results := make(chan error, 2)
 	go func() { results <- broker.Handle(context.Background(), sourceServer) }()
 	go func() { results <- broker.Handle(context.Background(), targetServer) }()
-	if err := writeRegistration(sourceClient, "session", roleSource, sourceToken); err != nil {
+	if err := writeRegistration(sourceClient, "session", roleSource, sourceToken, ""); err != nil {
 		t.Fatalf("source registration error = %v", err)
 	}
-	if err := writeRegistration(targetClient, "session", roleTarget, targetToken); err != nil {
+	if err := writeRegistration(targetClient, "session", roleTarget, targetToken, ""); err != nil {
 		t.Fatalf("target registration error = %v", err)
 	}
 	if err := <-results; err == nil {
 		t.Fatal("broker accepted a wrong token")
 	}
+}
+
+func TestBrokerRejectsWrongAccessToken(t *testing.T) {
+	broker := mustBroker(t, Config{
+		WaitTimeout: time.Second,
+		IdleTimeout: time.Second,
+		MaxWaiting:  10,
+		MaxBytes:    1024,
+		AccessToken: "correct-relay-token",
+	})
+	token := bytes.Repeat([]byte{0x42}, tokenSize)
+	server, client := net.Pipe()
+	defer client.Close()
+	result := make(chan error, 1)
+	go func() { result <- broker.Handle(context.Background(), server) }()
+	if err := writeRegistration(client, "session", roleSource, token, "wrong-relay-token"); err != nil {
+		t.Fatalf("registration error = %v", err)
+	}
+	if err := <-result; err == nil || err.Error() != "Relay access token is invalid" {
+		t.Fatalf("broker error = %v, want Relay access token is invalid", err)
+	}
+}
+
+func TestBrokerAcceptsAccessToken(t *testing.T) {
+	broker := mustBroker(t, Config{
+		WaitTimeout: time.Second,
+		IdleTimeout: time.Second,
+		MaxWaiting:  10,
+		MaxBytes:    1024,
+		AccessToken: "relay-token",
+	})
+	token := bytes.Repeat([]byte{0x42}, tokenSize)
+	source, target, results := connectPairWithAccessToken(t, broker, "session", token, token, "relay-token")
+	defer source.Close()
+	defer target.Close()
+	if _, err := source.Write([]byte("ok")); err != nil {
+		t.Fatalf("source Write() error = %v", err)
+	}
+	assertRead(t, target, "ok")
+	_ = source.Close()
+	_ = target.Close()
+	waitBrokerResults(t, results, false)
 }
 
 func TestBrokerRejectsDuplicateRole(t *testing.T) {
@@ -77,8 +119,8 @@ func TestBrokerRejectsDuplicateRole(t *testing.T) {
 	results := make(chan error, 2)
 	go func() { results <- broker.Handle(context.Background(), firstServer) }()
 	go func() { results <- broker.Handle(context.Background(), secondServer) }()
-	_ = writeRegistration(firstClient, "session", roleSource, token)
-	_ = writeRegistration(secondClient, "session", roleSource, token)
+	_ = writeRegistration(firstClient, "session", roleSource, token, "")
+	_ = writeRegistration(secondClient, "session", roleSource, token, "")
 	if err := <-results; err == nil {
 		t.Fatal("broker accepted duplicate roles")
 	}
@@ -95,7 +137,7 @@ func TestBrokerPairingTimeout(t *testing.T) {
 	defer client.Close()
 	result := make(chan error, 1)
 	go func() { result <- broker.Handle(context.Background(), server) }()
-	if err := writeRegistration(client, "session", roleSource, make([]byte, tokenSize)); err != nil {
+	if err := writeRegistration(client, "session", roleSource, make([]byte, tokenSize), ""); err != nil {
 		t.Fatalf("writeRegistration() error = %v", err)
 	}
 	if err := <-result; err == nil {
@@ -140,10 +182,10 @@ func TestBrokerActiveSessionLimit(t *testing.T) {
 	results := make(chan error, 2)
 	go func() { results <- broker.Handle(context.Background(), sourceServer) }()
 	go func() { results <- broker.Handle(context.Background(), targetServer) }()
-	if err := writeRegistration(sourceClient, "second", roleSource, token); err != nil {
+	if err := writeRegistration(sourceClient, "second", roleSource, token, ""); err != nil {
 		t.Fatalf("source registration error = %v", err)
 	}
-	if err := writeRegistration(targetClient, "second", roleTarget, token); err != nil {
+	if err := writeRegistration(targetClient, "second", roleTarget, token, ""); err != nil {
 		t.Fatalf("target registration error = %v", err)
 	}
 	if err := <-results; err == nil || err.Error() != "Relay active session limit reached" {
@@ -162,7 +204,7 @@ func TestRegisterCanBeCanceled(t *testing.T) {
 	defer client.Close()
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	err := Register(ctx, client, "session", RoleSource, make([]byte, tokenSize))
+	err := Register(ctx, client, "session", RoleSource, make([]byte, tokenSize), "")
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("Register() error = %v, want context.Canceled", err)
 	}
@@ -199,6 +241,11 @@ func connectPair(t *testing.T, broker *Broker, sourceToken, targetToken []byte) 
 
 func connectPairSession(t *testing.T, broker *Broker, sessionID string, sourceToken, targetToken []byte) (net.Conn, net.Conn, chan error) {
 	t.Helper()
+	return connectPairWithAccessToken(t, broker, sessionID, sourceToken, targetToken, "")
+}
+
+func connectPairWithAccessToken(t *testing.T, broker *Broker, sessionID string, sourceToken, targetToken []byte, accessToken string) (net.Conn, net.Conn, chan error) {
+	t.Helper()
 	sourceServer, sourceClient := net.Pipe()
 	targetServer, targetClient := net.Pipe()
 	results := make(chan error, 2)
@@ -208,10 +255,10 @@ func connectPairSession(t *testing.T, broker *Broker, sessionID string, sourceTo
 	sourceReady := make(chan error, 1)
 	targetReady := make(chan error, 1)
 	go func() {
-		sourceReady <- Register(context.Background(), sourceClient, sessionID, RoleSource, sourceToken)
+		sourceReady <- Register(context.Background(), sourceClient, sessionID, RoleSource, sourceToken, accessToken)
 	}()
 	go func() {
-		targetReady <- Register(context.Background(), targetClient, sessionID, RoleTarget, targetToken)
+		targetReady <- Register(context.Background(), targetClient, sessionID, RoleTarget, targetToken, accessToken)
 	}()
 	if err := <-sourceReady; err != nil {
 		t.Fatalf("source Register() error = %v", err)

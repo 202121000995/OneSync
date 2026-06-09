@@ -17,6 +17,7 @@ if [ "$relay_installed" = true ]; then
 	cat <<'EOF'
   sudo onesync-relayctl status    查看 Relay 运行状态
   sudo onesync-relayctl logs      查看 Relay 最近日志
+  sudo onesync-relayctl token     查看生成链接时填写的 Relay 令牌
   sudo onesync-relayctl start     启动 Relay 服务
   sudo onesync-relayctl stop      停止 Relay 服务
   sudo onesync-relayctl restart   重启 Relay 服务
@@ -26,10 +27,10 @@ EOF
 else
 	cat <<'EOF'
   未安装 Relay。推荐一键部署：
-  curl -fsSL https://raw.githubusercontent.com/202121000995/OneSync/main/packaging/acceptance-scripts/linux/deploy-relaytls.sh | sudo env RELAY_HOSTS=你的域名或IP RELAY_PORT=7443 sh
+  curl -fsSL https://raw.githubusercontent.com/202121000995/OneSync/main/packaging/acceptance-scripts/linux/deploy-relaytls.sh | sudo env RELAY_HOSTS=你的域名或IP RELAY_PORT=7443 RELAY_TOKEN=自定义令牌 sh
 
   中国大陆服务器可用代理：
-  curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/202121000995/OneSync/main/packaging/acceptance-scripts/linux/deploy-relaytls.sh | sudo env RELAY_HOSTS=你的域名或IP RELAY_PORT=7443 GH_PROXY=https://gh-proxy.org/ sh
+  curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/202121000995/OneSync/main/packaging/acceptance-scripts/linux/deploy-relaytls.sh | sudo env RELAY_HOSTS=你的域名或IP RELAY_PORT=7443 RELAY_TOKEN=自定义令牌 GH_PROXY=https://gh-proxy.org/ sh
 EOF
 fi
 
@@ -38,5 +39,6 @@ cat <<'EOF'
 提示：
   Relay TLS 地址格式是：域名或IP:端口
   例如：zz.31pk.top:7443
+  生成同步链接时同时填写 Relay TLS 地址和 Relay 令牌，目标端只粘贴同步链接即可。
   同步客户端菜单命令是：onesync
 EOF

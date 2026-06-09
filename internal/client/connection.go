@@ -69,7 +69,7 @@ func connectSource(
 	var relayed func(context.Context) (authenticatedConnection, error)
 	if credential.RelayEndpoint != "" {
 		relayed = func(ctx context.Context) (authenticatedConnection, error) {
-			session, err := connectRelay(ctx, credential.RelayEndpoint, credential.SessionID, relay.RoleSource, relayToken, clientTLS, maxPayload)
+			session, err := connectRelay(ctx, credential.RelayEndpoint, credential.SessionID, relay.RoleSource, relayToken, credential.RelayToken, clientTLS, maxPayload)
 			if err != nil {
 				return authenticatedConnection{}, fmt.Errorf("%w: %v", errConnectionUnavailable, err)
 			}
@@ -112,7 +112,7 @@ func connectTarget(
 		return targetConnection{}, fmt.Errorf("%w: %v", errConnectionUnavailable, directErr)
 	}
 	session, relayErr := connectRelay(
-		ctx, credential.RelayEndpoint, credential.SessionID, relay.RoleTarget, relayToken, clientTLS, maxPayload,
+		ctx, credential.RelayEndpoint, credential.SessionID, relay.RoleTarget, relayToken, credential.RelayToken, clientTLS, maxPayload,
 	)
 	if relayErr != nil {
 		if directConnected {
@@ -131,6 +131,7 @@ func connectRelay(
 	ctx context.Context,
 	endpoint, sessionID, role string,
 	token []byte,
+	accessToken string,
 	config *tls.Config,
 	maxPayload uint32,
 ) (network.Session, error) {
@@ -139,7 +140,7 @@ func connectRelay(
 	if err != nil {
 		return nil, fmt.Errorf("connect Relay TLS endpoint: %w", err)
 	}
-	if err := relay.Register(ctx, connection, sessionID, role, token); err != nil {
+	if err := relay.Register(ctx, connection, sessionID, role, token, accessToken); err != nil {
 		_ = connection.Close()
 		return nil, err
 	}

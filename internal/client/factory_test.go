@@ -211,6 +211,7 @@ func TestRunnersSynchronizeThroughRelayAfterDirectFailure(t *testing.T) {
 		MaxWaiting:  10,
 		MaxActive:   10,
 		MaxBytes:    16 << 20,
+		AccessToken: "relay-access-token",
 	})
 	if err != nil {
 		t.Fatalf("NewBroker() error = %v", err)
@@ -241,6 +242,7 @@ func TestRunnersSynchronizeThroughRelayAfterDirectFailure(t *testing.T) {
 		SessionID:     "relay-session",
 		Endpoint:      "127.0.0.1:1",
 		RelayEndpoint: relayServer.Addr().String(),
+		RelayToken:    "relay-access-token",
 		Token:         token,
 	}
 	sourceCredential := credential

@@ -91,6 +91,24 @@ func TestLinkCarriesCertificateBundle(t *testing.T) {
 	}
 }
 
+func TestLinkCarriesRelayToken(t *testing.T) {
+	service := NewLinkService()
+	service.random = fixedRandom
+	relayCertificatePEM := testRelayCertificatePEM(t)
+
+	encoded, err := service.IssueWithRelayCertificate("session-1", "192.168.1.10:7443", "relay.example:7443", "relay-secret", relayCertificatePEM)
+	if err != nil {
+		t.Fatalf("IssueWithRelayCertificate() error = %v", err)
+	}
+	link, err := service.Parse(encoded)
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+	if link.RelayToken != "relay-secret" {
+		t.Fatalf("RelayToken = %q, want relay-secret", link.RelayToken)
+	}
+}
+
 func TestLinkRejectsInvalidCertificate(t *testing.T) {
 	service := NewLinkService()
 	service.random = fixedRandom
@@ -103,6 +121,9 @@ func TestLinkRejectsMalformedAndUnsafeMetadata(t *testing.T) {
 	service := NewLinkService()
 	if _, err := service.Issue("../session", "endpoint", ""); err == nil {
 		t.Fatal("Issue() accepted an unsafe session ID")
+	}
+	if _, err := service.IssueWithRelayCertificate("session", "endpoint", "", "relay-secret", ""); err == nil {
+		t.Fatal("IssueWithRelayCertificate() accepted relay token without relay endpoint")
 	}
 	if _, err := service.Parse("not-base64!"); err == nil {
 		t.Fatal("Parse() accepted malformed input")

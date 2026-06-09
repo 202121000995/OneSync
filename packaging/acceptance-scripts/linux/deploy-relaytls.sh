@@ -46,8 +46,8 @@ proxy_url() {
 install_relay() {
 	if [ -z "${RELAY_HOSTS:-}" ]; then
 		printf 'RELAY_HOSTS is required. Example:\n' >&2
-		printf '  curl -fsSL https://raw.githubusercontent.com/%s/main/packaging/acceptance-scripts/linux/deploy-relaytls.sh | sudo env RELAY_HOSTS=1.2.3.4 RELAY_PORT=443 sh\n' "$REPO" >&2
-		printf '  curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/%s/main/packaging/acceptance-scripts/linux/deploy-relaytls.sh | sudo env RELAY_HOSTS=1.2.3.4 RELAY_PORT=443 GH_PROXY=https://gh-proxy.org/ sh\n' "$REPO" >&2
+		printf '  curl -fsSL https://raw.githubusercontent.com/%s/main/packaging/acceptance-scripts/linux/deploy-relaytls.sh | sudo env RELAY_HOSTS=1.2.3.4 RELAY_PORT=443 RELAY_TOKEN=your-secret sh\n' "$REPO" >&2
+		printf '  curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/%s/main/packaging/acceptance-scripts/linux/deploy-relaytls.sh | sudo env RELAY_HOSTS=1.2.3.4 RELAY_PORT=443 RELAY_TOKEN=your-secret GH_PROXY=https://gh-proxy.org/ sh\n' "$REPO" >&2
 		exit 1
 	fi
 
@@ -78,6 +78,7 @@ install_relay() {
 	printf 'Installing Relay TLS server...\n'
 	RELAY_HOSTS=$RELAY_HOSTS \
 	RELAY_PORT=$RELAY_PORT \
+	RELAY_TOKEN=${RELAY_TOKEN:-} \
 	ONESYNC_RELAY_CERT=${ONESYNC_RELAY_CERT:-} \
 	ONESYNC_RELAY_KEY=${ONESYNC_RELAY_KEY:-} \
 	"$stage/onesync-relayctl" install
@@ -87,11 +88,14 @@ install_relay() {
 
 	first_host=$(printf '%s' "$RELAY_HOSTS" | cut -d, -f1)
 	printf '\nRelay TLS address for OneSync link:\n%s:%s\n' "$first_host" "$RELAY_PORT"
+	printf '\nRelay token for OneSync link:\n'
+	onesync-relayctl token
 	printf '\nCommon menu command:\n'
 	printf '  onesyncr\n'
 	printf '\nCommon commands:\n'
 	printf '  sudo onesync-relayctl status\n'
 	printf '  sudo onesync-relayctl logs\n'
+	printf '  sudo onesync-relayctl token\n'
 	printf '  sudo onesync-relayctl restart\n'
 	printf '  sudo onesync-relayctl upgrade\n'
 	printf '  sudo onesync-relayctl uninstall\n'

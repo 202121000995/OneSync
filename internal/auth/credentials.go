@@ -22,6 +22,7 @@ type Credential struct {
 	SessionID        string `json:"session_id"`
 	Endpoint         string `json:"endpoint"`
 	RelayEndpoint    string `json:"relay_endpoint,omitempty"`
+	RelayToken       string `json:"relay_token,omitempty"`
 	CACertificatePEM string `json:"ca_certificate_pem,omitempty"`
 	Token            string `json:"token"`
 	PeerID           string `json:"peer_id,omitempty"`
@@ -209,7 +210,7 @@ func (s *CredentialStore) path(taskID string) string {
 }
 
 func validateCredential(credential Credential) error {
-	if err := validateLinkMetadata(credential.SessionID, credential.Endpoint, credential.RelayEndpoint, credential.CACertificatePEM); err != nil {
+	if err := validateLinkMetadata(credential.SessionID, credential.Endpoint, credential.RelayEndpoint, credential.RelayToken, credential.CACertificatePEM); err != nil {
 		return err
 	}
 	token, err := base64Token(credential.Token)

@@ -84,8 +84,9 @@ Relay command:
 | Check | Expected | Result | Notes |
 | --- | --- | --- | --- |
 | Relay starts | Logs show Relay listening |  |  |
-| Source and target trust Relay certificate | Relay TLS check is usable |  |  |
-| Source link includes Relay endpoint | Link test checks Relay |  |  |
+| Relay token is configured | `onesync-relayctl token` shows the token used in link generation |  |  |
+| Source link carries Relay certificate | Target does not need a separate Relay certificate file |  |  |
+| Source link includes Relay endpoint and token | Link test checks Relay |  |  |
 | Direct path unavailable or disabled | Direct may fail when expected |  |  |
 | Relay fallback succeeds | Target sync completes through Relay |  |  |
 | Relay-only source works without `-cert/-key` | Link generation requires Relay field |  |  |
@@ -94,7 +95,8 @@ Relay command:
 
 | Check | Expected | Result | Notes |
 | --- | --- | --- | --- |
-| Wrong or missing Relay CA on target | Relay "测试连接" fails certificate verification |  |  |
+| Wrong Relay token in generated link | Relay connection fails authentication |  |  |
+| Wrong or stale Relay certificate in link | Relay "测试连接" fails certificate verification |  |  |
 | Source certificate missing endpoint host | Link dialog warns before testing |  |  |
 | Source without cert and without Relay | Link generation is rejected |  |  |
 | Expired or consumed link | Join is rejected |  |  |

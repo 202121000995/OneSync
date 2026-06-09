@@ -234,7 +234,7 @@ func TestLinkIssueBundlesRelayCertificate(t *testing.T) {
 	}
 
 	issue := jsonRequest(http.MethodPost, "http://127.0.0.1/api/links", map[string]any{
-		"task_id": "source", "endpoint": "192.168.1.10:7443", "relay_endpoint": "relay.example:7443",
+		"task_id": "source", "endpoint": "192.168.1.10:7443", "relay_endpoint": "relay.example:7443", "relay_token": "relay-secret",
 	})
 	response := httptest.NewRecorder()
 	server.Handler().ServeHTTP(response, issue)
@@ -254,6 +254,9 @@ func TestLinkIssueBundlesRelayCertificate(t *testing.T) {
 	if fetcher.endpoint != "relay.example:7443" {
 		t.Fatalf("fetcher endpoint = %q", fetcher.endpoint)
 	}
+	if parsed.RelayToken != "relay-secret" {
+		t.Fatalf("RelayToken = %q, want relay-secret", parsed.RelayToken)
+	}
 	if !bytes.Contains([]byte(parsed.CACertificatePEM), []byte(sourceCertificatePEM)) ||
 		!bytes.Contains([]byte(parsed.CACertificatePEM), []byte(relayCertificatePEM)) {
 		t.Fatal("link did not include both source and Relay certificates")
@@ -264,6 +267,9 @@ func TestLinkIssueBundlesRelayCertificate(t *testing.T) {
 	}
 	if credential.CACertificatePEM != parsed.CACertificatePEM {
 		t.Fatal("source credential did not store bundled certificates")
+	}
+	if credential.RelayToken != "relay-secret" {
+		t.Fatalf("source credential RelayToken = %q, want relay-secret", credential.RelayToken)
 	}
 }
 

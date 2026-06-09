@@ -120,6 +120,8 @@
         <label>源端 TLS 地址<input name="endpoint" required placeholder="例如：192.168.1.10:7443"></label>
         <div id="endpoint-suggestions" class="suggestions"></div>
         <label>Relay TLS 地址（可选）<input name="relay_endpoint" placeholder="例如：relay.example.com:7443"></label>
+        <label>Relay 令牌（可选）<input name="relay_token" type="password" autocomplete="off" placeholder="部署 Relay 时生成或设置的访问令牌"></label>
+        <p class="hint">使用 Relay 令牌后，目标端仍只需要粘贴这一段同步链接，不需要单独传证书或令牌文件。</p>
         <textarea id="generated-link" rows="6" readonly></textarea>
         <div class="dialog-actions">
           <button id="generate-link" type="submit">生成链接并启动源端</button>
