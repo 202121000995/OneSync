@@ -78,6 +78,7 @@ func main() {
 		ConnectionTester:    connectionTester,
 		SyncPort:            *syncPort,
 		DirectTLSConfigured: serverTLS != nil,
+		DirectTLSHosts:      serverCertificateHosts(serverTLS),
 	})
 	if err != nil {
 		log.Fatal(err)
@@ -148,6 +149,22 @@ func loadClientTLS(caPath string) (*tls.Config, error) {
 	}
 	config.RootCAs = roots
 	return config, nil
+}
+
+func serverCertificateHosts(config *tls.Config) []string {
+	if config == nil || len(config.Certificates) == 0 || len(config.Certificates[0].Certificate) == 0 {
+		return nil
+	}
+	certificate, err := x509.ParseCertificate(config.Certificates[0].Certificate[0])
+	if err != nil {
+		return nil
+	}
+	hosts := make([]string, 0, len(certificate.IPAddresses)+len(certificate.DNSNames))
+	for _, ip := range certificate.IPAddresses {
+		hosts = append(hosts, ip.String())
+	}
+	hosts = append(hosts, certificate.DNSNames...)
+	return hosts
 }
 
 func dataDirectory() (string, error) {

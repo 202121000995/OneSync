@@ -8,7 +8,7 @@ const endpointSuggestions = document.querySelector("#endpoint-suggestions");
 const connectionResult = document.querySelector("#connection-result");
 const testLinkButton = document.querySelector("#test-link");
 const linkReadinessHint = document.querySelector("#link-readiness-hint");
-const defaultConfig = { sync_port: 7443, direct_tls_configured: false };
+const defaultConfig = { sync_port: 7443, direct_tls_configured: false, direct_tls_hosts: [] };
 let appConfig = { ...defaultConfig };
 
 async function api(path, options = {}) {
@@ -103,7 +103,7 @@ function issueLink(taskId) {
   linkForm.reset();
   linkForm.elements.task_id.value = taskId;
   linkForm.elements.endpoint.placeholder = `例如：192.168.1.10:${appConfig.sync_port}`;
-  linkReadinessHint.textContent = sourceReadinessWarning({ role: "source" });
+  updateLinkReadinessHint();
   generatedLink.value = "";
   renderEndpointSuggestions([]);
   dialog.showModal();
@@ -113,6 +113,40 @@ function issueLink(taskId) {
 function sourceReadinessWarning(task) {
   if (task.role !== "source" || appConfig.direct_tls_configured) return "";
   return "当前没有加载源端 TLS 证书：直连不会监听。只用 Relay 时请填写 Relay 地址；需要直连时请重启并提供 -cert 和 -key。";
+}
+
+function updateLinkReadinessHint() {
+  linkReadinessHint.textContent = sourceReadinessWarning({ role: "source" }) || certificateHostWarning();
+}
+
+function certificateHostWarning() {
+  if (!appConfig.direct_tls_configured) return "";
+  const endpoint = linkForm.elements.endpoint.value;
+  const host = endpointHost(endpoint);
+  if (!host) return "";
+  const certificateHosts = (appConfig.direct_tls_hosts || []).map((value) => String(value).toLowerCase());
+  if (certificateHosts.length === 0) {
+    return "当前源端证书没有 IP/DNS 地址，目标端可能无法验证这个直连地址。";
+  }
+  if (certificateHosts.some((name) => hostMatchesCertificate(host, name))) return "";
+  return `当前源端证书不包含 ${host}，目标端测试直连时会证书验证失败。请使用证书里的地址，或重新生成包含该地址的证书。`;
+}
+
+function endpointHost(endpoint) {
+  const value = endpoint.trim();
+  if (!value) return "";
+  try {
+    return new URL(`tls://${value}`).hostname.replace(/^\[|\]$/g, "").toLowerCase();
+  } catch {
+    return "";
+  }
+}
+
+function hostMatchesCertificate(host, certificateName) {
+  if (host === certificateName) return true;
+  if (!certificateName.startsWith("*.")) return false;
+  const suffix = certificateName.slice(1);
+  return host.endsWith(suffix) && host.slice(0, -suffix.length).indexOf(".") === -1;
 }
 
 linkForm.addEventListener("submit", async (event) => {
@@ -160,6 +194,7 @@ function renderEndpointSuggestions(suggestions) {
     button.textContent = suggestion;
     button.addEventListener("click", () => {
       linkForm.elements.endpoint.value = suggestion;
+      updateLinkReadinessHint();
       notify("已填入源端 TLS 地址");
     });
     endpointSuggestions.append(button);
@@ -186,6 +221,8 @@ document.querySelector("#create-form").addEventListener("submit", async (event) 
     loadTasks();
   } catch (error) { notify(error.message); }
 });
+
+linkForm.elements.endpoint.addEventListener("input", updateLinkReadinessHint);
 
 document.querySelector("#join-form").addEventListener("submit", async (event) => {
   event.preventDefault();

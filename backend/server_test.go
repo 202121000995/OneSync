@@ -224,6 +224,7 @@ func TestConfigAPIReportsSyncPort(t *testing.T) {
 	server, err := NewServerWithOptions(manager, auth.NewLinkService(), credentials, Options{
 		SyncPort:            9443,
 		DirectTLSConfigured: true,
+		DirectTLSHosts:      []string{"192.168.1.10", "source.local"},
 	})
 	if err != nil {
 		t.Fatalf("NewServerWithOptions() error = %v", err)
@@ -233,7 +234,8 @@ func TestConfigAPIReportsSyncPort(t *testing.T) {
 	server.Handler().ServeHTTP(response, request)
 	if response.Code != http.StatusOK ||
 		!bytes.Contains(response.Body.Bytes(), []byte(`"sync_port":9443`)) ||
-		!bytes.Contains(response.Body.Bytes(), []byte(`"direct_tls_configured":true`)) {
+		!bytes.Contains(response.Body.Bytes(), []byte(`"direct_tls_configured":true`)) ||
+		!bytes.Contains(response.Body.Bytes(), []byte(`"direct_tls_hosts":["192.168.1.10","source.local"]`)) {
 		t.Fatalf("config response status = %d, body = %s", response.Code, response.Body.String())
 	}
 }

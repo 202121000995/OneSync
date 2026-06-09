@@ -69,6 +69,8 @@ Open the management page. On Windows 10 or newer it opens automatically. On Linu
 
 If the source task card or link dialog says the source TLS certificate is not loaded, stop `onesync` and restart it with both `-cert source.crt` and `-key source.key`. Direct synchronization will not listen without those two files.
 
+If the link dialog says the source certificate does not contain the endpoint host, use an endpoint that appears in the certificate, or regenerate the certificate with the IP address or DNS name that the target computer will use.
+
 Create a source task and choose the folder to send. Click "生成链接". In the dialog, choose a suggested private IPv4 endpoint or enter the source synchronization endpoint manually, for example:
 
 ```text
@@ -142,6 +144,7 @@ If "测试连接" fails for direct mode:
 - Confirm the source firewall allows the synchronization port.
 - Confirm the target was started with `-ca source.crt` or a CA bundle that includes `source.crt`.
 - Confirm the certificate includes the exact IP address or DNS name used in the link endpoint.
+- If the source management page warns that the certificate does not contain the endpoint host, fix that warning before testing from the target computer.
 
 If "测试连接" fails for Relay:
 

@@ -57,6 +57,7 @@ type Options struct {
 	EndpointSuggester   endpointSuggester
 	SyncPort            int
 	DirectTLSConfigured bool
+	DirectTLSHosts      []string
 }
 
 // Server provides the local management API and web page.
@@ -68,6 +69,7 @@ type Server struct {
 	endpointSuggester   endpointSuggester
 	syncPort            int
 	directTLSConfigured bool
+	directTLSHosts      []string
 	handler             http.Handler
 }
 
@@ -89,6 +91,7 @@ func NewServerWithOptions(manager taskManager, links *auth.LinkService, credenti
 		endpointSuggester:   options.EndpointSuggester,
 		syncPort:            options.SyncPort,
 		directTLSConfigured: options.DirectTLSConfigured,
+		directTLSHosts:      append([]string(nil), options.DirectTLSHosts...),
 	}
 	if server.syncPort == 0 {
 		server.syncPort = DefaultSyncPort
@@ -161,9 +164,14 @@ func (s *Server) listTasks(writer http.ResponseWriter, request *http.Request) {
 }
 
 func (s *Server) config(writer http.ResponseWriter, _ *http.Request) {
+	directTLSHosts := s.directTLSHosts
+	if directTLSHosts == nil {
+		directTLSHosts = []string{}
+	}
 	writeJSON(writer, http.StatusOK, map[string]any{
 		"sync_port":             s.syncPort,
 		"direct_tls_configured": s.directTLSConfigured,
+		"direct_tls_hosts":      directTLSHosts,
 	})
 }
 
