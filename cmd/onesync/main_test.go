@@ -112,7 +112,7 @@ func TestAutomaticCertificateReadyRequiresCurrentHosts(t *testing.T) {
 	if !automaticCertificateReady(certPath, keyPath, []string{"127.0.0.1"}, now) {
 		t.Fatal("automaticCertificateReady() rejected matching certificate")
 	}
-	if automaticCertificateReady(certPath, keyPath, []string{"127.0.0.1", "192.168.1.36"}, now) {
+	if automaticCertificateReady(certPath, keyPath, []string{"127.0.0.1", "192.0.2.36"}, now) {
 		t.Fatal("automaticCertificateReady() accepted certificate missing current host")
 	}
 }

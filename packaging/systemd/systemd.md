@@ -50,7 +50,7 @@ Relay requires a TLS certificate and private key:
 
 ```sh
 sudo install -m 0700 -d /etc/onesync
-onesync-cert -hosts relay.example.com,203.0.113.10 -cert relay.crt -key relay.key
+onesync-cert -hosts relay.example.com -cert relay.crt -key relay.key
 sudo install -m 0644 relay.crt /etc/onesync/relay.crt
 sudo install -m 0600 relay.key /etc/onesync/relay.key
 sudo systemctl enable --now onesync-relay.service

@@ -76,8 +76,8 @@ sudo onesyncctl uninstall
 To upgrade a Linux client without relying on GitHub API auto-discovery, pass a fixed release tag or a direct Linux package URL:
 
 ```sh
-sudo env RELEASE_TAG=acceptance-22ae3cf GH_PROXY=https://gh-proxy.org onesyncctl upgrade
-sudo env PACKAGE_URL=https://gh-proxy.org/https://github.com/202121000995/OneSync/releases/download/acceptance-22ae3cf/onesync-acceptance-linux-amd64-22ae3cf.tar.gz onesyncctl upgrade
+sudo env RELEASE_TAG=acceptance-xxxxxxx GH_PROXY=https://gh-proxy.org onesyncctl upgrade
+sudo env PACKAGE_URL=https://gh-proxy.org/https://github.com/202121000995/OneSync/releases/download/acceptance-xxxxxxx/onesync-acceptance-linux-amd64-xxxxxxx.tar.gz onesyncctl upgrade
 ```
 
 The Linux service listens on `0.0.0.0:8765` by default and requires a management account. Open `http://server-ip:8765`, then set the account and password on first access. To keep it local-only instead, install with `sudo ONESYNC_WEB_BIND=127.0.0.1 ./onesyncctl install`.
@@ -91,13 +91,13 @@ curl -fsSL https://raw.githubusercontent.com/202121000995/OneSync/main/packaging
 If the server cannot reach GitHub directly, use a GitHub proxy. The proxy is used both to download the deployment script and to download the latest Linux package inside the script:
 
 ```sh
-curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/202121000995/OneSync/main/packaging/acceptance-scripts/linux/deploy-onesync.sh | sudo env RELEASE_TAG=acceptance-f93bf8a GH_PROXY=https://gh-proxy.org/ sh
+curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/202121000995/OneSync/main/packaging/acceptance-scripts/linux/deploy-onesync.sh | sudo env RELEASE_TAG=acceptance-xxxxxxx GH_PROXY=https://gh-proxy.org/ sh
 ```
 
 If the GitHub API or raw script cache is blocked, pass the Linux package URL directly:
 
 ```sh
-curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/202121000995/OneSync/main/packaging/acceptance-scripts/linux/deploy-onesync.sh | sudo env PACKAGE_URL=https://gh-proxy.org/https://github.com/202121000995/OneSync/releases/download/acceptance-f93bf8a/onesync-acceptance-linux-amd64-f93bf8a.tar.gz sh
+curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/202121000995/OneSync/main/packaging/acceptance-scripts/linux/deploy-onesync.sh | sudo env PACKAGE_URL=https://gh-proxy.org/https://github.com/202121000995/OneSync/releases/download/acceptance-xxxxxxx/onesync-acceptance-linux-amd64-xxxxxxx.tar.gz sh
 ```
 
 After installing the Linux client, run `onesync` to show the Chinese client command menu with common status, log, restart, upgrade, and uninstall commands.
@@ -107,19 +107,19 @@ The installers place service binaries under `/usr/local/bin` and also create com
 For a Linux Relay server, use the one-command Relay TLS deployment script. `RELAY_HOSTS` is the Relay server domain or public IP without the port, `RELAY_PORT` is the port clients will use, and `RELAY_TOKEN` is the Relay access token. If `RELAY_TOKEN` is omitted, the installer generates one and stores it in `/etc/onesync/relay.token`:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/202121000995/OneSync/main/packaging/acceptance-scripts/linux/deploy-relaytls.sh | sudo env RELAY_HOSTS=203.0.113.10 RELAY_PORT=443 RELAY_TOKEN=your-secret sh
+curl -fsSL https://raw.githubusercontent.com/202121000995/OneSync/main/packaging/acceptance-scripts/linux/deploy-relaytls.sh | sudo env RELAY_HOSTS=relay.example.com RELAY_PORT=443 RELAY_TOKEN=your-secret sh
 ```
 
 If the server cannot reach GitHub directly, use a GitHub proxy. The proxy is used both to download the deployment script and to download the latest Linux package inside the script:
 
 ```sh
-curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/202121000995/OneSync/main/packaging/acceptance-scripts/linux/deploy-relaytls.sh | sudo env RELAY_HOSTS=203.0.113.10 RELAY_PORT=443 RELAY_TOKEN=your-secret RELEASE_TAG=acceptance-f93bf8a GH_PROXY=https://gh-proxy.org/ sh
+curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/202121000995/OneSync/main/packaging/acceptance-scripts/linux/deploy-relaytls.sh | sudo env RELAY_HOSTS=relay.example.com RELAY_PORT=443 RELAY_TOKEN=your-secret RELEASE_TAG=acceptance-xxxxxxx GH_PROXY=https://gh-proxy.org/ sh
 ```
 
 If the GitHub API or raw script cache is blocked, pass the Linux package URL directly:
 
 ```sh
-curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/202121000995/OneSync/main/packaging/acceptance-scripts/linux/deploy-relaytls.sh | sudo env RELAY_HOSTS=203.0.113.10 RELAY_PORT=443 RELAY_TOKEN=your-secret PACKAGE_URL=https://gh-proxy.org/https://github.com/202121000995/OneSync/releases/download/acceptance-f93bf8a/onesync-acceptance-linux-amd64-f93bf8a.tar.gz sh
+curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/202121000995/OneSync/main/packaging/acceptance-scripts/linux/deploy-relaytls.sh | sudo env RELAY_HOSTS=relay.example.com RELAY_PORT=443 RELAY_TOKEN=your-secret PACKAGE_URL=https://gh-proxy.org/https://github.com/202121000995/OneSync/releases/download/acceptance-xxxxxxx/onesync-acceptance-linux-amd64-xxxxxxx.tar.gz sh
 ```
 
 After Relay deployment, use `onesyncr` to view the Chinese Relay command menu.
@@ -127,7 +127,7 @@ After Relay deployment, use `onesyncr` to view the Chinese Relay command menu.
 After deployment, enter the Relay TLS address and Relay token when generating a synchronization link:
 
 ```text
-Relay TLS 地址: 203.0.113.10:443
+Relay TLS 地址: relay.example.com:443
 Relay 令牌: your-secret
 ```
 
@@ -136,8 +136,8 @@ The generated synchronization link carries the Relay address, Relay token, sourc
 If you already downloaded the Linux package, you can also install Relay from the extracted directory:
 
 ```sh
-sudo RELAY_HOSTS=relay.example.com,203.0.113.10 ./onesync-relayctl install
-sudo RELAY_HOSTS=203.0.113.10 RELAY_PORT=443 RELAY_TOKEN=your-secret ./onesync-relayctl install
+sudo RELAY_HOSTS=relay.example.com ./onesync-relayctl install
+sudo RELAY_HOSTS=relay.example.com RELAY_PORT=443 RELAY_TOKEN=your-secret ./onesync-relayctl install
 sudo onesync-relayctl start
 sudo onesync-relayctl status
 sudo onesync-relayctl logs
@@ -151,11 +151,11 @@ sudo onesync-relayctl uninstall
 To upgrade Relay without relying on GitHub API auto-discovery, pass a fixed release tag or a direct Linux package URL:
 
 ```sh
-sudo env RELEASE_TAG=acceptance-22ae3cf GH_PROXY=https://gh-proxy.org onesync-relayctl upgrade
-sudo env PACKAGE_URL=https://gh-proxy.org/https://github.com/202121000995/OneSync/releases/download/acceptance-22ae3cf/onesync-acceptance-linux-amd64-22ae3cf.tar.gz onesync-relayctl upgrade
+sudo env RELEASE_TAG=acceptance-xxxxxxx GH_PROXY=https://gh-proxy.org onesync-relayctl upgrade
+sudo env PACKAGE_URL=https://gh-proxy.org/https://github.com/202121000995/OneSync/releases/download/acceptance-xxxxxxx/onesync-acceptance-linux-amd64-xxxxxxx.tar.gz onesync-relayctl upgrade
 ```
 
-`RELAY_HOSTS` is written into the Relay TLS certificate. It should contain the Relay domain or public IP, without the port. `RELAY_PORT` controls the listening port. `RELAY_TOKEN` controls who can use the Relay server. When creating a synchronization link, enter the Relay TLS address as `host:port`, for example `203.0.113.10:443`, and enter the Relay token shown by `sudo onesync-relayctl token`.
+`RELAY_HOSTS` is written into the Relay TLS certificate. It should contain the Relay domain or public IP, without the port. `RELAY_PORT` controls the listening port. `RELAY_TOKEN` controls who can use the Relay server. When creating a synchronization link, enter the Relay TLS address as `host:port`, for example `relay.example.com:443`, and enter the Relay token shown by `sudo onesync-relayctl token`.
 
 By default, `onesync-relayctl install` generates a private self-signed Relay TLS certificate under `/etc/onesync/relay.crt` and `/etc/onesync/relay.key`, and a Relay access token under `/etc/onesync/relay.token`. To use your own certificate, install with `ONESYNC_RELAY_CERT=/path/fullchain.crt ONESYNC_RELAY_KEY=/path/private.key`.
 
