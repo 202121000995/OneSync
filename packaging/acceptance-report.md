@@ -33,7 +33,7 @@ When using `packaging/package-acceptance.sh`, attach or paste `PACKAGE-SHA256SUM
 
 | Certificate | Generated on | Hosts/SANs | How it is trusted | Notes |
 | --- | --- | --- | --- | --- |
-| source.crt |  |  | Carried in synchronization link | Do not copy source.key |
+| Automatic source TLS certificate |  |  | Carried in synchronization link | Source private key stays on source computer |
 | relay.crt |  |  |  |  |
 | onesync-ca.crt |  |  |  |  |
 
@@ -69,7 +69,7 @@ Relay command:
 | Check | Expected | Result | Notes |
 | --- | --- | --- | --- |
 | Source management page opens locally | `http://127.0.0.1:8765` opens |  |  |
-| Source certificate is loaded | No "TLS certificate is not loaded" warning |  |  |
+| Source certificate is loaded automatically | No source TLS warning |  |  |
 | Link dialog certificate endpoint is available | "证书地址" suggestion appears |  |  |
 | Link dialog endpoint matches certificate | No certificate mismatch warning |  |  |
 | Source task starts | State becomes "连接中" or waits for target |  |  |

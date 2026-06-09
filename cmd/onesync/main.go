@@ -9,14 +9,19 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/202121000995/OneSync/backend"
 	"github.com/202121000995/OneSync/internal/auth"
+	"github.com/202121000995/OneSync/internal/certutil"
 	"github.com/202121000995/OneSync/internal/client"
 	"github.com/202121000995/OneSync/internal/diagnostic"
+	"github.com/202121000995/OneSync/internal/netutil"
 	"github.com/202121000995/OneSync/internal/platform"
 	"github.com/202121000995/OneSync/internal/task"
 )
@@ -29,8 +34,8 @@ func main() {
 	port := flag.Int("port", 8765, "local management port")
 	syncPort := flag.Int("sync-port", backend.DefaultSyncPort, "default TLS synchronization port suggested by the management page")
 	dataDir := flag.String("data-dir", defaultDataDir, "OneSync data directory")
-	certificatePath := flag.String("cert", "", "TLS certificate file for source tasks")
-	privateKeyPath := flag.String("key", "", "TLS private key file for source tasks")
+	certificatePath := flag.String("cert", "", "optional custom TLS certificate file for source tasks")
+	privateKeyPath := flag.String("key", "", "optional custom TLS private key file for source tasks")
 	caPath := flag.String("ca", "", "optional trusted CA certificate file")
 	logPath := flag.String("log-file", "", "optional log file path")
 	syncInterval := flag.Duration("sync-interval", client.DefaultSyncInterval, "time between completed synchronization cycles")
@@ -43,7 +48,7 @@ func main() {
 	if logFile != nil {
 		defer logFile.Close()
 	}
-	serverTLS, err := loadServerTLS(*certificatePath, *privateKeyPath)
+	serverTLS, err := loadOrCreateServerTLS(*certificatePath, *privateKeyPath, *dataDir, *syncPort)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -117,9 +122,6 @@ func configureLogging(logPath string) (*os.File, error) {
 }
 
 func loadServerTLS(certificatePath, privateKeyPath string) (*tls.Config, error) {
-	if certificatePath == "" && privateKeyPath == "" {
-		return nil, nil
-	}
 	if certificatePath == "" || privateKeyPath == "" {
 		return nil, errors.New("-cert and -key must be provided together")
 	}
@@ -131,6 +133,77 @@ func loadServerTLS(certificatePath, privateKeyPath string) (*tls.Config, error) 
 		Certificates: []tls.Certificate{certificate},
 		MinVersion:   tls.VersionTLS13,
 	}, nil
+}
+
+func loadOrCreateServerTLS(certificatePath, privateKeyPath, dataDir string, syncPort int) (*tls.Config, error) {
+	if certificatePath != "" || privateKeyPath != "" {
+		return loadServerTLS(certificatePath, privateKeyPath)
+	}
+	hosts, err := automaticCertificateHosts(syncPort)
+	if err != nil {
+		return nil, err
+	}
+	certificatePath = filepath.Join(dataDir, "certs", "source.crt")
+	privateKeyPath = filepath.Join(dataDir, "certs", "source.key")
+	if !automaticCertificateReady(certificatePath, privateKeyPath, hosts, time.Now()) {
+		if err := certutil.Generate(certutil.Options{
+			Hosts:    hosts,
+			CertPath: certificatePath,
+			KeyPath:  privateKeyPath,
+			Validity: 10 * 365 * 24 * time.Hour,
+		}); err != nil {
+			return nil, fmt.Errorf("create automatic source TLS certificate: %w", err)
+		}
+		log.Printf("Generated automatic source TLS certificate for: %s", strings.Join(hosts, ", "))
+	}
+	return loadServerTLS(certificatePath, privateKeyPath)
+}
+
+func automaticCertificateHosts(syncPort int) ([]string, error) {
+	suggestions, err := netutil.LocalEndpointSuggestions(syncPort)
+	if err != nil {
+		return nil, err
+	}
+	seen := map[string]struct{}{
+		"localhost": {},
+		"127.0.0.1": {},
+	}
+	for _, suggestion := range suggestions {
+		host, _, err := net.SplitHostPort(suggestion)
+		if err != nil {
+			continue
+		}
+		host = strings.Trim(host, "[]")
+		if host != "" {
+			seen[host] = struct{}{}
+		}
+	}
+	hosts := make([]string, 0, len(seen))
+	for host := range seen {
+		hosts = append(hosts, host)
+	}
+	sort.Strings(hosts)
+	return hosts, nil
+}
+
+func automaticCertificateReady(certificatePath, privateKeyPath string, hosts []string, now time.Time) bool {
+	config, err := loadServerTLS(certificatePath, privateKeyPath)
+	if err != nil || config == nil || len(config.Certificates) == 0 || len(config.Certificates[0].Certificate) == 0 {
+		return false
+	}
+	certificate, err := x509.ParseCertificate(config.Certificates[0].Certificate[0])
+	if err != nil {
+		return false
+	}
+	if !certificate.NotAfter.After(now.Add(24 * time.Hour)) {
+		return false
+	}
+	for _, host := range hosts {
+		if err := certificate.VerifyHostname(host); err != nil {
+			return false
+		}
+	}
+	return true
 }
 
 func loadClientTLS(caPath string) (*tls.Config, error) {

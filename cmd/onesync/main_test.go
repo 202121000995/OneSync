@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto/tls"
+	"crypto/x509"
 	"log"
 	"os"
 	"path/filepath"
@@ -63,11 +64,75 @@ func TestServerCertificateHosts(t *testing.T) {
 	}
 }
 
+func TestLoadOrCreateServerTLSGeneratesAutomaticCertificate(t *testing.T) {
+	root := t.TempDir()
+	config, err := loadOrCreateServerTLS("", "", root, 7443)
+	if err != nil {
+		t.Fatalf("loadOrCreateServerTLS() error = %v", err)
+	}
+	if config == nil || len(config.Certificates) != 1 {
+		t.Fatalf("config = %+v, want one certificate", config)
+	}
+	certPath := filepath.Join(root, "certs", "source.crt")
+	keyPath := filepath.Join(root, "certs", "source.key")
+	if _, err := os.Stat(certPath); err != nil {
+		t.Fatalf("source certificate was not written: %v", err)
+	}
+	info, err := os.Stat(keyPath)
+	if err != nil {
+		t.Fatalf("source private key was not written: %v", err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("key permissions = %o, want 0600", info.Mode().Perm())
+	}
+	certificate := parseServerCertificate(t, config)
+	verifyHost(t, certificate, "localhost")
+	verifyHost(t, certificate, "127.0.0.1")
+}
+
+func TestAutomaticCertificateReadyRequiresCurrentHosts(t *testing.T) {
+	root := t.TempDir()
+	certPath := filepath.Join(root, "source.crt")
+	keyPath := filepath.Join(root, "source.key")
+	now := time.Now().UTC()
+	if err := certutil.Generate(certutil.Options{
+		Hosts:    []string{"127.0.0.1"},
+		CertPath: certPath,
+		KeyPath:  keyPath,
+		Validity: 48 * time.Hour,
+		Now:      func() time.Time { return now },
+	}); err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+	if !automaticCertificateReady(certPath, keyPath, []string{"127.0.0.1"}, now) {
+		t.Fatal("automaticCertificateReady() rejected matching certificate")
+	}
+	if automaticCertificateReady(certPath, keyPath, []string{"127.0.0.1", "192.168.1.36"}, now) {
+		t.Fatal("automaticCertificateReady() accepted certificate missing current host")
+	}
+}
+
 func TestServerCertificateHostsHandlesMissingCertificate(t *testing.T) {
 	if hosts := serverCertificateHosts(nil); hosts != nil {
 		t.Fatalf("serverCertificateHosts(nil) = %v", hosts)
 	}
 	if hosts := serverCertificateHosts(&tls.Config{}); hosts != nil {
 		t.Fatalf("serverCertificateHosts(empty) = %v", hosts)
+	}
+}
+
+func parseServerCertificate(t *testing.T, config *tls.Config) *x509.Certificate {
+	t.Helper()
+	certificate, err := x509.ParseCertificate(config.Certificates[0].Certificate[0])
+	if err != nil {
+		t.Fatalf("ParseCertificate() error = %v", err)
+	}
+	return certificate
+}
+
+func verifyHost(t *testing.T, certificate *x509.Certificate, host string) {
+	t.Helper()
+	if err := certificate.VerifyHostname(host); err != nil {
+		t.Fatalf("certificate does not verify for %s: %v", host, err)
 	}
 }

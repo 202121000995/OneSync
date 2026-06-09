@@ -45,11 +45,11 @@ packaging/package-acceptance.sh dist/acceptance dist/acceptance-packages
 Copy the Windows zip to Windows source or target computers. Copy the Linux tar.gz to Linux source, target, or Relay computers. Record `dist/acceptance-packages/PACKAGE-SHA256SUMS.txt` in the acceptance report.
 Each package also includes `preflight-checklist.md`.
 
-The packages include starter scripts. The source certificate script automatically detects private IPv4 addresses on the source computer, then the web page lets you choose or type the endpoint used in the link:
+The packages include starter scripts. OneSync automatically prepares and loads the source TLS certificate when the source service starts, then the web page lets you choose or type the endpoint used in the link:
 
-- Windows source: `make-source-cert.cmd`, then `start-source.cmd`.
+- Windows source: run `start-source.cmd`.
 - Windows target: run `start-target.cmd`, then paste the generated link.
-- Linux source: `./make-source-cert.sh`, then `./start-source.sh`.
+- Linux source: run `./start-source.sh`.
 - Linux target: run `./start-target.sh`, then paste the generated link.
 - Linux Relay: `./make-relay-cert.sh`, then `./start-relay.sh`.
 
@@ -71,39 +71,27 @@ GOOS=linux GOARCH=amd64 go build -o onesync-relay-linux ./cmd/relay
 GOOS=linux GOARCH=amd64 go build -o onesync-cert-linux ./cmd/onesync-cert
 ```
 
-## Create a local certificate
+## Source TLS certificate
 
-Generate a TLS certificate on the source computer. The starter script includes detected private IPv4 addresses, `localhost`, and `127.0.0.1`.
+For normal source and target acceptance, do not manually create or copy source certificate files. When OneSync starts without `-cert` and `-key`, it automatically writes and loads a source TLS certificate under the OneSync data directory. The generated synchronization link carries the public certificate to the target.
 
-```sh
-# Windows
-make-source-cert.cmd
-
-# Linux
-./make-source-cert.sh
-```
-
-Keep `source.key` private. The source public certificate is included in generated synchronization links, so direct-mode targets do not need a separate `source.crt` file.
-
-The generated certificate is a local self-signed certificate for private testing or small trusted deployments. It is not a production certificate lifecycle system. If automatic IP detection misses the address you need, set `SOURCE_HOSTS` manually before running the certificate script.
-
-If the source LAN IP changes, generate a new certificate that includes the new IP address. Certificate verification is strict, so a certificate for `192.168.1.10` will not verify when the target connects to `192.168.1.25`.
+If the source LAN IP changes, restart OneSync on the source computer. The automatic certificate will be checked against the current private IPv4 addresses and refreshed when needed. The link endpoint still needs to use the address that the target can reach.
 
 ## Direct connection
 
 On the source computer:
 
 ```sh
-onesync -cert source.crt -key source.key -ca source.crt -sync-interval 10s
+onesync -sync-interval 10s
 ```
 
 Open the management page. On Windows 10 or newer it opens automatically. On Linux, open `http://127.0.0.1:8765` locally, or use a trusted SSH tunnel.
 
-If the source task card or link dialog says the source TLS certificate is not loaded, stop `onesync` and restart it with both `-cert source.crt` and `-key source.key`. Direct synchronization will not listen without those two files.
+If the source task card or link dialog says the source TLS certificate did not load automatically, restart OneSync. For Relay-only testing, fill the Relay TLS address before generating the link.
 
-If you intentionally run without a source certificate, fill the Relay TLS address before generating the link. OneSync rejects links that have neither a usable source certificate nor a Relay address.
+OneSync rejects links that have neither a usable source certificate nor a Relay address.
 
-If the link dialog says the source certificate does not contain the endpoint host, choose one of the "证书地址" buttons when it is reachable from the target computer, or regenerate the certificate with the IP address or DNS name that the target computer will use.
+If the link dialog says the source certificate does not contain the endpoint host, choose one of the "证书地址" buttons when it is reachable from the target computer, or restart OneSync on the source computer so the automatic certificate refreshes for the current network.
 
 Create a source task and choose the folder to send. Click "生成链接并启动". In the dialog, first try a "证书地址" suggestion that the target computer can reach. If it is not reachable, enter another source synchronization endpoint manually, for example:
 
@@ -152,7 +140,7 @@ cp relay.crt onesync-relay-ca.crt
 Start the source and target with the Relay CA bundle when testing Relay:
 
 ```sh
-onesync -cert source.crt -key source.key -ca onesync-relay-ca.crt -sync-interval 10s
+onesync -ca onesync-relay-ca.crt -sync-interval 10s
 onesync -ca onesync-relay-ca.crt -sync-interval 10s
 ```
 
@@ -166,19 +154,17 @@ Click "生成链接并启动源端" before testing the link on the target comput
 
 On the target computer, "测试连接" checks both the direct source endpoint and the Relay TLS endpoint when Relay is present. The target first tries the direct source endpoint. If it cannot connect or authenticate directly, it falls back to Relay.
 
-For Relay-only acceptance, the source can run without `-cert` and `-key` as long as the generated link has a Relay address. The management page will warn that direct synchronization will not listen; that is expected for Relay-only use. Keep the direct endpoint field filled with the source address shown in the link form, and fill the Relay field with the reachable Relay TLS address.
+For Relay acceptance, keep the direct endpoint field filled with the source address shown in the link form, and fill the Relay field with the reachable Relay TLS address. The target first tries direct mode, then falls back to Relay when direct mode is not usable.
 
 ## Troubleshooting
 
 If "测试连接" fails for direct mode:
 
 - Confirm the source task is started.
-- Confirm the source was started with `-cert` and `-key`.
 - Confirm the link endpoint is the synchronization endpoint, such as `192.168.1.10:7443`, not `127.0.0.1:8765`.
 - Confirm the source firewall allows the synchronization port.
-- Confirm the target is using a link generated by the source after the source certificate was loaded.
-- Confirm the certificate includes the exact IP address or DNS name used in the link endpoint.
-- If the source management page warns that the certificate does not contain the endpoint host, fix that warning before testing from the target computer.
+- Confirm the target is using a link generated by the source after OneSync started.
+- Confirm the link dialog uses a "证书地址" suggestion that the target can reach, or restart the source after the source IP changes.
 
 If "测试连接" fails for Relay:
 

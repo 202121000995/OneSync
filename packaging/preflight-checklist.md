@@ -18,24 +18,19 @@ Use this checklist before a real multi-machine acceptance run. Fill the blanks f
 - [ ] Windows computers use the Windows zip.
 - [ ] Linux computers use the Linux tar.gz.
 - [ ] Source and target packages are from the same commit.
-- [ ] Source certificate script detected the private IPv4 address that the target can reach, or `SOURCE_HOSTS` was set manually.
+- [ ] Source OneSync was started once so it can automatically prepare the source TLS certificate.
 - [ ] Logs folder exists or will be created by the starter scripts.
 
 ## 3. Direct mode
 
-Before generating the source certificate:
+Before generating the source link:
 
 - [ ] Confirm the source LAN IP from the target computer's network, not from the source computer alone.
 - [ ] Confirm the synchronization port. Default is `7443`.
 - [ ] Confirm the source firewall allows the synchronization port.
 - [ ] Confirm the management page port `8765` is only opened locally on each computer.
 - [ ] If the source has multiple network cards, note which private IPv4 address the target should use.
-
-Before generating the source link:
-
-- [ ] Source certificate includes the exact IP address or DNS name used in the direct endpoint.
-- [ ] Link dialog "证书地址" includes the endpoint chosen for the target, or the certificate was regenerated with `SOURCE_HOSTS`.
-- [ ] Source started with both `-cert` and `-key`.
+- [ ] Link dialog "证书地址" includes the endpoint chosen for the target; if the source IP changed, restart source OneSync and reopen the dialog.
 - [ ] Target is using the generated link that includes the source public certificate.
 - [ ] Source link was generated with "生成链接并启动源端" before target clicks "测试连接".
 

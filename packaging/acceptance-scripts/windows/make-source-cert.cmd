@@ -2,6 +2,7 @@
 setlocal
 
 rem Override SOURCE_HOSTS only when automatic IP detection is not enough.
+rem Normal source startup does not need this script; OneSync prepares source TLS automatically.
 if "%SOURCE_HOSTS%"=="" (
   for /f "usebackq delims=" %%H in (`powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0detect-source-hosts.ps1"`) do set "SOURCE_HOSTS=%%H"
 )

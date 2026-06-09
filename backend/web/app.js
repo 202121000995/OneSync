@@ -183,7 +183,7 @@ function issueLink(taskId) {
 
 function sourceReadinessWarning(task) {
   if (task.role !== "source" || appConfig.direct_tls_configured) return "";
-  return "当前没有加载源端 TLS 证书：直连不会监听。只用 Relay 时请填写 Relay 地址；需要直连时请重启并提供 -cert 和 -key。";
+  return "源端 TLS 证书没有自动加载成功：直连暂不可用。请重启 OneSync；临时只用 Relay 时请填写 Relay 地址。";
 }
 
 function updateLinkReadinessHint() {
@@ -226,7 +226,7 @@ linkForm.addEventListener("submit", async (event) => {
   const endpoint = String(data.get("endpoint") || "").trim();
   const relayEndpoint = String(data.get("relay_endpoint") || "").trim();
   if (!appConfig.direct_tls_configured && !relayEndpoint) {
-    notify("请填写 Relay TLS 地址，或重启时提供 -cert 和 -key 后再生成直连链接。");
+    notify("源端 TLS 证书没有自动加载成功，请重启 OneSync；临时只用 Relay 时请填写 Relay TLS 地址。");
     return;
   }
   try {

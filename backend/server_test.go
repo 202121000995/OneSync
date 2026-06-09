@@ -154,7 +154,7 @@ func TestLinkIssueRejectsUnusableSourceWithoutTLSOrRelay(t *testing.T) {
 	response := httptest.NewRecorder()
 	server.Handler().ServeHTTP(response, request)
 	if response.Code != http.StatusBadRequest ||
-		!bytes.Contains(response.Body.Bytes(), []byte("source link requires a TLS certificate or Relay endpoint")) {
+		!bytes.Contains(response.Body.Bytes(), []byte("source direct connection is not ready; restart OneSync or enter a Relay endpoint")) {
 		t.Fatalf("issue status = %d, body = %s", response.Code, response.Body.String())
 	}
 	if _, err := credentials.Load("source"); err == nil {

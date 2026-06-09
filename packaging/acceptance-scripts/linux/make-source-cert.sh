@@ -2,6 +2,7 @@
 set -eu
 
 # Override SOURCE_HOSTS only when automatic IP detection is not enough.
+# Normal source startup does not need this script; OneSync prepares source TLS automatically.
 if [ -z "${SOURCE_HOSTS:-}" ]; then
 	private_ips=$(
 		{

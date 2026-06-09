@@ -285,7 +285,7 @@ func (s *Server) issueLink(writer http.ResponseWriter, request *http.Request) {
 		return
 	}
 	if !s.directTLSConfigured && strings.TrimSpace(input.RelayEndpoint) == "" {
-		writeAPIError(writer, http.StatusBadRequest, errors.New("source link requires a TLS certificate or Relay endpoint"))
+		writeAPIError(writer, http.StatusBadRequest, errors.New("source direct connection is not ready; restart OneSync or enter a Relay endpoint"))
 		return
 	}
 	caCertificate := ""

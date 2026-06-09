@@ -44,6 +44,7 @@ func TestWebScriptKeepsReadinessRegressionsCovered(t *testing.T) {
 		"证书地址：",
 		"本机地址：",
 		"请填写 Relay TLS 地址",
+		"源端 TLS 证书没有自动加载成功",
 		"当前源端证书不包含",
 		"同步链接已生成；源端任务已使用这个链接启动",
 		"已加入同步，目标端任务正在启动",
