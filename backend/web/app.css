@@ -25,6 +25,7 @@ button.secondary { background: #e7eee8; color: #334239; }
 .hint { margin: 8px 0 14px; font-size: 13px; line-height: 1.45; }
 .hint.success { color: #237a4b; }
 .hint.error { color: #b42318; }
+.hint.warning, .warning { color: #9a5b13; }
 .suggestions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: -6px 0 10px; color: #5e6b63; font-size: 13px; }
 button.suggestion { padding: 6px 10px; border-radius: 999px; background: #eef4ef; color: #237a4b; font-size: 13px; }
 button.suggestion:hover { background: #dcebdd; }
@@ -35,6 +36,7 @@ button.suggestion:hover { background: #dcebdd; }
 .task:first-child { border-top: 0; }
 .task h3 { margin: 0 0 5px; }
 .task p { margin: 0; font-size: 14px; }
+.task .warning { margin-top: 5px; font-size: 13px; line-height: 1.45; }
 .task .progress { margin-top: 5px; color: #2d7a4e; }
 .actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 .badge { display: inline-block; border-radius: 999px; padding: 4px 9px; background: #eef4ef; color: #496052; font-size: 12px; }

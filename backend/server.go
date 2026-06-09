@@ -53,20 +53,22 @@ func (localEndpointSuggester) Suggestions(port int) ([]string, error) {
 
 // Options controls optional management server dependencies.
 type Options struct {
-	ConnectionTester  connectionTester
-	EndpointSuggester endpointSuggester
-	SyncPort          int
+	ConnectionTester    connectionTester
+	EndpointSuggester   endpointSuggester
+	SyncPort            int
+	DirectTLSConfigured bool
 }
 
 // Server provides the local management API and web page.
 type Server struct {
-	manager           taskManager
-	links             *auth.LinkService
-	credentials       *auth.CredentialStore
-	connectionTester  connectionTester
-	endpointSuggester endpointSuggester
-	syncPort          int
-	handler           http.Handler
+	manager             taskManager
+	links               *auth.LinkService
+	credentials         *auth.CredentialStore
+	connectionTester    connectionTester
+	endpointSuggester   endpointSuggester
+	syncPort            int
+	directTLSConfigured bool
+	handler             http.Handler
 }
 
 // NewServer creates a local management server.
@@ -80,12 +82,13 @@ func NewServerWithOptions(manager taskManager, links *auth.LinkService, credenti
 		return nil, errors.New("manager, link service, and credential store are required")
 	}
 	server := &Server{
-		manager:           manager,
-		links:             links,
-		credentials:       credentials,
-		connectionTester:  options.ConnectionTester,
-		endpointSuggester: options.EndpointSuggester,
-		syncPort:          options.SyncPort,
+		manager:             manager,
+		links:               links,
+		credentials:         credentials,
+		connectionTester:    options.ConnectionTester,
+		endpointSuggester:   options.EndpointSuggester,
+		syncPort:            options.SyncPort,
+		directTLSConfigured: options.DirectTLSConfigured,
 	}
 	if server.syncPort == 0 {
 		server.syncPort = DefaultSyncPort
@@ -158,7 +161,10 @@ func (s *Server) listTasks(writer http.ResponseWriter, request *http.Request) {
 }
 
 func (s *Server) config(writer http.ResponseWriter, _ *http.Request) {
-	writeJSON(writer, http.StatusOK, map[string]any{"sync_port": s.syncPort})
+	writeJSON(writer, http.StatusOK, map[string]any{
+		"sync_port":             s.syncPort,
+		"direct_tls_configured": s.directTLSConfigured,
+	})
 }
 
 func (s *Server) endpointSuggestions(writer http.ResponseWriter, request *http.Request) {

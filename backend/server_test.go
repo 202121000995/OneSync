@@ -222,7 +222,8 @@ func TestConfigAPIReportsSyncPort(t *testing.T) {
 		t.Fatalf("NewCredentialStore() error = %v", err)
 	}
 	server, err := NewServerWithOptions(manager, auth.NewLinkService(), credentials, Options{
-		SyncPort: 9443,
+		SyncPort:            9443,
+		DirectTLSConfigured: true,
 	})
 	if err != nil {
 		t.Fatalf("NewServerWithOptions() error = %v", err)
@@ -230,7 +231,9 @@ func TestConfigAPIReportsSyncPort(t *testing.T) {
 	request := httptest.NewRequest(http.MethodGet, "http://127.0.0.1/api/config", nil)
 	response := httptest.NewRecorder()
 	server.Handler().ServeHTTP(response, request)
-	if response.Code != http.StatusOK || !bytes.Contains(response.Body.Bytes(), []byte(`"sync_port":9443`)) {
+	if response.Code != http.StatusOK ||
+		!bytes.Contains(response.Body.Bytes(), []byte(`"sync_port":9443`)) ||
+		!bytes.Contains(response.Body.Bytes(), []byte(`"direct_tls_configured":true`)) {
 		t.Fatalf("config response status = %d, body = %s", response.Code, response.Body.String())
 	}
 }

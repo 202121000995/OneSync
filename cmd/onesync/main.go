@@ -75,8 +75,9 @@ func main() {
 		log.Fatal(err)
 	}
 	server, err := backend.NewServerWithOptions(manager, auth.NewLinkService(), credentials, backend.Options{
-		ConnectionTester: connectionTester,
-		SyncPort:         *syncPort,
+		ConnectionTester:    connectionTester,
+		SyncPort:            *syncPort,
+		DirectTLSConfigured: serverTLS != nil,
 	})
 	if err != nil {
 		log.Fatal(err)

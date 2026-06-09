@@ -7,7 +7,9 @@ const generatedLink = document.querySelector("#generated-link");
 const endpointSuggestions = document.querySelector("#endpoint-suggestions");
 const connectionResult = document.querySelector("#connection-result");
 const testLinkButton = document.querySelector("#test-link");
-let appConfig = { sync_port: 7443 };
+const linkReadinessHint = document.querySelector("#link-readiness-hint");
+const defaultConfig = { sync_port: 7443, direct_tls_configured: false };
+let appConfig = { ...defaultConfig };
 
 async function api(path, options = {}) {
   const response = await fetch(path, {
@@ -43,13 +45,14 @@ function renderTask(task) {
   item.className = "task";
   const details = document.createElement("div");
   const path = task.role === "source" ? task.source_path : task.target_path;
-  details.innerHTML = `<h3></h3><p></p><p class="progress"></p><p class="error"></p>`;
+  details.innerHTML = `<h3></h3><p></p><p class="warning"></p><p class="progress"></p><p class="error"></p>`;
   details.querySelector("h3").textContent = task.id;
   details.querySelector("p").textContent = `${task.role === "source" ? "源端" : "目标端"} · ${path} · `;
   const badge = document.createElement("span");
   badge.className = "badge";
   badge.textContent = stateLabel(task.state);
   details.querySelector("p").append(badge);
+  details.querySelector(".warning").textContent = sourceReadinessWarning(task);
   details.querySelector(".progress").textContent = progressLabel(task.progress);
   details.querySelector(".error").textContent = task.last_error || "";
 
@@ -100,10 +103,16 @@ function issueLink(taskId) {
   linkForm.reset();
   linkForm.elements.task_id.value = taskId;
   linkForm.elements.endpoint.placeholder = `例如：192.168.1.10:${appConfig.sync_port}`;
+  linkReadinessHint.textContent = sourceReadinessWarning({ role: "source" });
   generatedLink.value = "";
   renderEndpointSuggestions([]);
   dialog.showModal();
   loadEndpointSuggestions();
+}
+
+function sourceReadinessWarning(task) {
+  if (task.role !== "source" || appConfig.direct_tls_configured) return "";
+  return "当前没有加载源端 TLS 证书：直连不会监听。只用 Relay 时请填写 Relay 地址；需要直连时请重启并提供 -cert 和 -key。";
 }
 
 linkForm.addEventListener("submit", async (event) => {
@@ -245,7 +254,7 @@ document.querySelector("#close-link-dialog").addEventListener("click", () => dia
 
 async function loadConfig() {
   try {
-    appConfig = await api("/api/config", { headers: {} });
+    appConfig = { ...defaultConfig, ...(await api("/api/config", { headers: {} })) };
   } catch (error) {
     notify(error.message);
   }
