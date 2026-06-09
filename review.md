@@ -1723,3 +1723,33 @@
 剩余风险：
 
 - `RELEASE_TAG` 需要填写存在的验收版本；如果要完全自动取最新版，仍依赖 GitHub API 或其他可访问的版本索引。
+
+## 部署兜底、日志筛选、设备汇总和前端行为测试审核
+
+审核分支：`feature/deploy-logs-devices-web-tests`
+
+审核结论：通过。
+
+审核说明：
+
+- Linux 客户端和 Relay 一键部署脚本新增 `PACKAGE_URL` / `ONESYNC_LINUX_PACKAGE_URL`，可绕过 GitHub API 和 Release 自动发现，直接安装指定 Linux 包。
+- 部署脚本识别已经带 `GH_PROXY` 前缀的包地址，避免重复拼接代理地址。
+- Quickstart 补充了代理环境下直接传入 Linux 包地址的命令。
+- 日志窗口新增级别筛选、关键词搜索、复制当前日志和下载当前日志，便于测试机只复制可见问题。
+- 设备管理新增全局设备汇总，按设备维度展示已连接任务数、信任任务数、禁用任务数和任务范围。
+- 任务设备管理新增信任/取消信任操作，设备详情弹窗展示设备历史。
+- 诊断日志补充设备信任状态和设备历史，方便定位连接、禁用、踢出和重命名过程。
+- 新增前端行为测试，使用 Node 运行真实 `app.js`，覆盖日志筛选和全局设备汇总，不再只靠静态字符串检查。
+
+验证结果：
+
+- `sh -n packaging/acceptance-scripts/linux/deploy-relaytls.sh` 通过。
+- `sh -n packaging/acceptance-scripts/linux/deploy-onesync.sh` 通过。
+- `go test ./backend ./internal/task` 通过。
+- `go test ./...` 通过。
+- `git diff --check` 通过。
+
+剩余风险：
+
+- “信任设备”当前是管理状态和诊断标记，正式的加密级访问控制仍依赖同步链接令牌、设备绑定、禁用和踢出。
+- 前端行为测试覆盖了核心数据逻辑，但还不是完整浏览器端到端测试；真实 Windows/Linux 页面操作仍需要继续验收。

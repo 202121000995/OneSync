@@ -228,6 +228,9 @@ func TestManagerDeviceControlsPersist(t *testing.T) {
 	if err := manager.RenameDevice(context.Background(), "task", "办公室电脑"); err != nil {
 		t.Fatalf("RenameDevice() error = %v", err)
 	}
+	if err := manager.SetDeviceTrusted(context.Background(), "task", true); err != nil {
+		t.Fatalf("SetDeviceTrusted() error = %v", err)
+	}
 	if err := manager.SetDeviceDisabled(context.Background(), "task", true); err != nil {
 		t.Fatalf("SetDeviceDisabled() error = %v", err)
 	}
@@ -243,8 +246,11 @@ func TestManagerDeviceControlsPersist(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get() error = %v", err)
 	}
-	if found.Devices.Alias != "办公室电脑" || !found.DeviceDisabled || found.Devices.PeerID != "" {
-		t.Fatalf("device state = %+v disabled=%t", found.Devices, found.DeviceDisabled)
+	if found.Devices.Alias != "办公室电脑" || found.DeviceTrusted || !found.DeviceDisabled || found.Devices.PeerID != "" {
+		t.Fatalf("device state = %+v trusted=%t disabled=%t", found.Devices, found.DeviceTrusted, found.DeviceDisabled)
+	}
+	if len(found.DeviceHistory) < 3 {
+		t.Fatalf("DeviceHistory = %+v, want at least rename/trust/disable/kick events", found.DeviceHistory)
 	}
 }
 

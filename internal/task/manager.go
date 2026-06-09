@@ -281,6 +281,8 @@ func (m *Manager) RenameDevice(ctx context.Context, taskID, alias string) error 
 	}
 	previous := task
 	task.Devices.Alias = strings.TrimSpace(alias)
+	task.Logs = appendLogEntry(task.Logs, LogEntry{Time: m.now().UTC(), Level: "info", Message: "设备已重命名"})
+	task.DeviceHistory = appendDeviceEvent(task.DeviceHistory, DeviceEvent{Time: m.now().UTC(), Type: "renamed", Message: "设备已重命名", PeerID: task.Devices.PeerID, Connection: task.Devices.Connection, Endpoint: task.Devices.Endpoint, RelayEndpoint: task.Devices.RelayEndpoint})
 	task.UpdatedAt = m.now().UTC()
 	m.tasks[taskID] = task
 	if err := m.store.save(m.tasks); err != nil {
@@ -305,12 +307,40 @@ func (m *Manager) SetDeviceDisabled(ctx context.Context, taskID string, disabled
 	task.DeviceDisabled = disabled
 	if disabled {
 		task.Devices.Connected = 0
-		task.Logs = append(task.Logs, LogEntry{Time: m.now().UTC(), Level: "warning", Message: "设备已禁用"})
+		task.Logs = appendLogEntry(task.Logs, LogEntry{Time: m.now().UTC(), Level: "warning", Message: "设备已禁用"})
+		task.DeviceHistory = appendDeviceEvent(task.DeviceHistory, DeviceEvent{Time: m.now().UTC(), Type: "disabled", Message: "设备已禁用", PeerID: task.Devices.PeerID, Connection: task.Devices.Connection, Endpoint: task.Devices.Endpoint, RelayEndpoint: task.Devices.RelayEndpoint})
 	} else {
-		task.Logs = append(task.Logs, LogEntry{Time: m.now().UTC(), Level: "info", Message: "设备已启用"})
+		task.Logs = appendLogEntry(task.Logs, LogEntry{Time: m.now().UTC(), Level: "info", Message: "设备已启用"})
+		task.DeviceHistory = appendDeviceEvent(task.DeviceHistory, DeviceEvent{Time: m.now().UTC(), Type: "enabled", Message: "设备已启用", PeerID: task.Devices.PeerID, Connection: task.Devices.Connection, Endpoint: task.Devices.Endpoint, RelayEndpoint: task.Devices.RelayEndpoint})
 	}
-	if len(task.Logs) > 200 {
-		task.Logs = append([]LogEntry(nil), task.Logs[len(task.Logs)-200:]...)
+	task.UpdatedAt = m.now().UTC()
+	m.tasks[taskID] = task
+	if err := m.store.save(m.tasks); err != nil {
+		m.tasks[taskID] = previous
+		return err
+	}
+	return nil
+}
+
+// SetDeviceTrusted toggles whether one task's peer is marked as trusted.
+func (m *Manager) SetDeviceTrusted(ctx context.Context, taskID string, trusted bool) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	task, exists := m.tasks[taskID]
+	if !exists {
+		return ErrTaskNotFound
+	}
+	previous := task
+	task.DeviceTrusted = trusted
+	if trusted {
+		task.Logs = appendLogEntry(task.Logs, LogEntry{Time: m.now().UTC(), Level: "info", Message: "设备已标记为信任"})
+		task.DeviceHistory = appendDeviceEvent(task.DeviceHistory, DeviceEvent{Time: m.now().UTC(), Type: "trusted", Message: "设备已标记为信任", PeerID: task.Devices.PeerID, Connection: task.Devices.Connection, Endpoint: task.Devices.Endpoint, RelayEndpoint: task.Devices.RelayEndpoint})
+	} else {
+		task.Logs = appendLogEntry(task.Logs, LogEntry{Time: m.now().UTC(), Level: "info", Message: "设备已取消信任"})
+		task.DeviceHistory = appendDeviceEvent(task.DeviceHistory, DeviceEvent{Time: m.now().UTC(), Type: "untrusted", Message: "设备已取消信任", PeerID: task.Devices.PeerID, Connection: task.Devices.Connection, Endpoint: task.Devices.Endpoint, RelayEndpoint: task.Devices.RelayEndpoint})
 	}
 	task.UpdatedAt = m.now().UTC()
 	m.tasks[taskID] = task
@@ -334,11 +364,10 @@ func (m *Manager) ClearDeviceBinding(ctx context.Context, taskID string) error {
 	}
 	previous := task
 	alias := task.Devices.Alias
+	task.DeviceTrusted = false
 	task.Devices = DeviceStats{Alias: alias, Total: 1, TLS: "TLS 1.3"}
-	task.Logs = append(task.Logs, LogEntry{Time: m.now().UTC(), Level: "warning", Message: "已踢出并清除设备绑定"})
-	if len(task.Logs) > 200 {
-		task.Logs = append([]LogEntry(nil), task.Logs[len(task.Logs)-200:]...)
-	}
+	task.Logs = appendLogEntry(task.Logs, LogEntry{Time: m.now().UTC(), Level: "warning", Message: "已踢出并清除设备绑定"})
+	task.DeviceHistory = appendDeviceEvent(task.DeviceHistory, DeviceEvent{Time: m.now().UTC(), Type: "kicked", Message: "已踢出并清除设备绑定", PeerID: previous.Devices.PeerID, Connection: previous.Devices.Connection, Endpoint: previous.Devices.Endpoint, RelayEndpoint: previous.Devices.RelayEndpoint})
 	task.UpdatedAt = m.now().UTC()
 	m.tasks[taskID] = task
 	if err := m.store.save(m.tasks); err != nil {
@@ -473,6 +502,22 @@ func boundedError(err error) string {
 	return message
 }
 
+func appendLogEntry(logs []LogEntry, entry LogEntry) []LogEntry {
+	logs = append(logs, entry)
+	if len(logs) > 200 {
+		return append([]LogEntry(nil), logs[len(logs)-200:]...)
+	}
+	return logs
+}
+
+func appendDeviceEvent(events []DeviceEvent, event DeviceEvent) []DeviceEvent {
+	events = append(events, event)
+	if len(events) > 100 {
+		return append([]DeviceEvent(nil), events[len(events)-100:]...)
+	}
+	return events
+}
+
 func (m *Manager) setState(taskID, state, lastError string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -558,8 +603,20 @@ func (m *Manager) setDevice(taskID string, details DeviceStats) error {
 		return ErrTaskNotFound
 	}
 	previous := task
+	if details.Alias == "" {
+		details.Alias = task.Devices.Alias
+	}
 	details.LastSeen = m.now().UTC()
 	task.Devices = details
+	task.DeviceHistory = appendDeviceEvent(task.DeviceHistory, DeviceEvent{
+		Time:          details.LastSeen,
+		Type:          "connected",
+		Message:       "设备连接成功",
+		PeerID:        details.PeerID,
+		Connection:    details.Connection,
+		Endpoint:      details.Endpoint,
+		RelayEndpoint: details.RelayEndpoint,
+	})
 	task.UpdatedAt = m.now().UTC()
 	m.tasks[taskID] = task
 	if err := m.store.save(m.tasks); err != nil {

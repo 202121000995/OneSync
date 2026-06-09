@@ -5,6 +5,7 @@ REPO=${ONESYNC_REPO:-202121000995/OneSync}
 ACTION=${1:-install}
 GH_PROXY=${GH_PROXY:-}
 RELEASE_TAG=${ONESYNC_RELEASE_TAG:-${RELEASE_TAG:-}}
+PACKAGE_URL=${ONESYNC_LINUX_PACKAGE_URL:-${PACKAGE_URL:-}}
 
 need_root() {
 	if [ "$(id -u)" -ne 0 ]; then
@@ -26,6 +27,12 @@ proxy_url() {
 		printf '%s' "$url"
 		return
 	fi
+	case "$url" in
+		"$GH_PROXY"*)
+			printf '%s' "$url"
+			return
+			;;
+	esac
 	case "$GH_PROXY" in
 		*/)
 			printf '%s%s' "$GH_PROXY" "$url"
@@ -37,6 +44,10 @@ proxy_url() {
 }
 
 latest_linux_package_url() {
+	if [ -n "$PACKAGE_URL" ]; then
+		printf '%s\n' "$PACKAGE_URL"
+		return
+	fi
 	if [ -n "$RELEASE_TAG" ]; then
 		release_commit=${RELEASE_TAG#acceptance-}
 		printf 'https://github.com/%s/releases/download/%s/onesync-acceptance-linux-amd64-%s.tar.gz\n' "$REPO" "$RELEASE_TAG" "$release_commit"

@@ -85,6 +85,12 @@ If the server cannot reach GitHub directly, use a GitHub proxy. The proxy is use
 curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/202121000995/OneSync/main/packaging/acceptance-scripts/linux/deploy-onesync.sh | sudo env RELEASE_TAG=acceptance-f93bf8a GH_PROXY=https://gh-proxy.org/ sh
 ```
 
+If the GitHub API or raw script cache is blocked, pass the Linux package URL directly:
+
+```sh
+curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/202121000995/OneSync/main/packaging/acceptance-scripts/linux/deploy-onesync.sh | sudo env PACKAGE_URL=https://gh-proxy.org/https://github.com/202121000995/OneSync/releases/download/acceptance-f93bf8a/onesync-acceptance-linux-amd64-f93bf8a.tar.gz sh
+```
+
 After installing the Linux client, run `onesync` to show the Chinese client command menu with common status, log, restart, upgrade, and uninstall commands.
 After installing the Linux Relay, run `onesyncr` to show the Chinese Relay command menu.
 
@@ -98,6 +104,12 @@ If the server cannot reach GitHub directly, use a GitHub proxy. The proxy is use
 
 ```sh
 curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/202121000995/OneSync/main/packaging/acceptance-scripts/linux/deploy-relaytls.sh | sudo env RELAY_HOSTS=203.0.113.10 RELAY_PORT=443 RELAY_TOKEN=your-secret RELEASE_TAG=acceptance-f93bf8a GH_PROXY=https://gh-proxy.org/ sh
+```
+
+If the GitHub API or raw script cache is blocked, pass the Linux package URL directly:
+
+```sh
+curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/202121000995/OneSync/main/packaging/acceptance-scripts/linux/deploy-relaytls.sh | sudo env RELAY_HOSTS=203.0.113.10 RELAY_PORT=443 RELAY_TOKEN=your-secret PACKAGE_URL=https://gh-proxy.org/https://github.com/202121000995/OneSync/releases/download/acceptance-f93bf8a/onesync-acceptance-linux-amd64-f93bf8a.tar.gz sh
 ```
 
 After Relay deployment, use `onesyncr` to view the Chinese Relay command menu.

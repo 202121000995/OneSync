@@ -39,7 +39,9 @@ type Task struct {
 	Traffic        TrafficStats       `json:"traffic,omitempty"`
 	Size           SizeStats          `json:"size,omitempty"`
 	Devices        DeviceStats        `json:"devices,omitempty"`
+	DeviceTrusted  bool               `json:"device_trusted,omitempty"`
 	DeviceDisabled bool               `json:"device_disabled,omitempty"`
+	DeviceHistory  []DeviceEvent      `json:"device_history,omitempty"`
 	Logs           []LogEntry         `json:"logs,omitempty"`
 	CreatedAt      time.Time          `json:"created_at"`
 	UpdatedAt      time.Time          `json:"updated_at"`
@@ -71,6 +73,17 @@ type DeviceStats struct {
 	TLS           string    `json:"tls,omitempty"`
 	ClientVersion string    `json:"client_version,omitempty"`
 	LastSeen      time.Time `json:"last_seen,omitempty"`
+}
+
+// DeviceEvent records device-level state changes and connection history.
+type DeviceEvent struct {
+	Time          time.Time `json:"time"`
+	Type          string    `json:"type"`
+	Message       string    `json:"message"`
+	PeerID        string    `json:"peer_id,omitempty"`
+	Connection    string    `json:"connection,omitempty"`
+	Endpoint      string    `json:"endpoint,omitempty"`
+	RelayEndpoint string    `json:"relay_endpoint,omitempty"`
 }
 
 // LogEntry records a task lifecycle event for the management page.
@@ -129,6 +142,9 @@ func validateTask(task Task) error {
 	if err := validateDeviceStats(task.Devices); err != nil {
 		return err
 	}
+	if err := validateDeviceHistory(task.DeviceHistory); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -185,6 +201,26 @@ func validateDeviceStats(devices DeviceStats) error {
 		}
 		if strings.ContainsRune(value, '\x00') {
 			return errors.New("device detail contains null byte")
+		}
+	}
+	return nil
+}
+
+func validateDeviceHistory(events []DeviceEvent) error {
+	if len(events) > 100 {
+		return errors.New("device history exceeds 100 entries")
+	}
+	for _, event := range events {
+		if event.Type != "" && event.Type != "connected" && event.Type != "trusted" && event.Type != "untrusted" && event.Type != "disabled" && event.Type != "enabled" && event.Type != "kicked" && event.Type != "renamed" {
+			return fmt.Errorf("invalid device event type %q", event.Type)
+		}
+		for _, value := range []string{event.Message, event.PeerID, event.Connection, event.Endpoint, event.RelayEndpoint} {
+			if len(value) > 2048 {
+				return errors.New("device event detail exceeds 2048 characters")
+			}
+			if strings.ContainsRune(value, '\x00') {
+				return errors.New("device event detail contains null byte")
+			}
 		}
 	}
 	return nil

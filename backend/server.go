@@ -43,6 +43,7 @@ type taskManager interface {
 	Delete(ctx context.Context, taskID string) error
 	UpdateIgnoreRules(ctx context.Context, taskID string, rules []string) error
 	RenameDevice(ctx context.Context, taskID, alias string) error
+	SetDeviceTrusted(ctx context.Context, taskID string, trusted bool) error
 	SetDeviceDisabled(ctx context.Context, taskID string, disabled bool) error
 	ClearDeviceBinding(ctx context.Context, taskID string) error
 	Get(ctx context.Context, taskID string) (task.Task, error)
@@ -481,6 +482,7 @@ func (s *Server) updateDevice(writer http.ResponseWriter, request *http.Request)
 	taskID := request.PathValue("id")
 	var input struct {
 		Alias    *string `json:"alias"`
+		Trusted  *bool   `json:"trusted"`
 		Disabled *bool   `json:"disabled"`
 	}
 	if err := decodeJSON(writer, request, &input); err != nil {
@@ -491,6 +493,12 @@ func (s *Server) updateDevice(writer http.ResponseWriter, request *http.Request)
 	}
 	if input.Alias != nil {
 		if err := s.manager.RenameDevice(request.Context(), taskID, *input.Alias); err != nil {
+			writeAPIError(writer, statusForTaskError(err), err)
+			return
+		}
+	}
+	if input.Trusted != nil {
+		if err := s.manager.SetDeviceTrusted(request.Context(), taskID, *input.Trusted); err != nil {
 			writeAPIError(writer, statusForTaskError(err), err)
 			return
 		}
@@ -937,6 +945,7 @@ func (s *Server) diagnosticText(tasks []task.Task) string {
 		fmt.Fprintf(&builder, "  累计接收: %d 字节\n", item.Traffic.ReceivedBytes)
 		fmt.Fprintf(&builder, "  累计发送: %d 字节\n", item.Traffic.SentBytes)
 		fmt.Fprintf(&builder, "  设备名称: %s\n", emptyText(item.Devices.Alias))
+		fmt.Fprintf(&builder, "  设备信任: %s\n", yesNo(item.DeviceTrusted))
 		fmt.Fprintf(&builder, "  设备禁用: %s\n", yesNo(item.DeviceDisabled))
 		fmt.Fprintf(&builder, "  同步设备: %d / %d\n", item.Devices.Connected, item.Devices.Total)
 		fmt.Fprintf(&builder, "  连接方式: %s\n", emptyText(item.Devices.Connection))
@@ -944,6 +953,13 @@ func (s *Server) diagnosticText(tasks []task.Task) string {
 		fmt.Fprintf(&builder, "  设备详情 Relay: %s\n", emptyText(item.Devices.RelayEndpoint))
 		fmt.Fprintf(&builder, "  加密: %s\n", emptyText(item.Devices.TLS))
 		fmt.Fprintf(&builder, "  最近连接: %s\n", timeText(item.Devices.LastSeen))
+		fmt.Fprintf(&builder, "  设备历史:\n")
+		if len(item.DeviceHistory) == 0 {
+			fmt.Fprintf(&builder, "    - 暂无设备历史\n")
+		}
+		for _, event := range item.DeviceHistory {
+			fmt.Fprintf(&builder, "    - [%s] %s %s %s %s\n", event.Type, timeText(event.Time), emptyText(event.Message), emptyText(event.Connection), emptyText(event.PeerID))
+		}
 		fmt.Fprintf(&builder, "  忽略规则: %d 条\n", len(item.IgnoreRules))
 		for _, rule := range item.IgnoreRules {
 			fmt.Fprintf(&builder, "    - %s\n", rule)

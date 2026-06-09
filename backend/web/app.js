@@ -30,6 +30,8 @@ const settingsButton = document.querySelector("#toolbar-settings");
 const deleteButton = document.querySelector("#toolbar-delete");
 const settingsSummary = document.querySelector("#settings-summary");
 const logsList = document.querySelector("#logs-list");
+const logLevelFilter = document.querySelector("#log-level-filter");
+const logSearch = document.querySelector("#log-search");
 const deviceManagerList = document.querySelector("#device-manager-list");
 const connectionManagerList = document.querySelector("#connection-manager-list");
 const appSettingsBody = document.querySelector("#app-settings-body");
@@ -59,6 +61,7 @@ let selectedTaskId = "";
 let trafficSnapshot = { time: Date.now(), tasks: {} };
 let authState = { enabled: false, configured: false, authenticated: true };
 let ignoreTemplates = [];
+let visibleLogs = [];
 
 async function api(path, options = {}) {
   const response = await fetch(path, {
@@ -585,10 +588,26 @@ function plainHint(text) {
 }
 
 function openLogsDialog() {
-  const task = selectedTask();
-  const logs = task ? (task.logs || []) : tasksCache.flatMap((item) => (item.logs || []).map((entry) => ({ ...entry, task_id: item.id })));
-  logsList.replaceChildren(...(logs.length ? logs.slice(-200).reverse().map(renderLogEntry) : [emptyLogEntry()]));
+  renderLogs();
   logsDialog.showModal();
+}
+
+function allLogRows() {
+  const task = selectedTask();
+  return task
+    ? (task.logs || []).map((entry) => ({ ...entry, task_id: task.id }))
+    : tasksCache.flatMap((item) => (item.logs || []).map((entry) => ({ ...entry, task_id: item.id })));
+}
+
+function renderLogs() {
+  const level = logLevelFilter.value;
+  const query = logSearch.value.trim().toLowerCase();
+  visibleLogs = allLogRows()
+    .filter((entry) => !level || (entry.level || "info") === level)
+    .filter((entry) => !query || logLine(entry).toLowerCase().includes(query))
+    .slice(-300)
+    .reverse();
+  logsList.replaceChildren(...(visibleLogs.length ? visibleLogs.map(renderLogEntry) : [emptyLogEntry()]));
 }
 
 async function fetchDiagnosticsText() {
@@ -629,12 +648,32 @@ async function downloadDiagnostics() {
   } catch (error) { notify(error.message); }
 }
 
+async function copyVisibleLogs() {
+  const text = visibleLogs.length ? visibleLogs.map(logLine).join("\n") : "暂无日志。";
+  await navigator.clipboard.writeText(text);
+  notify("当前日志已复制");
+}
+
+function downloadVisibleLogs() {
+  const task = selectedTask();
+  const name = `onesync-logs-${task ? task.id : "all"}-${new Date().toISOString().replace(/[:.]/g, "-")}.txt`;
+  const text = visibleLogs.length ? visibleLogs.map(logLine).join("\n") : "暂无日志。";
+  const url = URL.createObjectURL(new Blob([text], { type: "text/plain;charset=utf-8" }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = name;
+  link.click();
+  URL.revokeObjectURL(url);
+  notify("当前日志已下载");
+}
+
 function openDevicesDialog(task) {
   devicesTitle.textContent = `设备详情 - ${task.id}`;
   const devices = task.devices || {};
   const rows = [
     ["状态", stateLabel(task)],
     ["设备名称", deviceDisplayName(task)],
+    ["是否信任", task.device_trusted ? "已信任" : "未信任"],
     ["是否禁用", task.device_disabled ? "已禁用" : "未禁用"],
     ["同步设备", deviceCountLabel(task)],
     ["连接", devices.connection || "等待连接"],
@@ -655,6 +694,8 @@ function openDevicesDialog(task) {
     table.append(row);
   }
   const children = [table];
+  const history = renderDeviceHistory(task);
+  if (history) children.push(history);
   if (task.role === "source") {
     const savedLink = savedSourceLink(task.id);
     const actions = document.createElement("div");
@@ -681,26 +722,96 @@ function openDevicesDialog(task) {
 }
 
 function openDeviceManager() {
-  const cards = tasksCache.map(renderDeviceManagerCard);
-  deviceManagerList.replaceChildren(...(cards.length ? cards : [plainHint("暂无设备。")]));
+  const children = [];
+  const summaries = globalDeviceSummaries();
+  if (summaries.length) {
+    children.push(sectionTitle("全局设备"));
+    children.push(...summaries.map(renderGlobalDeviceCard));
+    children.push(sectionTitle("任务设备"));
+  }
+  children.push(...tasksCache.map(renderDeviceManagerCard));
+  deviceManagerList.replaceChildren(...(children.length ? children : [plainHint("暂无设备。")]));
   if (!deviceManagerDialog.open) deviceManagerDialog.showModal();
 }
 
 function renderDeviceManagerCard(task) {
   const devices = task.devices || {};
   const card = document.createElement("section");
-  card.className = `manager-card ${task.device_disabled ? "disabled" : ""}`;
+  card.className = `manager-card ${task.device_disabled ? "disabled" : ""} ${task.device_trusted ? "trusted" : ""}`;
   const title = document.createElement("h3");
   title.textContent = `${deviceDisplayName(task)} · ${task.id}`;
   const detail = document.createElement("p");
-  detail.textContent = `${roleLabel(task)} · ${stateLabel(task)} · ${deviceCountLabel(task)} · ${devices.connection || "等待连接"} · ${devices.relay_endpoint || task.relay_url || "无 Relay"}`;
+  detail.textContent = `${roleLabel(task)} · ${stateLabel(task)} · ${deviceCountLabel(task)} · ${task.device_trusted ? "已信任" : "未信任"} · ${task.device_disabled ? "已拉黑" : "未拉黑"} · ${devices.connection || "等待连接"} · ${devices.relay_endpoint || task.relay_url || "无 Relay"}`;
   const actions = document.createElement("div");
   actions.className = "inline-actions";
+  actions.append(actionButton("历史", () => openDevicesDialog(task), { secondary: true, compact: true }));
   actions.append(actionButton("重命名", () => renameDevice(task), { secondary: true, compact: true }));
+  actions.append(actionButton(task.device_trusted ? "取消信任" : "信任", () => setDeviceTrusted(task, !task.device_trusted), { secondary: true, compact: true }));
   actions.append(actionButton(task.device_disabled ? "启用" : "禁用", () => setDeviceDisabled(task, !task.device_disabled), { secondary: true, compact: true }));
   actions.append(actionButton("踢出", () => kickDevice(task), { danger: true, compact: true }));
   card.append(title, detail, actions);
   return card;
+}
+
+function sectionTitle(text) {
+  const row = document.createElement("p");
+  row.className = "manager-section-title";
+  row.textContent = text;
+  return row;
+}
+
+function globalDeviceSummaries() {
+  const groups = new Map();
+  for (const task of tasksCache) {
+    const devices = task.devices || {};
+    const key = devices.peer_id || devices.alias || `${task.role}:${task.id}`;
+    const current = groups.get(key) || {
+      name: deviceDisplayName(task),
+      tasks: [],
+      connected: 0,
+      trusted: 0,
+      disabled: 0,
+      lastSeen: "",
+      connection: new Set(),
+    };
+    current.tasks.push(task);
+    if (deviceConnected(task)) current.connected++;
+    if (task.device_trusted) current.trusted++;
+    if (task.device_disabled) current.disabled++;
+    if (devices.last_seen && (!current.lastSeen || new Date(devices.last_seen) > new Date(current.lastSeen))) current.lastSeen = devices.last_seen;
+    if (devices.connection) current.connection.add(devices.connection);
+    groups.set(key, current);
+  }
+  return [...groups.values()];
+}
+
+function renderGlobalDeviceCard(summary) {
+  const card = document.createElement("section");
+  card.className = `manager-card ${summary.disabled ? "disabled" : ""} ${summary.trusted ? "trusted" : ""}`;
+  const title = document.createElement("h3");
+  title.textContent = summary.name;
+  const detail = document.createElement("p");
+  detail.textContent = `关联任务 ${summary.tasks.length} 个 · 在线 ${summary.connected}/${summary.tasks.length} · 信任 ${summary.trusted} · 拉黑 ${summary.disabled} · ${summary.connection.size ? [...summary.connection].join("/") : "等待连接"} · 最近 ${summary.lastSeen ? new Date(summary.lastSeen).toLocaleString() : "-"}`;
+  const taskList = document.createElement("p");
+  taskList.className = "muted";
+  taskList.textContent = summary.tasks.map((task) => `${task.id}(${roleLabel(task)})`).join("，");
+  card.append(title, detail, taskList);
+  return card;
+}
+
+function renderDeviceHistory(task) {
+  const events = task.device_history || [];
+  if (!events.length) return null;
+  const box = document.createElement("div");
+  box.className = "logs-list compact-list";
+  box.replaceChildren(...events.slice(-30).reverse().map((event) => {
+    const row = document.createElement("p");
+    row.className = "log-entry";
+    const time = event.time ? new Date(event.time).toLocaleString() : "";
+    row.textContent = `${time} · ${event.type || "event"} · ${event.message || ""} · ${event.connection || "-"} · ${shortPeerID(event.peer_id)}`;
+    return row;
+  }));
+  return box;
 }
 
 async function renameDevice(task) {
@@ -724,6 +835,18 @@ async function setDeviceDisabled(task, disabled) {
       body: JSON.stringify({ disabled }),
     });
     notify(disabled ? "设备已禁用" : "设备已启用");
+    await loadTasks();
+    openDeviceManager();
+  } catch (error) { notify(error.message); }
+}
+
+async function setDeviceTrusted(task, trusted) {
+  try {
+    await api(`/api/tasks/${encodeURIComponent(task.id)}/device`, {
+      method: "PATCH",
+      body: JSON.stringify({ trusted }),
+    });
+    notify(trusted ? "设备已信任" : "设备已取消信任");
     await loadTasks();
     openDeviceManager();
   } catch (error) { notify(error.message); }
@@ -836,9 +959,14 @@ function shortPeerID(peerID) {
 function renderLogEntry(entry) {
   const row = document.createElement("p");
   row.className = `log-entry ${entry.level || "info"}`;
-  const time = entry.time ? new Date(entry.time).toLocaleString() : "";
-  row.textContent = `${time}${entry.task_id ? ` · ${entry.task_id}` : ""} · ${entry.message || ""}`;
+  row.textContent = logLine(entry);
   return row;
+}
+
+function logLine(entry) {
+  const time = entry.time ? new Date(entry.time).toLocaleString() : "";
+  const level = entry.level || "info";
+  return `${time} · ${level}${entry.task_id ? ` · ${entry.task_id}` : ""} · ${entry.message || ""}`;
 }
 
 function emptyLogEntry() {
@@ -1166,6 +1294,10 @@ document.querySelector("#apply-ignore-template").addEventListener("click", apply
 document.querySelector("#preview-ignore").addEventListener("click", previewIgnoreRules);
 document.querySelector("#copy-diagnostics").addEventListener("click", copyDiagnostics);
 document.querySelector("#download-diagnostics").addEventListener("click", downloadDiagnostics);
+document.querySelector("#copy-visible-logs").addEventListener("click", copyVisibleLogs);
+document.querySelector("#download-visible-logs").addEventListener("click", downloadVisibleLogs);
+logLevelFilter.addEventListener("change", renderLogs);
+logSearch.addEventListener("input", renderLogs);
 document.querySelector("#copy-all-diagnostics").addEventListener("click", async () => {
   selectedTaskId = "";
   await copyDiagnostics();

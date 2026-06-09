@@ -84,15 +84,15 @@ func TestTaskAPI(t *testing.T) {
 	}
 
 	device := jsonRequest(http.MethodPatch, "http://127.0.0.1/api/tasks/photos/device", map[string]any{
-		"alias": "办公室电脑", "disabled": true,
+		"alias": "办公室电脑", "trusted": true, "disabled": true,
 	})
 	response = httptest.NewRecorder()
 	server.Handler().ServeHTTP(response, device)
 	if response.Code != http.StatusOK {
 		t.Fatalf("device update status = %d, body = %s", response.Code, response.Body.String())
 	}
-	if got := manager.tasks["photos"]; got.Devices.Alias != "办公室电脑" || !got.DeviceDisabled {
-		t.Fatalf("device state = %+v disabled=%t", got.Devices, got.DeviceDisabled)
+	if got := manager.tasks["photos"]; got.Devices.Alias != "办公室电脑" || !got.DeviceTrusted || !got.DeviceDisabled {
+		t.Fatalf("device state = %+v trusted=%t disabled=%t", got.Devices, got.DeviceTrusted, got.DeviceDisabled)
 	}
 }
 
@@ -580,6 +580,15 @@ func (m *fakeManager) RenameDevice(_ context.Context, id, alias string) error {
 		return task.ErrTaskNotFound
 	}
 	found.Devices.Alias = alias
+	m.tasks[id] = found
+	return nil
+}
+func (m *fakeManager) SetDeviceTrusted(_ context.Context, id string, trusted bool) error {
+	found, ok := m.tasks[id]
+	if !ok {
+		return task.ErrTaskNotFound
+	}
+	found.DeviceTrusted = trusted
 	m.tasks[id] = found
 	return nil
 }

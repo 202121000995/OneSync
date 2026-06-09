@@ -157,8 +157,21 @@
     <dialog id="logs-dialog">
       <form method="dialog">
         <h2>任务日志</h2>
+        <div class="filter-row">
+          <label>级别
+            <select id="log-level-filter">
+              <option value="">全部</option>
+              <option value="info">信息</option>
+              <option value="warning">警告</option>
+              <option value="error">错误</option>
+            </select>
+          </label>
+          <label>搜索<input id="log-search" placeholder="按任务名、会话编号、错误内容搜索"></label>
+        </div>
         <div id="logs-list" class="logs-list">暂无日志。</div>
         <div class="dialog-actions">
+          <button id="copy-visible-logs" type="button">复制当前日志</button>
+          <button id="download-visible-logs" class="secondary" type="button">下载当前日志</button>
           <button id="copy-diagnostics" type="button">复制诊断</button>
           <button id="download-diagnostics" class="secondary" type="button">下载诊断</button>
           <button class="secondary" type="submit">关闭</button>
@@ -169,7 +182,7 @@
     <dialog id="device-manager-dialog">
       <form method="dialog">
         <h2>设备管理</h2>
-        <p class="hint">统一查看每个同步任务绑定或最近连接的设备；可重命名、禁用/启用、踢出设备。</p>
+        <p class="hint">统一查看全局设备和每个同步任务绑定或最近连接的设备；可重命名、信任、禁用/启用、踢出设备。</p>
         <div id="device-manager-list" class="manager-list">暂无设备。</div>
         <div class="dialog-actions">
           <button class="secondary" type="submit">关闭</button>

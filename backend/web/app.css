@@ -37,6 +37,8 @@ button.compact { padding: 6px 9px; border-radius: 8px; font-size: 12px; }
 button.link-button { padding: 0; border-radius: 0; background: transparent; color: #175cd3; font-weight: 800; }
 button.link-button:hover { background: transparent; color: #0f4393; text-decoration: underline; }
 .form-actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.filter-row { display: grid; grid-template-columns: 160px 1fr; gap: 10px; align-items: end; }
+.filter-row label { margin: 0 0 12px; }
 .hint { margin: 8px 0 14px; font-size: 13px; line-height: 1.45; }
 .hint.success { color: #237a4b; }
 .hint.error { color: #b42318; }
@@ -94,6 +96,8 @@ button.suggestion:hover { background: #dcebdd; }
 .manager-card h3 { margin: 0; font-size: 15px; }
 .manager-card p { margin: 0; font-size: 13px; }
 .manager-card.disabled { opacity: .68; border-color: #fecdca; }
+.manager-card.trusted { border-color: #92d6aa; }
+.manager-section-title { margin: 8px 0 2px; color: #334239; font-size: 13px; font-weight: 850; }
 .detail-table { width: 100%; border-collapse: collapse; border: 1px solid #dfe8df; border-radius: 12px; overflow: hidden; background: #fbfdfb; }
 .detail-table td { padding: 11px 12px; border-bottom: 1px solid #edf1ed; font-size: 14px; }
 .detail-table tr:last-child td { border-bottom: 0; }
@@ -115,4 +119,5 @@ dialog::backdrop { background: rgba(20, 32, 24, .45); }
   .actions { justify-content: flex-start; }
   .task-table { min-width: 920px; }
   .tasks { overflow-x: auto; }
+  .filter-row { grid-template-columns: 1fr; }
 }
