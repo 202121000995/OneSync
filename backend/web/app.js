@@ -4,6 +4,7 @@ const toast = document.querySelector("#toast");
 const dialog = document.querySelector("#link-dialog");
 const linkForm = document.querySelector("#link-form");
 const generatedLink = document.querySelector("#generated-link");
+const endpointSuggestions = document.querySelector("#endpoint-suggestions");
 const connectionResult = document.querySelector("#connection-result");
 const testLinkButton = document.querySelector("#test-link");
 
@@ -98,7 +99,9 @@ function issueLink(taskId) {
   linkForm.reset();
   linkForm.elements.task_id.value = taskId;
   generatedLink.value = "";
+  renderEndpointSuggestions([]);
   dialog.showModal();
+  loadEndpointSuggestions();
 }
 
 linkForm.addEventListener("submit", async (event) => {
@@ -119,6 +122,38 @@ linkForm.addEventListener("submit", async (event) => {
     notify("同步链接已生成");
   } catch (error) { notify(error.message); }
 });
+
+async function loadEndpointSuggestions() {
+  endpointSuggestions.textContent = "正在查找本机地址";
+  try {
+    const { suggestions } = await api("/api/endpoint-suggestions?port=7443", { headers: {} });
+    renderEndpointSuggestions(suggestions || []);
+  } catch (error) {
+    endpointSuggestions.textContent = "无法读取本机地址，请手动填写";
+  }
+}
+
+function renderEndpointSuggestions(suggestions) {
+  endpointSuggestions.replaceChildren();
+  if (!suggestions.length) {
+    endpointSuggestions.textContent = "没有发现局域网 IPv4 地址，请手动填写。";
+    return;
+  }
+  const label = document.createElement("span");
+  label.textContent = "可选地址：";
+  endpointSuggestions.append(label);
+  for (const suggestion of suggestions) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "suggestion";
+    button.textContent = suggestion;
+    button.addEventListener("click", () => {
+      linkForm.elements.endpoint.value = suggestion;
+      notify("已填入源端 TLS 地址");
+    });
+    endpointSuggestions.append(button);
+  }
+}
 
 document.querySelector("#create-form").addEventListener("submit", async (event) => {
   event.preventDefault();

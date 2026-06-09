@@ -163,6 +163,43 @@ func TestLinkTestUsesConfiguredConnectionTester(t *testing.T) {
 	}
 }
 
+func TestEndpointSuggestionsAPI(t *testing.T) {
+	manager := &fakeManager{tasks: make(map[string]task.Task)}
+	credentials, err := auth.NewCredentialStore(filepath.Join(t.TempDir(), "credentials"))
+	if err != nil {
+		t.Fatalf("NewCredentialStore() error = %v", err)
+	}
+	suggester := &fakeEndpointSuggester{suggestions: []string{"10.0.0.7:7443", "192.168.1.10:7443"}}
+	server, err := NewServerWithOptions(manager, auth.NewLinkService(), credentials, Options{
+		EndpointSuggester: suggester,
+	})
+	if err != nil {
+		t.Fatalf("NewServerWithOptions() error = %v", err)
+	}
+	request := httptest.NewRequest(http.MethodGet, "http://127.0.0.1/api/endpoint-suggestions?port=7443", nil)
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+	if suggester.port != 7443 {
+		t.Fatalf("suggestion port = %d, want 7443", suggester.port)
+	}
+	if !bytes.Contains(response.Body.Bytes(), []byte("192.168.1.10:7443")) {
+		t.Fatalf("response = %s", response.Body.String())
+	}
+}
+
+func TestEndpointSuggestionsAPIRejectsInvalidPort(t *testing.T) {
+	server := newTestServer(t)
+	request := httptest.NewRequest(http.MethodGet, "http://127.0.0.1/api/endpoint-suggestions?port=bad", nil)
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+}
+
 func newTestServer(t *testing.T) *Server {
 	t.Helper()
 	return newServerWithManager(t, &fakeManager{tasks: make(map[string]task.Task)})
@@ -231,4 +268,14 @@ func (t *fakeConnectionTester) Test(_ context.Context, endpoint, relayEndpoint s
 		Relay:  &diagnostic.EndpointResult{Endpoint: relayEndpoint, OK: true},
 		Usable: true,
 	}
+}
+
+type fakeEndpointSuggester struct {
+	port        int
+	suggestions []string
+}
+
+func (s *fakeEndpointSuggester) Suggestions(port int) ([]string, error) {
+	s.port = port
+	return s.suggestions, nil
 }

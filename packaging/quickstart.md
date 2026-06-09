@@ -51,7 +51,7 @@ onesync -cert source.crt -key source.key -ca source.crt -sync-interval 10s
 
 Open the management page. On Windows 10 or newer it opens automatically. On Linux, open `http://127.0.0.1:8765` locally, or use a trusted SSH tunnel.
 
-Create a source task and choose the folder to send. Click "生成链接". In the dialog, enter the source synchronization endpoint, for example:
+Create a source task and choose the folder to send. Click "生成链接". In the dialog, choose a suggested private IPv4 endpoint or enter the source synchronization endpoint manually, for example:
 
 ```text
 192.168.1.10:7443

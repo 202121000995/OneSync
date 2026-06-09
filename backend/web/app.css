@@ -25,6 +25,9 @@ button.secondary { background: #e7eee8; color: #334239; }
 .hint { margin: 8px 0 14px; font-size: 13px; line-height: 1.45; }
 .hint.success { color: #237a4b; }
 .hint.error { color: #b42318; }
+.suggestions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: -6px 0 10px; color: #5e6b63; font-size: 13px; }
+button.suggestion { padding: 6px 10px; border-radius: 999px; background: #eef4ef; color: #237a4b; font-size: 13px; }
+button.suggestion:hover { background: #dcebdd; }
 .tasks { min-height: 220px; }
 .section-title h2 { margin: 0; }
 #status { color: #77847b; font-size: 14px; }

@@ -58,6 +58,7 @@
         <p>填写其他设备可以访问的同步地址。链接 24 小时内有效，成功使用一次后失效。</p>
         <input type="hidden" name="task_id">
         <label>源端 TLS 地址<input name="endpoint" required placeholder="例如：192.168.1.10:7443"></label>
+        <div id="endpoint-suggestions" class="suggestions"></div>
         <label>Relay TLS 地址（可选）<input name="relay_endpoint" placeholder="例如：relay.example.com:7443"></label>
         <textarea id="generated-link" rows="6" readonly></textarea>
         <div class="dialog-actions">

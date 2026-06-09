@@ -11,11 +11,13 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/202121000995/OneSync/internal/auth"
 	"github.com/202121000995/OneSync/internal/diagnostic"
+	"github.com/202121000995/OneSync/internal/netutil"
 	"github.com/202121000995/OneSync/internal/task"
 )
 
@@ -36,18 +38,30 @@ type connectionTester interface {
 	Test(ctx context.Context, endpoint, relayEndpoint string) diagnostic.Result
 }
 
+type endpointSuggester interface {
+	Suggestions(port int) ([]string, error)
+}
+
+type localEndpointSuggester struct{}
+
+func (localEndpointSuggester) Suggestions(port int) ([]string, error) {
+	return netutil.LocalEndpointSuggestions(port)
+}
+
 // Options controls optional management server dependencies.
 type Options struct {
-	ConnectionTester connectionTester
+	ConnectionTester  connectionTester
+	EndpointSuggester endpointSuggester
 }
 
 // Server provides the local management API and web page.
 type Server struct {
-	manager          taskManager
-	links            *auth.LinkService
-	credentials      *auth.CredentialStore
-	connectionTester connectionTester
-	handler          http.Handler
+	manager           taskManager
+	links             *auth.LinkService
+	credentials       *auth.CredentialStore
+	connectionTester  connectionTester
+	endpointSuggester endpointSuggester
+	handler           http.Handler
 }
 
 // NewServer creates a local management server.
@@ -61,13 +75,18 @@ func NewServerWithOptions(manager taskManager, links *auth.LinkService, credenti
 		return nil, errors.New("manager, link service, and credential store are required")
 	}
 	server := &Server{
-		manager:          manager,
-		links:            links,
-		credentials:      credentials,
-		connectionTester: options.ConnectionTester,
+		manager:           manager,
+		links:             links,
+		credentials:       credentials,
+		connectionTester:  options.ConnectionTester,
+		endpointSuggester: options.EndpointSuggester,
+	}
+	if server.endpointSuggester == nil {
+		server.endpointSuggester = localEndpointSuggester{}
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/tasks", server.listTasks)
+	mux.HandleFunc("GET /api/endpoint-suggestions", server.endpointSuggestions)
 	mux.HandleFunc("POST /api/tasks", server.createTask)
 	mux.HandleFunc("POST /api/tasks/{id}/start", server.startTask)
 	mux.HandleFunc("POST /api/tasks/{id}/stop", server.stopTask)
@@ -123,6 +142,24 @@ func (s *Server) listTasks(writer http.ResponseWriter, request *http.Request) {
 		return
 	}
 	writeJSON(writer, http.StatusOK, map[string]any{"tasks": tasks})
+}
+
+func (s *Server) endpointSuggestions(writer http.ResponseWriter, request *http.Request) {
+	port := 7443
+	if rawPort := strings.TrimSpace(request.URL.Query().Get("port")); rawPort != "" {
+		parsedPort, err := strconv.Atoi(rawPort)
+		if err != nil {
+			writeAPIError(writer, http.StatusBadRequest, errors.New("endpoint suggestion port is invalid"))
+			return
+		}
+		port = parsedPort
+	}
+	suggestions, err := s.endpointSuggester.Suggestions(port)
+	if err != nil {
+		writeAPIError(writer, http.StatusBadRequest, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{"suggestions": suggestions})
 }
 
 func (s *Server) createTask(writer http.ResponseWriter, request *http.Request) {
