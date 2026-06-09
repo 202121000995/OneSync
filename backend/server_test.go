@@ -6,11 +6,14 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/202121000995/OneSync/internal/auth"
+	"github.com/202121000995/OneSync/internal/certutil"
 	"github.com/202121000995/OneSync/internal/diagnostic"
 	"github.com/202121000995/OneSync/internal/task"
 )
@@ -75,8 +78,10 @@ func TestLinkIssueAndJoinStoresCredentialSeparately(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewCredentialStore() error = %v", err)
 	}
+	sourceCertificatePEM := testCertificatePEM(t)
 	server, err := NewServerWithOptions(manager, auth.NewLinkService(), credentials, Options{
-		DirectTLSConfigured: true,
+		DirectTLSConfigured:  true,
+		DirectTLSCertificate: sourceCertificatePEM,
 	})
 	if err != nil {
 		t.Fatalf("NewServerWithOptions() error = %v", err)
@@ -99,6 +104,13 @@ func TestLinkIssueAndJoinStoresCredentialSeparately(t *testing.T) {
 	if bytes.Contains(response.Body.Bytes(), []byte("/private/source")) {
 		t.Fatal("link response exposed the local source path")
 	}
+	parsed, err := server.links.Parse(issued.Link)
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+	if parsed.CACertificatePEM != sourceCertificatePEM {
+		t.Fatal("link did not include source certificate")
+	}
 
 	join := jsonRequest(http.MethodPost, "http://127.0.0.1/api/links/join", map[string]any{
 		"task_id": "target", "target_path": "/private/target", "link": issued.Link,
@@ -114,6 +126,9 @@ func TestLinkIssueAndJoinStoresCredentialSeparately(t *testing.T) {
 	}
 	if credential.Token == "" || credential.Endpoint != "192.168.1.10:7443" || credential.PeerID == "" {
 		t.Fatalf("credential = %+v", credential)
+	}
+	if credential.CACertificatePEM != sourceCertificatePEM {
+		t.Fatal("joined credential did not store source certificate")
 	}
 	if manager.tasks["target"].PeerAddress != "192.168.1.10:7443" {
 		t.Fatalf("joined task = %+v", manager.tasks["target"])
@@ -155,8 +170,11 @@ func TestLinkTestUsesConfiguredConnectionTester(t *testing.T) {
 		t.Fatalf("NewCredentialStore() error = %v", err)
 	}
 	tester := &fakeConnectionTester{}
+	sourceCertificatePEM := testCertificatePEM(t)
 	server, err := NewServerWithOptions(manager, auth.NewLinkService(), credentials, Options{
-		ConnectionTester: tester,
+		ConnectionTester:     tester,
+		DirectTLSConfigured:  true,
+		DirectTLSCertificate: sourceCertificatePEM,
 	})
 	if err != nil {
 		t.Fatalf("NewServerWithOptions() error = %v", err)
@@ -186,6 +204,9 @@ func TestLinkTestUsesConfiguredConnectionTester(t *testing.T) {
 	}
 	if tester.endpoint != "192.168.1.10:7443" || tester.relayEndpoint != "relay.example:7443" {
 		t.Fatalf("tester called with endpoint=%q relay=%q", tester.endpoint, tester.relayEndpoint)
+	}
+	if tester.caCertificatePEM != sourceCertificatePEM {
+		t.Fatal("tester did not receive link certificate")
 	}
 	if !bytes.Contains(response.Body.Bytes(), []byte(`"usable":true`)) {
 		t.Fatalf("test response = %s", response.Body.String())
@@ -362,18 +383,40 @@ func (m *fakeManager) List(context.Context) ([]task.Task, error) {
 }
 
 type fakeConnectionTester struct {
-	endpoint      string
-	relayEndpoint string
+	endpoint         string
+	relayEndpoint    string
+	caCertificatePEM string
 }
 
-func (t *fakeConnectionTester) Test(_ context.Context, endpoint, relayEndpoint string) diagnostic.Result {
+func (t *fakeConnectionTester) TestWithCertificate(_ context.Context, endpoint, relayEndpoint, caCertificatePEM string) diagnostic.Result {
 	t.endpoint = endpoint
 	t.relayEndpoint = relayEndpoint
+	t.caCertificatePEM = caCertificatePEM
 	return diagnostic.Result{
 		Direct: diagnostic.EndpointResult{Endpoint: endpoint, OK: true},
 		Relay:  &diagnostic.EndpointResult{Endpoint: relayEndpoint, OK: true},
 		Usable: true,
 	}
+}
+
+func testCertificatePEM(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	certPath := filepath.Join(root, "source.crt")
+	keyPath := filepath.Join(root, "source.key")
+	if err := certutil.Generate(certutil.Options{
+		Hosts:    []string{"192.168.1.10"},
+		CertPath: certPath,
+		KeyPath:  keyPath,
+		Validity: time.Hour,
+	}); err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+	data, err := os.ReadFile(certPath)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	return string(data)
 }
 
 type fakeEndpointSuggester struct {

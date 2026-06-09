@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/pem"
 	"errors"
 	"flag"
 	"fmt"
@@ -75,10 +76,11 @@ func main() {
 		log.Fatal(err)
 	}
 	server, err := backend.NewServerWithOptions(manager, auth.NewLinkService(), credentials, backend.Options{
-		ConnectionTester:    connectionTester,
-		SyncPort:            *syncPort,
-		DirectTLSConfigured: serverTLS != nil,
-		DirectTLSHosts:      serverCertificateHosts(serverTLS),
+		ConnectionTester:     connectionTester,
+		SyncPort:             *syncPort,
+		DirectTLSConfigured:  serverTLS != nil,
+		DirectTLSHosts:       serverCertificateHosts(serverTLS),
+		DirectTLSCertificate: serverCertificatePEM(serverTLS),
 	})
 	if err != nil {
 		log.Fatal(err)
@@ -165,6 +167,13 @@ func serverCertificateHosts(config *tls.Config) []string {
 	}
 	hosts = append(hosts, certificate.DNSNames...)
 	return hosts
+}
+
+func serverCertificatePEM(config *tls.Config) string {
+	if config == nil || len(config.Certificates) == 0 || len(config.Certificates[0].Certificate) == 0 {
+		return ""
+	}
+	return string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: config.Certificates[0].Certificate[0]}))
 }
 
 func dataDirectory() (string, error) {

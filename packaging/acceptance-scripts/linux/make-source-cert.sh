@@ -9,4 +9,5 @@ mkdir -p certs
 ./onesync-cert -hosts "$SOURCE_HOSTS" -cert certs/source.crt -key certs/source.key
 
 printf '\nGenerated certs/source.crt and certs/source.key\n'
-printf 'Copy certs/source.crt to the target computer. Do not copy certs/source.key.\n'
+printf 'The generated synchronization link will carry certs/source.crt to the target.\n'
+printf 'Do not copy certs/source.key.\n'

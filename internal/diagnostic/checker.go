@@ -3,6 +3,7 @@ package diagnostic
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"net"
@@ -53,10 +54,24 @@ func NewChecker(config *tls.Config, timeout time.Duration) (*Checker, error) {
 
 // Test checks a direct endpoint and, when present, a Relay endpoint.
 func (c *Checker) Test(ctx context.Context, endpoint, relayEndpoint string) Result {
-	direct := c.Check(ctx, endpoint)
+	return c.TestWithCertificate(ctx, endpoint, relayEndpoint, "")
+}
+
+// TestWithCertificate checks endpoints with an optional additional CA certificate.
+func (c *Checker) TestWithCertificate(ctx context.Context, endpoint, relayEndpoint, caCertificatePEM string) Result {
+	checker := c
+	if strings.TrimSpace(caCertificatePEM) != "" {
+		config, err := addCACertificate(c.config, caCertificatePEM)
+		if err != nil {
+			direct := EndpointResult{Endpoint: strings.TrimSpace(endpoint), Error: err.Error()}
+			return Result{Direct: direct}
+		}
+		checker = &Checker{config: config, timeout: c.timeout}
+	}
+	direct := checker.Check(ctx, endpoint)
 	result := Result{Direct: direct, Usable: direct.OK}
 	if strings.TrimSpace(relayEndpoint) != "" {
-		relay := c.Check(ctx, relayEndpoint)
+		relay := checker.Check(ctx, relayEndpoint)
 		result.Relay = &relay
 		result.Usable = result.Usable || relay.OK
 	}
@@ -84,4 +99,24 @@ func (c *Checker) Check(ctx context.Context, endpoint string) EndpointResult {
 	_ = connection.Close()
 	result.OK = true
 	return result
+}
+
+func addCACertificate(config *tls.Config, caCertificatePEM string) (*tls.Config, error) {
+	copied := config.Clone()
+	var roots *x509.CertPool
+	if copied.RootCAs != nil {
+		roots = copied.RootCAs.Clone()
+	} else {
+		var err error
+		roots, err = x509.SystemCertPool()
+		if err != nil || roots == nil {
+			roots = x509.NewCertPool()
+		}
+	}
+	if !roots.AppendCertsFromPEM([]byte(caCertificatePEM)) {
+		return nil, errors.New("link CA certificate is invalid")
+	}
+	copied.RootCAs = roots
+	copied.MinVersion = tls.VersionTLS13
+	return copied, nil
 }

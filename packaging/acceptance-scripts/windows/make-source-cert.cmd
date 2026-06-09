@@ -10,4 +10,5 @@ onesync-cert.exe -hosts "%SOURCE_HOSTS%" -cert certs\source.crt -key certs\sourc
 
 echo.
 echo Generated certs\source.crt and certs\source.key
-echo Copy certs\source.crt to the target computer. Do not copy certs\source.key.
+echo The generated synchronization link will carry certs\source.crt to the target.
+echo Do not copy certs\source.key.

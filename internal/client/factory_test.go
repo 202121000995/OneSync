@@ -66,6 +66,34 @@ func TestRunnersSynchronizeDirectlyAndReconnectBoundPeer(t *testing.T) {
 	assertTestFile(t, filepath.Join(targetRoot, "folder", "file.txt"), "second")
 }
 
+func TestTargetTrustsSourceCertificateFromCredential(t *testing.T) {
+	serverTLS, clientTLS := clientTestTLS(t)
+	endpoint := availableAddress(t)
+	sourceRoot := t.TempDir()
+	targetRoot := t.TempDir()
+	sourceStore := credentialStore(t)
+	targetStore := credentialStore(t)
+	token := testToken()
+	peerID, err := auth.NewPeerID()
+	if err != nil {
+		t.Fatalf("NewPeerID() error = %v", err)
+	}
+	saveCredential(t, sourceStore, "source", auth.Credential{
+		SessionID: "session", Endpoint: endpoint, Token: token, OneTime: true,
+	})
+	saveCredential(t, targetStore, "target", auth.Credential{
+		SessionID: "session", Endpoint: endpoint, Token: token, PeerID: peerID,
+		CACertificatePEM: certificatePEMFromTLS(t, serverTLS),
+	})
+	sourceFactory := testFactory(t, sourceStore, serverTLS, clientTLS)
+	targetFactory := testFactory(t, targetStore, nil, &tls.Config{})
+	sourceTask := task.Task{ID: "source", Role: task.RoleSource, SourcePath: sourceRoot}
+	targetTask := task.Task{ID: "target", Role: task.RoleTarget, TargetPath: targetRoot}
+
+	writeTestFile(t, filepath.Join(sourceRoot, "file.txt"), "trusted by link")
+	runRunnerPairUntilFile(t, sourceFactory, targetFactory, sourceTask, targetTask, filepath.Join(targetRoot, "file.txt"), "trusted by link")
+}
+
 func TestRunnersKeepSynchronizingUntilCanceled(t *testing.T) {
 	serverTLS, clientTLS := clientTestTLS(t)
 	endpoint := availableAddress(t)
@@ -314,6 +342,14 @@ func clientTestTLS(t *testing.T) (*tls.Config, *tls.Config) {
 			RootCAs:    roots,
 			MinVersion: tls.VersionTLS13,
 		}
+}
+
+func certificatePEMFromTLS(t *testing.T, config *tls.Config) string {
+	t.Helper()
+	if config == nil || len(config.Certificates) == 0 || len(config.Certificates[0].Certificate) == 0 {
+		t.Fatal("TLS config has no certificate")
+	}
+	return string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: config.Certificates[0].Certificate[0]}))
 }
 
 func availableAddress(t *testing.T) string {

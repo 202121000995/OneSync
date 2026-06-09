@@ -19,13 +19,14 @@ import (
 
 // Credential contains private connection material for one task.
 type Credential struct {
-	SessionID     string `json:"session_id"`
-	Endpoint      string `json:"endpoint"`
-	RelayEndpoint string `json:"relay_endpoint,omitempty"`
-	Token         string `json:"token"`
-	PeerID        string `json:"peer_id,omitempty"`
-	OneTime       bool   `json:"one_time,omitempty"`
-	Used          bool   `json:"used,omitempty"`
+	SessionID        string `json:"session_id"`
+	Endpoint         string `json:"endpoint"`
+	RelayEndpoint    string `json:"relay_endpoint,omitempty"`
+	CACertificatePEM string `json:"ca_certificate_pem,omitempty"`
+	Token            string `json:"token"`
+	PeerID           string `json:"peer_id,omitempty"`
+	OneTime          bool   `json:"one_time,omitempty"`
+	Used             bool   `json:"used,omitempty"`
 }
 
 // CredentialStore persists private task credentials separately from task state.
@@ -192,7 +193,7 @@ func (s *CredentialStore) path(taskID string) string {
 }
 
 func validateCredential(credential Credential) error {
-	if err := validateLinkMetadata(credential.SessionID, credential.Endpoint, credential.RelayEndpoint); err != nil {
+	if err := validateLinkMetadata(credential.SessionID, credential.Endpoint, credential.RelayEndpoint, credential.CACertificatePEM); err != nil {
 		return err
 	}
 	token, err := base64Token(credential.Token)

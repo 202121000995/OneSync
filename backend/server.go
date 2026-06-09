@@ -38,7 +38,7 @@ type taskManager interface {
 }
 
 type connectionTester interface {
-	Test(ctx context.Context, endpoint, relayEndpoint string) diagnostic.Result
+	TestWithCertificate(ctx context.Context, endpoint, relayEndpoint, caCertificatePEM string) diagnostic.Result
 }
 
 type endpointSuggester interface {
@@ -53,24 +53,26 @@ func (localEndpointSuggester) Suggestions(port int) ([]string, error) {
 
 // Options controls optional management server dependencies.
 type Options struct {
-	ConnectionTester    connectionTester
-	EndpointSuggester   endpointSuggester
-	SyncPort            int
-	DirectTLSConfigured bool
-	DirectTLSHosts      []string
+	ConnectionTester     connectionTester
+	EndpointSuggester    endpointSuggester
+	SyncPort             int
+	DirectTLSConfigured  bool
+	DirectTLSHosts       []string
+	DirectTLSCertificate string
 }
 
 // Server provides the local management API and web page.
 type Server struct {
-	manager             taskManager
-	links               *auth.LinkService
-	credentials         *auth.CredentialStore
-	connectionTester    connectionTester
-	endpointSuggester   endpointSuggester
-	syncPort            int
-	directTLSConfigured bool
-	directTLSHosts      []string
-	handler             http.Handler
+	manager              taskManager
+	links                *auth.LinkService
+	credentials          *auth.CredentialStore
+	connectionTester     connectionTester
+	endpointSuggester    endpointSuggester
+	syncPort             int
+	directTLSConfigured  bool
+	directTLSHosts       []string
+	directTLSCertificate string
+	handler              http.Handler
 }
 
 // NewServer creates a local management server.
@@ -84,14 +86,15 @@ func NewServerWithOptions(manager taskManager, links *auth.LinkService, credenti
 		return nil, errors.New("manager, link service, and credential store are required")
 	}
 	server := &Server{
-		manager:             manager,
-		links:               links,
-		credentials:         credentials,
-		connectionTester:    options.ConnectionTester,
-		endpointSuggester:   options.EndpointSuggester,
-		syncPort:            options.SyncPort,
-		directTLSConfigured: options.DirectTLSConfigured,
-		directTLSHosts:      append([]string(nil), options.DirectTLSHosts...),
+		manager:              manager,
+		links:                links,
+		credentials:          credentials,
+		connectionTester:     options.ConnectionTester,
+		endpointSuggester:    options.EndpointSuggester,
+		syncPort:             options.SyncPort,
+		directTLSConfigured:  options.DirectTLSConfigured,
+		directTLSHosts:       append([]string(nil), options.DirectTLSHosts...),
+		directTLSCertificate: options.DirectTLSCertificate,
 	}
 	if server.syncPort == 0 {
 		server.syncPort = DefaultSyncPort
@@ -270,7 +273,11 @@ func (s *Server) issueLink(writer http.ResponseWriter, request *http.Request) {
 		writeAPIError(writer, http.StatusBadRequest, errors.New("source link requires a TLS certificate or Relay endpoint"))
 		return
 	}
-	encoded, err := s.links.Issue(input.TaskID, input.Endpoint, input.RelayEndpoint)
+	caCertificate := ""
+	if s.directTLSConfigured {
+		caCertificate = s.directTLSCertificate
+	}
+	encoded, err := s.links.IssueWithCertificate(input.TaskID, input.Endpoint, input.RelayEndpoint, caCertificate)
 	if err != nil {
 		writeAPIError(writer, http.StatusBadRequest, err)
 		return
@@ -282,7 +289,8 @@ func (s *Server) issueLink(writer http.ResponseWriter, request *http.Request) {
 	}
 	if err := s.credentials.Save(input.TaskID, auth.Credential{
 		SessionID: link.SessionID, Endpoint: link.Endpoint,
-		RelayEndpoint: link.RelayEndpoint, Token: link.Token, OneTime: true,
+		RelayEndpoint: link.RelayEndpoint, CACertificatePEM: link.CACertificatePEM,
+		Token: link.Token, OneTime: true,
 	}); err != nil {
 		writeAPIError(writer, http.StatusInternalServerError, err)
 		return
@@ -331,7 +339,8 @@ func (s *Server) joinLink(writer http.ResponseWriter, request *http.Request) {
 	}
 	if err := s.credentials.Save(input.TaskID, auth.Credential{
 		SessionID: link.SessionID, Endpoint: link.Endpoint,
-		RelayEndpoint: link.RelayEndpoint, Token: link.Token, PeerID: peerID,
+		RelayEndpoint: link.RelayEndpoint, CACertificatePEM: link.CACertificatePEM,
+		Token: link.Token, PeerID: peerID,
 	}); err != nil {
 		writeAPIError(writer, http.StatusInternalServerError, err)
 		return
@@ -364,7 +373,7 @@ func (s *Server) testLink(writer http.ResponseWriter, request *http.Request) {
 		writeAPIError(writer, http.StatusBadRequest, errors.New("synchronization link has expired"))
 		return
 	}
-	result := s.connectionTester.Test(request.Context(), link.Endpoint, link.RelayEndpoint)
+	result := s.connectionTester.TestWithCertificate(request.Context(), link.Endpoint, link.RelayEndpoint, link.CACertificatePEM)
 	writeJSON(writer, http.StatusOK, result)
 }
 

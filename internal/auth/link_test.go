@@ -2,8 +2,12 @@ package auth
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/202121000995/OneSync/internal/certutil"
 )
 
 func TestLinkIssueParseAndOneTimeRedeem(t *testing.T) {
@@ -49,6 +53,32 @@ func TestLinkExpiresAfter24Hours(t *testing.T) {
 	}
 }
 
+func TestLinkCarriesSourceCertificate(t *testing.T) {
+	service := NewLinkService()
+	service.random = fixedRandom
+	certificatePEM := testCertificatePEM(t)
+
+	encoded, err := service.IssueWithCertificate("session-1", "192.168.1.10:7443", "", certificatePEM)
+	if err != nil {
+		t.Fatalf("IssueWithCertificate() error = %v", err)
+	}
+	link, err := service.Parse(encoded)
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+	if link.CACertificatePEM != certificatePEM {
+		t.Fatal("parsed link did not preserve source certificate")
+	}
+}
+
+func TestLinkRejectsInvalidCertificate(t *testing.T) {
+	service := NewLinkService()
+	service.random = fixedRandom
+	if _, err := service.IssueWithCertificate("session-1", "192.168.1.10:7443", "", "not a certificate"); err == nil {
+		t.Fatal("IssueWithCertificate() accepted invalid certificate")
+	}
+}
+
 func TestLinkRejectsMalformedAndUnsafeMetadata(t *testing.T) {
 	service := NewLinkService()
 	if _, err := service.Issue("../session", "endpoint", ""); err == nil {
@@ -74,4 +104,24 @@ func fixedRandom(data []byte) (int, error) {
 		data[index] = byte(index + 1)
 	}
 	return len(data), nil
+}
+
+func testCertificatePEM(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	certPath := filepath.Join(root, "source.crt")
+	keyPath := filepath.Join(root, "source.key")
+	if err := certutil.Generate(certutil.Options{
+		Hosts:    []string{"192.168.1.10"},
+		CertPath: certPath,
+		KeyPath:  keyPath,
+		Validity: time.Hour,
+	}); err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+	data, err := os.ReadFile(certPath)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	return string(data)
 }

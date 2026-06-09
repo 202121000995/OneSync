@@ -31,15 +31,16 @@ When using `packaging/package-acceptance.sh`, attach or paste `PACKAGE-SHA256SUM
 
 ## Certificates
 
-| Certificate | Generated on | Hosts/SANs | Copied to | Used as `-ca` by |
+| Certificate | Generated on | Hosts/SANs | How it is trusted | Notes |
 | --- | --- | --- | --- | --- |
-| source.crt |  |  |  |  |
+| source.crt |  |  | Carried in synchronization link | Do not copy source.key |
 | relay.crt |  |  |  |  |
 | onesync-ca.crt |  |  |  |  |
 
 Notes:
 
 - Confirm private keys were not copied to target computers.
+- Confirm the generated link includes the source public certificate for direct mode.
 - Confirm the source endpoint host appears in the source certificate.
 - Confirm the Relay endpoint host appears in the Relay certificate.
 
@@ -93,7 +94,7 @@ Relay command:
 
 | Check | Expected | Result | Notes |
 | --- | --- | --- | --- |
-| Wrong CA on target | "测试连接" fails certificate verification |  |  |
+| Wrong or missing Relay CA on target | Relay "测试连接" fails certificate verification |  |  |
 | Source certificate missing endpoint host | Link dialog warns before testing |  |  |
 | Source without cert and without Relay | Link generation is rejected |  |  |
 | Expired or consumed link | Join is rejected |  |  |

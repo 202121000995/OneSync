@@ -14,7 +14,7 @@ import (
 )
 
 func TestCheckerVerifiesTLSEndpoint(t *testing.T) {
-	serverConfig, clientConfig := diagnosticTLSConfigs(t)
+	serverConfig, clientConfig, _ := diagnosticTLSConfigs(t)
 	listener := startDiagnosticTLSServer(t, serverConfig)
 
 	checker, err := NewChecker(clientConfig, time.Second)
@@ -28,7 +28,7 @@ func TestCheckerVerifiesTLSEndpoint(t *testing.T) {
 }
 
 func TestCheckerReportsUntrustedCertificate(t *testing.T) {
-	serverConfig, _ := diagnosticTLSConfigs(t)
+	serverConfig, _, _ := diagnosticTLSConfigs(t)
 	listener := startDiagnosticTLSServer(t, serverConfig)
 	checker, err := NewChecker(&tls.Config{}, time.Second)
 	if err != nil {
@@ -40,13 +40,26 @@ func TestCheckerReportsUntrustedCertificate(t *testing.T) {
 	}
 }
 
+func TestCheckerUsesLinkCertificate(t *testing.T) {
+	serverConfig, _, certPEM := diagnosticTLSConfigs(t)
+	listener := startDiagnosticTLSServer(t, serverConfig)
+	checker, err := NewChecker(&tls.Config{}, time.Second)
+	if err != nil {
+		t.Fatalf("NewChecker() error = %v", err)
+	}
+	result := checker.TestWithCertificate(context.Background(), listener.Addr().String(), "", string(certPEM))
+	if !result.Usable || !result.Direct.OK {
+		t.Fatalf("TestWithCertificate() = %+v, want usable endpoint", result)
+	}
+}
+
 func TestCheckerRejectsDisabledVerification(t *testing.T) {
 	if _, err := NewChecker(&tls.Config{InsecureSkipVerify: true}, time.Second); err == nil {
 		t.Fatal("NewChecker() accepted disabled certificate verification")
 	}
 }
 
-func diagnosticTLSConfigs(t *testing.T) (*tls.Config, *tls.Config) {
+func diagnosticTLSConfigs(t *testing.T) (*tls.Config, *tls.Config, []byte) {
 	t.Helper()
 	root := t.TempDir()
 	certPath := filepath.Join(root, "server.crt")
@@ -71,7 +84,7 @@ func diagnosticTLSConfigs(t *testing.T) (*tls.Config, *tls.Config) {
 	if !roots.AppendCertsFromPEM(certPEM) {
 		t.Fatal("AppendCertsFromPEM() = false")
 	}
-	return &tls.Config{Certificates: []tls.Certificate{certificate}}, &tls.Config{RootCAs: roots}
+	return &tls.Config{Certificates: []tls.Certificate{certificate}}, &tls.Config{RootCAs: roots}, certPEM
 }
 
 func startDiagnosticTLSServer(t *testing.T, config *tls.Config) net.Listener {

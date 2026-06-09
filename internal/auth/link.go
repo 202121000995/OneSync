@@ -5,8 +5,10 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
@@ -24,13 +26,14 @@ const (
 
 // Link contains the public connection metadata carried between devices.
 type Link struct {
-	Version       int       `json:"version"`
-	SessionID     string    `json:"session_id"`
-	Endpoint      string    `json:"endpoint"`
-	RelayEndpoint string    `json:"relay_endpoint,omitempty"`
-	Token         string    `json:"token"`
-	IssuedAt      time.Time `json:"issued_at"`
-	ExpiresAt     time.Time `json:"expires_at"`
+	Version          int       `json:"version"`
+	SessionID        string    `json:"session_id"`
+	Endpoint         string    `json:"endpoint"`
+	RelayEndpoint    string    `json:"relay_endpoint,omitempty"`
+	CACertificatePEM string    `json:"ca_certificate_pem,omitempty"`
+	Token            string    `json:"token"`
+	IssuedAt         time.Time `json:"issued_at"`
+	ExpiresAt        time.Time `json:"expires_at"`
 }
 
 type issuedLink struct {
@@ -58,7 +61,12 @@ func NewLinkService() *LinkService {
 
 // Issue creates a link valid for 24 hours.
 func (s *LinkService) Issue(sessionID, endpoint, relayEndpoint string) (string, error) {
-	if err := validateLinkMetadata(sessionID, endpoint, relayEndpoint); err != nil {
+	return s.IssueWithCertificate(sessionID, endpoint, relayEndpoint, "")
+}
+
+// IssueWithCertificate creates a link and optionally includes a public CA certificate.
+func (s *LinkService) IssueWithCertificate(sessionID, endpoint, relayEndpoint, caCertificatePEM string) (string, error) {
+	if err := validateLinkMetadata(sessionID, endpoint, relayEndpoint, caCertificatePEM); err != nil {
 		return "", err
 	}
 	tokenBytes := make([]byte, linkTokenBytes)
@@ -68,13 +76,14 @@ func (s *LinkService) Issue(sessionID, endpoint, relayEndpoint string) (string, 
 	token := base64.RawURLEncoding.EncodeToString(tokenBytes)
 	now := s.now().UTC()
 	link := Link{
-		Version:       LinkVersion,
-		SessionID:     sessionID,
-		Endpoint:      endpoint,
-		RelayEndpoint: relayEndpoint,
-		Token:         token,
-		IssuedAt:      now,
-		ExpiresAt:     now.Add(DefaultLinkTTL),
+		Version:          LinkVersion,
+		SessionID:        sessionID,
+		Endpoint:         endpoint,
+		RelayEndpoint:    relayEndpoint,
+		CACertificatePEM: caCertificatePEM,
+		Token:            token,
+		IssuedAt:         now,
+		ExpiresAt:        now.Add(DefaultLinkTTL),
 	}
 	data, err := json.Marshal(link)
 	if err != nil {
@@ -114,7 +123,7 @@ func (s *LinkService) Parse(encoded string) (Link, error) {
 	if link.Version != LinkVersion {
 		return Link{}, fmt.Errorf("unsupported synchronization link version %d", link.Version)
 	}
-	if err := validateLinkMetadata(link.SessionID, link.Endpoint, link.RelayEndpoint); err != nil {
+	if err := validateLinkMetadata(link.SessionID, link.Endpoint, link.RelayEndpoint, link.CACertificatePEM); err != nil {
 		return Link{}, err
 	}
 	tokenBytes, err := base64.RawURLEncoding.DecodeString(link.Token)
@@ -160,7 +169,7 @@ func (s *LinkService) removeExpiredLocked(now time.Time) {
 	}
 }
 
-func validateLinkMetadata(sessionID, endpoint, relayEndpoint string) error {
+func validateLinkMetadata(sessionID, endpoint, relayEndpoint, caCertificatePEM string) error {
 	if strings.TrimSpace(sessionID) == "" || len(sessionID) > 128 {
 		return errors.New("session ID is invalid")
 	}
@@ -172,6 +181,18 @@ func validateLinkMetadata(sessionID, endpoint, relayEndpoint string) error {
 	}
 	if len(relayEndpoint) > 2048 {
 		return errors.New("relay endpoint is invalid")
+	}
+	if caCertificatePEM != "" {
+		if len(caCertificatePEM) > 8192 {
+			return errors.New("CA certificate is too large")
+		}
+		block, rest := pem.Decode([]byte(caCertificatePEM))
+		if block == nil || block.Type != "CERTIFICATE" || len(bytes.TrimSpace(rest)) != 0 {
+			return errors.New("CA certificate is invalid")
+		}
+		if _, err := x509.ParseCertificate(block.Bytes); err != nil {
+			return errors.New("CA certificate is invalid")
+		}
 	}
 	return nil
 }

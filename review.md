@@ -1183,3 +1183,29 @@
 
 - 自动启动仍依赖证书、端口、防火墙和 Relay 配置正确；连接失败会显示在任务卡片错误信息里。
 - 当前仍是验收包体验，正式版还需要安装器、托盘和证书向导进一步简化。
+
+## 源端证书随链接携带审核
+
+审核分支：`feature/embed-source-cert-in-link`
+
+审核结论：通过。
+
+审核说明：
+
+- 同步链接新增可选公开 CA 证书字段，用于携带源端 `source.crt`。
+- 源端生成链接时自动把当前加载的源端公开证书写入链接。
+- 目标端加入链接后把证书保存到任务凭据，连接源端时按任务追加信任根。
+- “测试连接”同样使用链接内证书，目标端无需先复制 `source.crt` 文件。
+- Windows/Linux 目标端启动脚本不再要求 `-ca source.crt`。
+- Quickstart、preflight checklist 和验收报告模板已改为一次粘贴链接流程。
+
+验证结果：
+
+- `go test ./internal/auth ./internal/client ./internal/diagnostic ./backend ./cmd/onesync` 通过。
+- `go test ./...` 通过。
+- `go vet ./...` 通过。
+
+剩余风险：
+
+- 链接会变长；当前限制仍覆盖本地自签证书验收场景。
+- Relay 使用自签证书时，Relay 证书仍需要通过 `-ca` 信任，除非后续也把 Relay 证书纳入链接或改用正式证书。

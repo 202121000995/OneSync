@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -176,13 +177,17 @@ func (r *runner) runCycle(ctx context.Context, taskID string, reporter task.Stat
 		return engine.Run(ctx, taskID)
 	}
 
+	clientTLS, err := clientTLSForCredential(r.factory.clientTLS, credential)
+	if err != nil {
+		return err
+	}
 	session, err := connectTarget(
 		ctx,
 		credential,
 		token,
 		[]byte(credential.Token),
 		credential.PeerID,
-		r.factory.clientTLS,
+		clientTLS,
 		r.factory.maxPayload,
 	)
 	if err != nil {
@@ -197,6 +202,29 @@ func (r *runner) runCycle(ctx context.Context, taskID string, reporter task.Stat
 		return err
 	}
 	return engine.Run(ctx, taskID)
+}
+
+func clientTLSForCredential(base *tls.Config, credential auth.Credential) (*tls.Config, error) {
+	config := base.Clone()
+	if credential.CACertificatePEM == "" {
+		return config, nil
+	}
+	var roots *x509.CertPool
+	if config.RootCAs != nil {
+		roots = config.RootCAs.Clone()
+	} else {
+		var err error
+		roots, err = x509.SystemCertPool()
+		if err != nil || roots == nil {
+			roots = x509.NewCertPool()
+		}
+	}
+	if !roots.AppendCertsFromPEM([]byte(credential.CACertificatePEM)) {
+		return nil, errors.New("task link CA certificate is invalid")
+	}
+	config.RootCAs = roots
+	config.MinVersion = tls.VersionTLS13
+	return config, nil
 }
 
 func (f *Factory) loadCredential(taskID string) (auth.Credential, error) {
