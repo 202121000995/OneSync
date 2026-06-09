@@ -1753,3 +1753,27 @@
 
 - “信任设备”当前是管理状态和诊断标记，正式的加密级访问控制仍依赖同步链接令牌、设备绑定、禁用和踢出。
 - 前端行为测试覆盖了核心数据逻辑，但还不是完整浏览器端到端测试；真实 Windows/Linux 页面操作仍需要继续验收。
+
+## Linux 命令快捷入口审核
+
+审核分支：`feature/linux-command-shortcuts`
+
+审核结论：通过。
+
+审核说明：
+
+- Linux 客户端安装和升级时，除 `/usr/local/bin/onesync`、`/usr/local/bin/onesyncctl` 外，同步创建 `/usr/bin/onesync` 和 `/usr/bin/onesyncctl` 快捷入口。
+- Linux Relay 安装和升级时，除 `/usr/local/bin/onesyncr`、`/usr/local/bin/onesync-relayctl` 外，同步创建 `/usr/bin/onesyncr` 和 `/usr/bin/onesync-relayctl` 快捷入口。
+- 卸载客户端或 Relay 时会清理对应 `/usr/bin` 快捷入口。
+- Quickstart 补充说明：这样可兼容 `sudo` 默认路径不包含 `/usr/local/bin` 的 Linux 服务器。
+
+验证结果：
+
+- `sh -n packaging/acceptance-scripts/linux/onesyncctl` 通过。
+- `sh -n packaging/acceptance-scripts/linux/onesync-relayctl` 通过。
+- `sh -n packaging/acceptance-scripts/linux/deploy-onesync.sh` 通过。
+- `sh -n packaging/acceptance-scripts/linux/deploy-relaytls.sh` 通过。
+
+剩余风险：
+
+- 如果服务器策略禁止写入 `/usr/bin`，安装仍会失败；这种环境需要通过 `ONESYNC_COMMAND_LINK_DIR` 指定允许写入的命令目录。

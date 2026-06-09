@@ -3,6 +3,7 @@ set -eu
 
 SERVICE=onesync.service
 INSTALL_DIR=${ONESYNC_INSTALL_DIR:-/usr/local/bin}
+COMMAND_LINK_DIR=${ONESYNC_COMMAND_LINK_DIR:-/usr/bin}
 DATA_DIR=${ONESYNC_DATA_DIR:-/var/lib/onesync}
 LOG_DIR=${ONESYNC_LOG_DIR:-/var/log/onesync}
 PORT=${ONESYNC_PORT:-8765}
@@ -20,6 +21,25 @@ need_root() {
 
 script_dir() {
 	cd -- "$(dirname -- "$0")" && pwd
+}
+
+install_command_link() {
+	name=$1
+	target=$2
+	if [ -d "$COMMAND_LINK_DIR" ] && [ "$COMMAND_LINK_DIR" != "$INSTALL_DIR" ]; then
+		ln -sf "$target" "$COMMAND_LINK_DIR/$name"
+	fi
+}
+
+install_command_links() {
+	install_command_link onesync "$INSTALL_DIR/onesync"
+	install_command_link onesyncctl "$INSTALL_DIR/onesyncctl"
+}
+
+remove_command_links() {
+	if [ -d "$COMMAND_LINK_DIR" ] && [ "$COMMAND_LINK_DIR" != "$INSTALL_DIR" ]; then
+		rm -f "$COMMAND_LINK_DIR/onesync" "$COMMAND_LINK_DIR/onesyncctl"
+	fi
 }
 
 proxy_url() {
@@ -54,6 +74,7 @@ install_service() {
 		install -m 0755 "$dir/onesync-cert" "$INSTALL_DIR/onesync-cert"
 	fi
 	install -m 0755 "$0" "$INSTALL_DIR/onesyncctl"
+	install_command_links
 	cat > /etc/systemd/system/$SERVICE <<EOF
 [Unit]
 Description=OneSync service
@@ -109,6 +130,7 @@ upgrade_service() {
 	if [ -x "$stage/onesync-menu" ]; then
 		install -m 0755 "$stage/onesync-menu" "$INSTALL_DIR/onesync"
 	fi
+	install_command_links
 	if [ "$was_active" -eq 1 ]; then
 		systemctl start "$SERVICE"
 	fi
@@ -123,6 +145,7 @@ uninstall_service() {
 	rm -f /etc/systemd/system/$SERVICE
 	systemctl daemon-reload
 	rm -f "$INSTALL_DIR/onesyncd" "$INSTALL_DIR/onesyncctl" "$INSTALL_DIR/onesync"
+	remove_command_links
 	printf 'OneSync uninstalled. Data remains at %s and logs remain at %s.\n' "$DATA_DIR" "$LOG_DIR"
 }
 

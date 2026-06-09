@@ -93,6 +93,7 @@ curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/202121000995/O
 
 After installing the Linux client, run `onesync` to show the Chinese client command menu with common status, log, restart, upgrade, and uninstall commands.
 After installing the Linux Relay, run `onesyncr` to show the Chinese Relay command menu.
+The installers place service binaries under `/usr/local/bin` and also create command shortcuts under `/usr/bin` when available, so `sudo onesyncctl status` and `sudo onesync-relayctl status` work on systems whose `sudo` path does not include `/usr/local/bin`.
 
 For a Linux Relay server, use the one-command Relay TLS deployment script. `RELAY_HOSTS` is the Relay server domain or public IP without the port, `RELAY_PORT` is the port clients will use, and `RELAY_TOKEN` is the Relay access token. If `RELAY_TOKEN` is omitted, the installer generates one and stores it in `/etc/onesync/relay.token`:
 

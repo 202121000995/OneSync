@@ -3,6 +3,7 @@ set -eu
 
 SERVICE=onesync-relay.service
 INSTALL_DIR=${ONESYNC_INSTALL_DIR:-/usr/local/bin}
+COMMAND_LINK_DIR=${ONESYNC_COMMAND_LINK_DIR:-/usr/bin}
 CONFIG_DIR=${ONESYNC_RELAY_CONFIG_DIR:-/etc/onesync}
 LOG_DIR=${ONESYNC_LOG_DIR:-/var/log/onesync}
 RELAY_PORT=${RELAY_PORT:-7443}
@@ -22,6 +23,25 @@ need_root() {
 
 script_dir() {
 	cd -- "$(dirname -- "$0")" && pwd
+}
+
+install_command_link() {
+	name=$1
+	target=$2
+	if [ -d "$COMMAND_LINK_DIR" ] && [ "$COMMAND_LINK_DIR" != "$INSTALL_DIR" ]; then
+		ln -sf "$target" "$COMMAND_LINK_DIR/$name"
+	fi
+}
+
+install_command_links() {
+	install_command_link onesyncr "$INSTALL_DIR/onesyncr"
+	install_command_link onesync-relayctl "$INSTALL_DIR/onesync-relayctl"
+}
+
+remove_command_links() {
+	if [ -d "$COMMAND_LINK_DIR" ] && [ "$COMMAND_LINK_DIR" != "$INSTALL_DIR" ]; then
+		rm -f "$COMMAND_LINK_DIR/onesyncr" "$COMMAND_LINK_DIR/onesync-relayctl"
+	fi
 }
 
 proxy_url() {
@@ -101,6 +121,7 @@ install_service() {
 	if [ -x "$dir/onesyncr-menu" ]; then
 		install -m 0755 "$dir/onesyncr-menu" "$INSTALL_DIR/onesyncr"
 	fi
+	install_command_links
 	if [ ! -x "$INSTALL_DIR/onesyncctl" ]; then
 		rm -f "$INSTALL_DIR/onesync"
 	fi
@@ -171,6 +192,7 @@ upgrade_service() {
 	if [ -x "$stage/onesyncr-menu" ]; then
 		install -m 0755 "$stage/onesyncr-menu" "$INSTALL_DIR/onesyncr"
 	fi
+	install_command_links
 	if [ ! -x "$INSTALL_DIR/onesyncctl" ]; then
 		rm -f "$INSTALL_DIR/onesync"
 	fi
@@ -188,6 +210,7 @@ uninstall_service() {
 	rm -f /etc/systemd/system/$SERVICE
 	systemctl daemon-reload
 	rm -f "$INSTALL_DIR/onesync-relay" "$INSTALL_DIR/onesync-relayctl" "$INSTALL_DIR/onesyncr"
+	remove_command_links
 	printf 'OneSync Relay uninstalled. Certificate and token remain at %s and logs remain at %s.\n' "$CONFIG_DIR" "$LOG_DIR"
 }
 
