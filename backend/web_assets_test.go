@@ -50,12 +50,39 @@ func TestWebScriptKeepsReadinessRegressionsCovered(t *testing.T) {
 		"已加入同步，目标端任务正在启动",
 		"最近生成的源端链接",
 		"重启不会改变这个链接",
+		"已重新扫描并启动同步",
 		"删除",
 		"不会删除你的同步目录文件",
 	}
 	for _, text := range required {
 		if !strings.Contains(script, text) {
 			t.Fatalf("app.js no longer contains %q", text)
+		}
+	}
+}
+
+func TestWebPageKeepsTaskTableAsMainSurface(t *testing.T) {
+	html := readWebAsset(t, "web/index.html")
+	required := []string{
+		"同步任务",
+		"创建同步",
+		"加入同步",
+		"暂停/开始",
+		"重新扫描",
+		"设置",
+		"删除",
+		"类型",
+		"名称",
+		"状态",
+		"同步设备",
+		"本地大小",
+		"标准大小",
+		"接收流量",
+		"发送流量",
+	}
+	for _, text := range required {
+		if !strings.Contains(html, text) {
+			t.Fatalf("index.html no longer contains %q", text)
 		}
 	}
 }

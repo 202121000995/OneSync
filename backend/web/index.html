@@ -7,18 +7,64 @@
   <link rel="stylesheet" href="/app.css">
 </head>
 <body>
-  <main>
-    <header>
-      <div>
-        <p class="eyebrow">本机管理</p>
-        <h1>OneSync</h1>
-        <p>创建同步任务，生成链接，或在这台设备上加入同步。</p>
-      </div>
-      <button id="refresh" class="secondary">刷新</button>
-    </header>
+  <main class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">OneSync</div>
+      <nav>
+        <button class="nav-item active" type="button">同步任务</button>
+        <button class="nav-item" type="button" disabled>设备管理</button>
+        <button class="nav-item" type="button" disabled>连接管理</button>
+        <button class="nav-item" type="button" disabled>设置</button>
+        <button class="nav-item" type="button" disabled>日志</button>
+        <button class="nav-item" type="button" disabled>关于</button>
+      </nav>
+    </aside>
 
-    <section class="grid">
-      <form id="create-form" class="card">
+    <section class="workspace">
+      <header>
+        <div>
+          <h1>同步任务</h1>
+          <p>同步任务是 OneSync 的主界面；创建、加入和设置都围绕选中的任务操作。</p>
+        </div>
+        <span id="status">正在加载</span>
+      </header>
+
+      <section class="toolbar">
+        <div class="toolbar-left">
+          <button id="toolbar-start-stop" class="secondary" type="button" disabled>暂停/开始</button>
+          <button id="toolbar-rescan" class="secondary" type="button" disabled>重新扫描</button>
+          <button id="toolbar-settings" class="secondary" type="button" disabled>设置</button>
+          <button id="toolbar-delete" class="secondary danger" type="button" disabled>删除</button>
+        </div>
+        <div class="toolbar-right">
+          <button id="open-create" type="button">创建同步</button>
+          <button id="open-join" class="secondary" type="button">加入同步</button>
+          <button id="refresh" class="secondary" type="button">刷新</button>
+        </div>
+      </section>
+
+      <section class="card tasks">
+        <table class="task-table">
+          <thead>
+            <tr>
+              <th class="select-col"></th>
+              <th>类型</th>
+              <th>名称</th>
+              <th>状态</th>
+              <th>同步设备</th>
+              <th>本地大小</th>
+              <th>标准大小</th>
+              <th>接收流量</th>
+              <th>发送流量</th>
+            </tr>
+          </thead>
+          <tbody id="task-list"></tbody>
+        </table>
+      </section>
+    </section>
+
+    <dialog id="create-dialog">
+      <form id="create-form">
         <h2>创建任务</h2>
         <label>任务名称<input name="id" required maxlength="128" placeholder="例如：照片备份"></label>
         <label>设备角色
@@ -28,10 +74,15 @@
           </select>
         </label>
         <label>同步目录<input name="path" required placeholder="请选择或输入绝对路径"></label>
-        <button type="submit">创建任务</button>
+        <div class="dialog-actions">
+          <button type="submit">创建任务</button>
+          <button id="close-create-dialog" class="secondary" type="button">关闭</button>
+        </div>
       </form>
+    </dialog>
 
-      <form id="join-form" class="card">
+    <dialog id="join-dialog">
+      <form id="join-form">
         <h2>加入同步</h2>
         <label>同步链接<textarea name="link" required rows="4" placeholder="粘贴源设备生成的链接"></textarea></label>
         <label>保存目录<input name="target_path" required placeholder="请输入绝对路径"></label>
@@ -40,17 +91,10 @@
         <div class="form-actions">
           <button id="test-link" type="button" class="secondary">测试连接</button>
           <button type="submit">加入并启动</button>
+          <button id="close-join-dialog" class="secondary" type="button">关闭</button>
         </div>
       </form>
-    </section>
-
-    <section class="card tasks">
-      <div class="section-title">
-        <h2>同步任务</h2>
-        <span id="status">正在加载</span>
-      </div>
-      <div id="task-list" class="task-list"></div>
-    </section>
+    </dialog>
 
     <dialog id="link-dialog">
       <form id="link-form">
@@ -66,6 +110,18 @@
           <button id="generate-link" type="submit">生成链接并启动源端</button>
           <button id="copy-link" type="button">复制链接</button>
           <button id="close-link-dialog" class="secondary" type="button">关闭</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="settings-dialog">
+      <form method="dialog">
+        <h2>任务设置</h2>
+        <p id="settings-summary" class="hint">请选择一个同步任务。</p>
+        <label>忽略规则<textarea rows="6" placeholder="后续用于填写不需要同步的文件或文件夹规则" disabled></textarea></label>
+        <p class="hint warning">忽略规则设置入口已预留，后端规则保存会在下一步接入。</p>
+        <div class="dialog-actions">
+          <button class="secondary" type="submit">关闭</button>
         </div>
       </form>
     </dialog>

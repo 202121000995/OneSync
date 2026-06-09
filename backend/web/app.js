@@ -2,15 +2,25 @@ const list = document.querySelector("#task-list");
 const statusText = document.querySelector("#status");
 const toast = document.querySelector("#toast");
 const dialog = document.querySelector("#link-dialog");
+const createDialog = document.querySelector("#create-dialog");
+const joinDialog = document.querySelector("#join-dialog");
+const settingsDialog = document.querySelector("#settings-dialog");
 const linkForm = document.querySelector("#link-form");
 const generatedLink = document.querySelector("#generated-link");
 const endpointSuggestions = document.querySelector("#endpoint-suggestions");
 const connectionResult = document.querySelector("#connection-result");
 const testLinkButton = document.querySelector("#test-link");
 const linkReadinessHint = document.querySelector("#link-readiness-hint");
+const startStopButton = document.querySelector("#toolbar-start-stop");
+const rescanButton = document.querySelector("#toolbar-rescan");
+const settingsButton = document.querySelector("#toolbar-settings");
+const deleteButton = document.querySelector("#toolbar-delete");
+const settingsSummary = document.querySelector("#settings-summary");
 const defaultConfig = { sync_port: 7443, direct_tls_configured: false, direct_tls_hosts: [], direct_tls_endpoints: [] };
 const sourceLinksStorageKey = "onesync.sourceLinks.v1";
 let appConfig = { ...defaultConfig };
+let tasksCache = [];
+let selectedTaskId = "";
 
 async function api(path, options = {}) {
   const response = await fetch(path, {
@@ -32,44 +42,149 @@ async function loadTasks() {
   statusText.textContent = "正在加载";
   try {
     const { tasks } = await api("/api/tasks", { headers: {} });
-    list.replaceChildren(...tasks.map(renderTask));
-    if (!tasks.length) list.innerHTML = "<p>还没有同步任务。</p>";
+    tasksCache = tasks || [];
+    if (selectedTaskId && !tasksCache.some((task) => task.id === selectedTaskId)) selectedTaskId = "";
+    list.replaceChildren(...(tasksCache.length ? tasksCache.map(renderTaskRow) : [emptyTaskRow()]));
     statusText.textContent = `${tasks.length} 个任务`;
+    updateToolbar();
   } catch (error) {
     statusText.textContent = "加载失败";
     notify(error.message);
   }
 }
 
-function renderTask(task) {
-  const item = document.createElement("article");
-  item.className = `task ${taskClass(task)}`;
-  const details = document.createElement("div");
-  const path = task.role === "source" ? task.source_path : task.target_path;
-  details.innerHTML = `<h3></h3><p></p><p class="state-detail"></p><p class="warning"></p><p class="progress"></p><p class="error"></p>`;
-  details.querySelector("h3").textContent = task.id;
-  details.querySelector("p").textContent = `${task.role === "source" ? "源端" : "目标端"} · ${path} · `;
+function renderTaskRow(task) {
+  const row = document.createElement("tr");
+  row.className = `${taskClass(task)} ${task.id === selectedTaskId ? "selected" : ""}`;
+  row.title = [taskStateDetail(task), sourceReadinessWarning(task), task.last_error].filter(Boolean).join("\n");
+  row.addEventListener("click", () => selectTask(task.id));
+
+  const selector = document.createElement("input");
+  selector.type = "checkbox";
+  selector.checked = task.id === selectedTaskId;
+  selector.addEventListener("click", (event) => {
+    event.stopPropagation();
+    selectTask(task.id);
+  });
+
+  appendCell(row, selector, "select-col");
+  appendCell(row, roleLabel(task));
+  appendCell(row, taskNameCell(task));
+  appendCell(row, statusCell(task));
+  appendCell(row, syncDeviceCell(task));
+  appendCell(row, localSizeLabel(task));
+  appendCell(row, standardSizeLabel(task));
+  appendCell(row, "0 B/s", "muted");
+  appendCell(row, "0 B/s", "muted");
+  return row;
+}
+
+function emptyTaskRow() {
+  const row = document.createElement("tr");
+  const cell = document.createElement("td");
+  cell.colSpan = 9;
+  cell.className = "empty-row";
+  cell.textContent = "还没有同步任务。点击右上角“创建同步”或“加入同步”开始。";
+  row.append(cell);
+  return row;
+}
+
+function appendCell(row, content, className = "") {
+  const cell = document.createElement("td");
+  if (className) cell.className = className;
+  if (content instanceof Node) cell.append(content);
+  else cell.textContent = content;
+  row.append(cell);
+  return cell;
+}
+
+function roleLabel(task) {
+  return task.role === "source" ? "源端" : "目标端";
+}
+
+function taskNameCell(task) {
+  const box = document.createElement("div");
+  const name = document.createElement("strong");
+  const path = document.createElement("span");
+  name.textContent = task.id;
+  path.textContent = task.role === "source" ? task.source_path : task.target_path;
+  box.className = "task-name";
+  box.append(name, path);
+  return box;
+}
+
+function statusCell(task) {
+  const box = document.createElement("div");
+  box.className = "status-cell";
   const badge = document.createElement("span");
   badge.className = `badge ${task.state || "unknown"}`;
   badge.textContent = stateLabel(task.state);
-  details.querySelector("p").append(badge);
-  details.querySelector(".state-detail").textContent = taskStateDetail(task);
-  details.querySelector(".warning").textContent = sourceReadinessWarning(task);
-  details.querySelector(".progress").textContent = progressLabel(task.progress);
-  details.querySelector(".error").textContent = task.last_error || "";
+  box.append(badge);
+  if (task.last_error) {
+    const error = document.createElement("span");
+    error.className = "row-error";
+    error.textContent = task.last_error;
+    box.append(error);
+  }
+  return box;
+}
+
+function syncDeviceCell(task) {
+  const box = document.createElement("div");
+  box.className = "device-cell";
   if (task.role === "source") {
     const savedLink = savedSourceLink(task.id);
-    if (savedLink) details.append(renderSavedSourceLink(task.id, savedLink));
+    const button = actionButton(savedLink ? "复制链接" : "生成链接", async (event) => {
+      event.stopPropagation();
+      if (savedLink) {
+        await navigator.clipboard.writeText(savedLink.link);
+        notify("源端链接已复制");
+      } else {
+        issueLink(task.id);
+      }
+    }, { compact: true });
+    box.append(button);
+    if (savedLink) {
+      const show = actionButton("显示", (event) => {
+        event.stopPropagation();
+        showSavedLink(task.id, savedLink);
+      }, { compact: true, secondary: true });
+      box.append(show);
+    }
+  } else {
+    box.textContent = task.peer_address || task.relay_url || "已加入";
   }
+  return box;
+}
 
-  const actions = document.createElement("div");
-  actions.className = "actions";
-  actions.append(actionButton("启动", () => taskAction(task.id, "start"), { disabled: isRunningTask(task) }));
-  actions.append(actionButton("停止", () => taskAction(task.id, "stop"), { secondary: true, disabled: !isRunningTask(task) }));
-  if (task.role === "source") actions.append(actionButton(savedSourceLink(task.id) ? "重新生成链接" : "生成链接并启动", () => issueLink(task.id)));
-  actions.append(actionButton("删除", () => deleteTask(task), { danger: true }));
-  item.append(details, actions);
-  return item;
+function localSizeLabel(task) {
+  if (!task.progress || task.progress.total_files === 0) return "-";
+  return `${task.progress.completed_files}/${task.progress.total_files} 个文件`;
+}
+
+function standardSizeLabel(task) {
+  if (!task.progress || task.progress.total_files === 0) return "-";
+  return `${task.progress.total_files} 个文件`;
+}
+
+function selectTask(taskId) {
+  selectedTaskId = taskId;
+  list.replaceChildren(...(tasksCache.length ? tasksCache.map(renderTaskRow) : [emptyTaskRow()]));
+  updateToolbar();
+}
+
+function selectedTask() {
+  return tasksCache.find((task) => task.id === selectedTaskId) || null;
+}
+
+function updateToolbar() {
+  const task = selectedTask();
+  const disabled = !task;
+  startStopButton.disabled = disabled;
+  rescanButton.disabled = disabled;
+  settingsButton.disabled = disabled;
+  deleteButton.disabled = disabled;
+  startStopButton.textContent = !task ? "暂停/开始" : (isRunningTask(task) ? "暂停" : "开始");
 }
 
 function taskClass(task) {
@@ -104,9 +219,7 @@ function renderSavedSourceLink(taskId, savedLink) {
     notify("源端链接已复制");
   }, { secondary: true }));
   actions.append(actionButton("显示链接", () => {
-    generatedLink.value = savedLink.link;
-    linkForm.elements.task_id.value = taskId;
-    dialog.showModal();
+    showSavedLink(taskId, savedLink);
   }, { secondary: true }));
   actions.append(actionButton("清除记录", () => {
     forgetSourceLink(taskId);
@@ -114,6 +227,12 @@ function renderSavedSourceLink(taskId, savedLink) {
   }, { secondary: true }));
   box.append(summary, actions);
   return box;
+}
+
+function showSavedLink(taskId, savedLink) {
+  generatedLink.value = savedLink.link;
+  linkForm.elements.task_id.value = taskId;
+  dialog.showModal();
 }
 
 function progressLabel(progress) {
@@ -140,6 +259,7 @@ function actionButton(label, action, options = {}) {
   const classes = [];
   if (options.secondary) classes.push("secondary");
   if (options.danger) classes.push("danger");
+  if (options.compact) classes.push("compact");
   button.className = classes.join(" ");
   if (options.disabled) button.disabled = true;
   button.addEventListener("click", action);
@@ -152,6 +272,41 @@ async function taskAction(id, action) {
     notify(action === "start" ? "任务正在启动" : "任务已停止");
     setTimeout(loadTasks, 300);
   } catch (error) { notify(error.message); }
+}
+
+async function toggleSelectedTask() {
+  const task = selectedTask();
+  if (!task) return;
+  if (isRunningTask(task)) {
+    await taskAction(task.id, "stop");
+    return;
+  }
+  if (task.role === "source" && !savedSourceLink(task.id)) {
+    issueLink(task.id);
+    return;
+  }
+  await taskAction(task.id, "start");
+}
+
+async function rescanSelectedTask() {
+  const task = selectedTask();
+  if (!task) return;
+  if (task.role === "source" && !savedSourceLink(task.id)) {
+    issueLink(task.id);
+    return;
+  }
+  try {
+    await restartTask(task.id);
+    notify("已重新扫描并启动同步");
+    setTimeout(loadTasks, 300);
+  } catch (error) { notify(error.message); }
+}
+
+function openSettingsForSelectedTask() {
+  const task = selectedTask();
+  if (!task) return;
+  settingsSummary.textContent = `当前任务：${task.id} · ${roleLabel(task)} · ${task.role === "source" ? task.source_path : task.target_path}`;
+  settingsDialog.showModal();
 }
 
 async function runTaskAction(id, action) {
@@ -343,6 +498,7 @@ document.querySelector("#create-form").addEventListener("submit", async (event) 
       }),
     });
     form.reset();
+    createDialog.close();
     notify("任务已创建");
     loadTasks();
   } catch (error) { notify(error.message); }
@@ -361,6 +517,7 @@ document.querySelector("#join-form").addEventListener("submit", async (event) =>
     });
     await runTaskAction(result.task, "start");
     form.reset();
+    joinDialog.close();
     notify("已加入同步，目标端任务正在启动");
     setTimeout(loadTasks, 300);
   } catch (error) { notify(error.message); }
@@ -406,6 +563,17 @@ function endpointStatus(label, result) {
 }
 
 document.querySelector("#refresh").addEventListener("click", loadTasks);
+document.querySelector("#open-create").addEventListener("click", () => createDialog.showModal());
+document.querySelector("#open-join").addEventListener("click", () => joinDialog.showModal());
+document.querySelector("#close-create-dialog").addEventListener("click", () => createDialog.close());
+document.querySelector("#close-join-dialog").addEventListener("click", () => joinDialog.close());
+startStopButton.addEventListener("click", toggleSelectedTask);
+rescanButton.addEventListener("click", rescanSelectedTask);
+settingsButton.addEventListener("click", openSettingsForSelectedTask);
+deleteButton.addEventListener("click", () => {
+  const task = selectedTask();
+  if (task) deleteTask(task);
+});
 document.querySelector("#copy-link").addEventListener("click", async () => {
   if (!generatedLink.value) {
     notify("请先生成同步链接");

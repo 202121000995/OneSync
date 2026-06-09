@@ -2,6 +2,7 @@ package scanner
 
 import (
 	"context"
+	"crypto/md5"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -158,7 +159,7 @@ func hashFile(ctx context.Context, path string) (string, error) {
 	}
 	defer file.Close()
 
-	hash := sha256.New()
+	hash := md5.New()
 	buffer := make([]byte, 128*1024)
 	for {
 		if err := ctx.Err(); err != nil {

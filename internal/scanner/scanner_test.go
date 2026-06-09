@@ -2,7 +2,7 @@ package scanner
 
 import (
 	"context"
-	"crypto/sha256"
+	"crypto/md5"
 	"encoding/hex"
 	"errors"
 	"os"
@@ -45,7 +45,7 @@ func TestScanCollectsRegularFiles(t *testing.T) {
 	}
 }
 
-func TestScanComputesSHA256WhenEnabled(t *testing.T) {
+func TestScanComputesMD5WhenEnabled(t *testing.T) {
 	root := t.TempDir()
 	const content = "hash me"
 	writeFile(t, filepath.Join(root, "file.txt"), content)
@@ -55,7 +55,7 @@ func TestScanComputesSHA256WhenEnabled(t *testing.T) {
 		t.Fatalf("Scan() error = %v", err)
 	}
 
-	sum := sha256.Sum256([]byte(content))
+	sum := md5.Sum([]byte(content))
 	want := hex.EncodeToString(sum[:])
 	if got := snapshot.Files["file.txt"].Hash; got != want {
 		t.Fatalf("Scan() hash = %q, want %q", got, want)

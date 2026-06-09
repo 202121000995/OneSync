@@ -45,10 +45,10 @@ packaging/package-acceptance.sh dist/acceptance dist/acceptance-packages
 Copy the Windows zip to Windows source or target computers. Copy the Linux tar.gz to Linux source, target, or Relay computers. Record `dist/acceptance-packages/PACKAGE-SHA256SUMS.txt` in the acceptance report.
 Each package also includes `preflight-checklist.md`.
 
-The packages include starter scripts. OneSync automatically prepares and loads the source TLS certificate when the source service starts, then the web page lets you choose or type the endpoint used in the link:
+The Windows package includes `OneSync.exe` for normal use. Double-click it on source or target computers; helper `.cmd` scripts are only for debugging with package-local data and logs. OneSync automatically prepares and loads the source TLS certificate when the source service starts, then the web page lets you choose or type the endpoint used in the link:
 
-- Windows source: run `start-source.cmd`.
-- Windows target: run `start-target.cmd`, then paste the generated link.
+- Windows source: double-click `OneSync.exe`.
+- Windows target: double-click `OneSync.exe`, then paste the generated link.
 - Linux source: run `./start-source.sh`.
 - Linux target: run `./start-target.sh`, then paste the generated link.
 - Linux Relay: `./make-relay-cert.sh`, then `./start-relay.sh`.
