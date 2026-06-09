@@ -1,0 +1,95 @@
+package backend
+
+import (
+	"net/http"
+	"net/http/httptest"
+	"regexp"
+	"strings"
+	"testing"
+
+	"github.com/202121000995/OneSync/internal/auth"
+	"github.com/202121000995/OneSync/internal/task"
+)
+
+func TestWebScriptReferencesExistingPageElements(t *testing.T) {
+	html := readWebAsset(t, "web/index.html")
+	script := readWebAsset(t, "web/app.js")
+	ids := matchesByGroup(`id="([^"]+)"`, html)
+	for selector := range matchesByGroup(`querySelector\("#([A-Za-z0-9_-]+)"\)`, script) {
+		if _, exists := ids[selector]; !exists {
+			t.Fatalf("app.js references missing #%s", selector)
+		}
+	}
+}
+
+func TestWebScriptFormElementsExistInPage(t *testing.T) {
+	html := readWebAsset(t, "web/index.html")
+	script := readWebAsset(t, "web/app.js")
+	names := matchesByGroup(`name="([^"]+)"`, html)
+	for field := range matchesByGroup(`\.elements\.([A-Za-z0-9_]+)`, script) {
+		if _, exists := names[field]; !exists {
+			t.Fatalf("app.js references missing form field %q", field)
+		}
+	}
+}
+
+func TestWebScriptKeepsReadinessRegressionsCovered(t *testing.T) {
+	script := readWebAsset(t, "web/app.js")
+	required := []string{
+		"direct_tls_configured",
+		"direct_tls_hosts",
+		"direct_tls_endpoints",
+		"certificateHostWarning",
+		"sourceReadinessWarning",
+		"证书地址：",
+		"本机地址：",
+		"请填写 Relay TLS 地址",
+		"当前源端证书不包含",
+	}
+	for _, text := range required {
+		if !strings.Contains(script, text) {
+			t.Fatalf("app.js no longer contains %q", text)
+		}
+	}
+}
+
+func TestStaticWebAssetsServed(t *testing.T) {
+	manager := &fakeManager{tasks: make(map[string]task.Task)}
+	credentials, err := auth.NewCredentialStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewCredentialStore() error = %v", err)
+	}
+	server, err := NewServer(manager, auth.NewLinkService(), credentials)
+	if err != nil {
+		t.Fatalf("NewServer() error = %v", err)
+	}
+	for _, target := range []string{"/", "/app.js", "/app.css"} {
+		request := httptest.NewRequest(http.MethodGet, "http://127.0.0.1"+target, nil)
+		response := httptest.NewRecorder()
+		server.Handler().ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("%s status = %d, body = %s", target, response.Code, response.Body.String())
+		}
+		if response.Body.Len() == 0 {
+			t.Fatalf("%s returned an empty body", target)
+		}
+	}
+}
+
+func readWebAsset(t *testing.T, name string) string {
+	t.Helper()
+	data, err := webFiles.ReadFile(name)
+	if err != nil {
+		t.Fatalf("ReadFile(%q) error = %v", name, err)
+	}
+	return string(data)
+}
+
+func matchesByGroup(pattern, text string) map[string]struct{} {
+	matches := regexp.MustCompile(pattern).FindAllStringSubmatch(text, -1)
+	values := make(map[string]struct{}, len(matches))
+	for _, match := range matches {
+		values[match[1]] = struct{}{}
+	}
+	return values
+}
