@@ -266,6 +266,10 @@ func (s *Server) issueLink(writer http.ResponseWriter, request *http.Request) {
 		writeAPIError(writer, http.StatusBadRequest, errors.New("only source tasks can issue links"))
 		return
 	}
+	if !s.directTLSConfigured && strings.TrimSpace(input.RelayEndpoint) == "" {
+		writeAPIError(writer, http.StatusBadRequest, errors.New("source link requires a TLS certificate or Relay endpoint"))
+		return
+	}
 	encoded, err := s.links.Issue(input.TaskID, input.Endpoint, input.RelayEndpoint)
 	if err != nil {
 		writeAPIError(writer, http.StatusBadRequest, err)

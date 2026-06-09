@@ -75,9 +75,11 @@ func TestLinkIssueAndJoinStoresCredentialSeparately(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewCredentialStore() error = %v", err)
 	}
-	server, err := NewServer(manager, auth.NewLinkService(), credentials)
+	server, err := NewServerWithOptions(manager, auth.NewLinkService(), credentials, Options{
+		DirectTLSConfigured: true,
+	})
 	if err != nil {
-		t.Fatalf("NewServer() error = %v", err)
+		t.Fatalf("NewServerWithOptions() error = %v", err)
 	}
 
 	issue := jsonRequest(http.MethodPost, "http://127.0.0.1/api/links", map[string]any{
@@ -115,6 +117,32 @@ func TestLinkIssueAndJoinStoresCredentialSeparately(t *testing.T) {
 	}
 	if manager.tasks["target"].PeerAddress != "192.168.1.10:7443" {
 		t.Fatalf("joined task = %+v", manager.tasks["target"])
+	}
+}
+
+func TestLinkIssueRejectsUnusableSourceWithoutTLSOrRelay(t *testing.T) {
+	manager := &fakeManager{tasks: map[string]task.Task{
+		"source": {ID: "source", Role: task.RoleSource, SourcePath: "/private/source"},
+	}}
+	credentials, err := auth.NewCredentialStore(filepath.Join(t.TempDir(), "credentials"))
+	if err != nil {
+		t.Fatalf("NewCredentialStore() error = %v", err)
+	}
+	server, err := NewServer(manager, auth.NewLinkService(), credentials)
+	if err != nil {
+		t.Fatalf("NewServer() error = %v", err)
+	}
+	request := jsonRequest(http.MethodPost, "http://127.0.0.1/api/links", map[string]any{
+		"task_id": "source", "endpoint": "192.168.1.10:7443",
+	})
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest ||
+		!bytes.Contains(response.Body.Bytes(), []byte("source link requires a TLS certificate or Relay endpoint")) {
+		t.Fatalf("issue status = %d, body = %s", response.Code, response.Body.String())
+	}
+	if _, err := credentials.Load("source"); err == nil {
+		t.Fatal("rejected source link stored credentials")
 	}
 }
 

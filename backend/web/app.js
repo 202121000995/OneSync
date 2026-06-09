@@ -154,6 +154,10 @@ linkForm.addEventListener("submit", async (event) => {
   const data = new FormData(linkForm);
   const endpoint = String(data.get("endpoint") || "").trim();
   const relayEndpoint = String(data.get("relay_endpoint") || "").trim();
+  if (!appConfig.direct_tls_configured && !relayEndpoint) {
+    notify("请填写 Relay TLS 地址，或重启时提供 -cert 和 -key 后再生成直连链接。");
+    return;
+  }
   try {
     const result = await api("/api/links", {
       method: "POST",
