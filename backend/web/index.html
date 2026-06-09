@@ -12,8 +12,8 @@
       <div class="brand">OneSync</div>
       <nav>
         <button class="nav-item active" type="button">同步任务</button>
-        <button class="nav-item" type="button" disabled>设备管理</button>
-        <button class="nav-item" type="button" disabled>连接管理</button>
+        <button id="open-device-manager" class="nav-item" type="button">设备管理</button>
+        <button id="open-connection-manager" class="nav-item" type="button">连接管理</button>
         <button class="nav-item" type="button" disabled>设置</button>
         <button id="open-logs" class="nav-item" type="button">日志</button>
         <button id="open-about" class="nav-item" type="button">关于</button>
@@ -158,6 +158,29 @@
         <div class="dialog-actions">
           <button id="copy-diagnostics" type="button">复制诊断</button>
           <button id="download-diagnostics" class="secondary" type="button">下载诊断</button>
+          <button class="secondary" type="submit">关闭</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="device-manager-dialog">
+      <form method="dialog">
+        <h2>设备管理</h2>
+        <p class="hint">统一查看每个同步任务绑定或最近连接的设备；可重命名、禁用/启用、踢出设备。</p>
+        <div id="device-manager-list" class="manager-list">暂无设备。</div>
+        <div class="dialog-actions">
+          <button class="secondary" type="submit">关闭</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="connection-manager-dialog">
+      <form method="dialog">
+        <h2>连接管理</h2>
+        <p class="hint">集中查看直连、Relay、最近错误和诊断入口。</p>
+        <div id="connection-manager-list" class="manager-list">暂无连接。</div>
+        <div class="dialog-actions">
+          <button id="copy-all-diagnostics" type="button">复制全部诊断</button>
           <button class="secondary" type="submit">关闭</button>
         </div>
       </form>

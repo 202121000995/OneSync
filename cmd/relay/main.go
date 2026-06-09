@@ -4,13 +4,11 @@ import (
 	"context"
 	"crypto/tls"
 	"flag"
-	"fmt"
 	"io"
 	"log"
-	"log/slog"
 	"os"
-	"path/filepath"
 
+	"github.com/202121000995/OneSync/internal/logger"
 	"github.com/202121000995/OneSync/internal/platform"
 	"github.com/202121000995/OneSync/internal/relay"
 )
@@ -41,16 +39,13 @@ func main() {
 	if err != nil {
 		log.Fatalf("load Relay TLS certificate: %v", err)
 	}
-	logger := slog.New(slog.NewTextHandler(logWriter, &slog.HandlerOptions{
-		Level: slog.LevelInfo,
-	}))
 	broker, err := relay.NewBroker(relay.Config{
 		WaitTimeout: *waitTimeout,
 		IdleTimeout: *idleTimeout,
 		MaxWaiting:  *maxWaiting,
 		MaxActive:   *maxActive,
 		MaxBytes:    *maxBytes,
-		Logger:      logger,
+		Logger:      logger.NewText(logWriter),
 	})
 	if err != nil {
 		log.Fatal(err)
@@ -75,13 +70,9 @@ func configureLogging(logPath string) (io.Writer, func() error, error) {
 	if logPath == "" {
 		return os.Stdout, nil, nil
 	}
-	if err := os.MkdirAll(filepath.Dir(logPath), 0o700); err != nil {
-		return nil, nil, fmt.Errorf("create log directory: %w", err)
-	}
-	file, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	file, err := logger.OpenPrivateLog(logPath)
 	if err != nil {
-		return nil, nil, fmt.Errorf("open log file: %w", err)
+		return nil, nil, err
 	}
-	log.SetOutput(file)
 	return file, file.Close, nil
 }

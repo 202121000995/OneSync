@@ -68,4 +68,10 @@ func TestCredentialStoreConsumesOneTimeTokenPersistently(t *testing.T) {
 	if _, err := reloaded.Claim("task", token, otherPeerID); err == nil {
 		t.Fatal("Claim() accepted a different peer after reload")
 	}
+	if err := reloaded.UnbindPeer("task"); err != nil {
+		t.Fatalf("UnbindPeer() error = %v", err)
+	}
+	if _, err := reloaded.Claim("task", token, otherPeerID); err != nil {
+		t.Fatalf("Claim() after UnbindPeer() error = %v", err)
+	}
 }

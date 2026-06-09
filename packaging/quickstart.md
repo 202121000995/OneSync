@@ -56,6 +56,7 @@ The Windows package includes `OneSync.exe` for normal use. Double-click it on so
 On Windows, `OneSync.exe` runs as a tray application. Closing or minimizing the browser page does not stop synchronization. Use the tray icon to open OneSync again or exit the service.
 
 In the task table, select one task and click "参数" to edit ignore rules. The parameters dialog can append default templates, test one sample path, and preview ignored files. Select one task and open "日志" to copy or download a diagnostic report. If no task is selected, the diagnostic report includes all tasks.
+Use "设备管理" to rename, disable, enable, or kick the device bound to a task. Use "连接管理" to inspect direct and Relay addresses, recent errors, and copy diagnostics.
 
 For Linux service-style testing, use the included control commands from the extracted Linux package:
 

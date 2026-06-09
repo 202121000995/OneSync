@@ -220,6 +220,34 @@ func TestManagerUpdatesIgnoreRulesAndRuntimeMetadata(t *testing.T) {
 	}
 }
 
+func TestManagerDeviceControlsPersist(t *testing.T) {
+	storePath := filepath.Join(t.TempDir(), "tasks.json")
+	manager := newTestManager(t, storePath, &fakeFactory{})
+	createSourceTask(t, manager, "task")
+
+	if err := manager.RenameDevice(context.Background(), "task", "办公室电脑"); err != nil {
+		t.Fatalf("RenameDevice() error = %v", err)
+	}
+	if err := manager.SetDeviceDisabled(context.Background(), "task", true); err != nil {
+		t.Fatalf("SetDeviceDisabled() error = %v", err)
+	}
+	if err := manager.Start(context.Background(), "task"); err == nil {
+		t.Fatal("Start() accepted a disabled device")
+	}
+	if err := manager.ClearDeviceBinding(context.Background(), "task"); err != nil {
+		t.Fatalf("ClearDeviceBinding() error = %v", err)
+	}
+
+	reloaded := newTestManager(t, storePath, &fakeFactory{})
+	found, err := reloaded.Get(context.Background(), "task")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if found.Devices.Alias != "办公室电脑" || !found.DeviceDisabled || found.Devices.PeerID != "" {
+		t.Fatalf("device state = %+v disabled=%t", found.Devices, found.DeviceDisabled)
+	}
+}
+
 func TestManagerDeleteStopsRunningTask(t *testing.T) {
 	runner := &fakeRunner{started: make(chan struct{}), waitForCancel: true}
 	manager := newTestManager(t, filepath.Join(t.TempDir(), "tasks.json"), &fakeFactory{runner: runner})

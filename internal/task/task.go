@@ -26,22 +26,23 @@ const (
 
 // Task contains persistent synchronization task state.
 type Task struct {
-	ID          string             `json:"id"`
-	Role        string             `json:"role"`
-	SourcePath  string             `json:"source_path,omitempty"`
-	TargetPath  string             `json:"target_path,omitempty"`
-	PeerAddress string             `json:"peer_address,omitempty"`
-	RelayURL    string             `json:"relay_url,omitempty"`
-	State       string             `json:"state"`
-	LastError   string             `json:"last_error,omitempty"`
-	Progress    *progress.Snapshot `json:"progress,omitempty"`
-	IgnoreRules []string           `json:"ignore_rules,omitempty"`
-	Traffic     TrafficStats       `json:"traffic,omitempty"`
-	Size        SizeStats          `json:"size,omitempty"`
-	Devices     DeviceStats        `json:"devices,omitempty"`
-	Logs        []LogEntry         `json:"logs,omitempty"`
-	CreatedAt   time.Time          `json:"created_at"`
-	UpdatedAt   time.Time          `json:"updated_at"`
+	ID             string             `json:"id"`
+	Role           string             `json:"role"`
+	SourcePath     string             `json:"source_path,omitempty"`
+	TargetPath     string             `json:"target_path,omitempty"`
+	PeerAddress    string             `json:"peer_address,omitempty"`
+	RelayURL       string             `json:"relay_url,omitempty"`
+	State          string             `json:"state"`
+	LastError      string             `json:"last_error,omitempty"`
+	Progress       *progress.Snapshot `json:"progress,omitempty"`
+	IgnoreRules    []string           `json:"ignore_rules,omitempty"`
+	Traffic        TrafficStats       `json:"traffic,omitempty"`
+	Size           SizeStats          `json:"size,omitempty"`
+	Devices        DeviceStats        `json:"devices,omitempty"`
+	DeviceDisabled bool               `json:"device_disabled,omitempty"`
+	Logs           []LogEntry         `json:"logs,omitempty"`
+	CreatedAt      time.Time          `json:"created_at"`
+	UpdatedAt      time.Time          `json:"updated_at"`
 }
 
 // TrafficStats stores cumulative task traffic counters.
@@ -60,6 +61,7 @@ type SizeStats struct {
 
 // DeviceStats stores the latest known peer and connection view for one task.
 type DeviceStats struct {
+	Alias         string    `json:"alias,omitempty"`
 	Connected     uint64    `json:"connected,omitempty"`
 	Total         uint64    `json:"total,omitempty"`
 	PeerID        string    `json:"peer_id,omitempty"`
@@ -177,7 +179,7 @@ func validateLogs(logs []LogEntry) error {
 }
 
 func validateDeviceStats(devices DeviceStats) error {
-	for _, value := range []string{devices.PeerID, devices.Endpoint, devices.RelayEndpoint, devices.Connection, devices.TLS, devices.ClientVersion} {
+	for _, value := range []string{devices.Alias, devices.PeerID, devices.Endpoint, devices.RelayEndpoint, devices.Connection, devices.TLS, devices.ClientVersion} {
 		if len(value) > 2048 {
 			return errors.New("device detail exceeds 2048 characters")
 		}

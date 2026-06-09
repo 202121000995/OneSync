@@ -167,6 +167,22 @@ func (s *CredentialStore) Claim(taskID, token, peerID string) (Credential, error
 	return credential, nil
 }
 
+// UnbindPeer clears a previously claimed peer identity while preserving link material.
+func (s *CredentialStore) UnbindPeer(taskID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	credential, err := s.loadLocked(taskID)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	credential.Used = false
+	credential.PeerID = ""
+	return s.saveLocked(taskID, credential)
+}
+
 // NewPeerID creates a stable high-entropy identity for one target task.
 func NewPeerID() (string, error) {
 	data := make([]byte, 32)

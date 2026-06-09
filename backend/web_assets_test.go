@@ -66,6 +66,12 @@ func TestWebScriptKeepsReadinessRegressionsCovered(t *testing.T) {
 		"/api/ignore/templates",
 		"/ignore-preview",
 		"诊断日志已复制",
+		"openDeviceManager",
+		"openConnectionManager",
+		"/device/kick",
+		"设备已禁用",
+		"设备已踢出",
+		"错误分类",
 	}
 	for _, text := range required {
 		if !strings.Contains(script, text) {
@@ -78,6 +84,8 @@ func TestWebPageKeepsTaskTableAsMainSurface(t *testing.T) {
 	html := readWebAsset(t, "web/index.html")
 	required := []string{
 		"同步任务",
+		"设备管理",
+		"连接管理",
 		"管理页登录",
 		"创建同步",
 		"加入同步",
@@ -93,6 +101,7 @@ func TestWebPageKeepsTaskTableAsMainSurface(t *testing.T) {
 		"任务日志",
 		"复制诊断",
 		"下载诊断",
+		"踢出设备",
 		"关于 OneSync",
 		"版本号",
 		"类型",

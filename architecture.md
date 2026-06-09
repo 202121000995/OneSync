@@ -610,6 +610,8 @@ V1 不引入数据库。配置与任务状态使用本地文件持久化：
    - 新增 Linux 客户端一键部署脚本，支持 `GH_PROXY`，并将客户端和 Relay 的简约菜单命令拆分为 `onesync` 与 `onesyncr`。
 47. `feature/task-params-diagnostics-watch-config`
    - 增强任务参数，支持忽略规则模板、规则测试和被忽略文件预览；增加诊断日志复制/下载；同步完成后通过轻量目录变化检测提前触发下一轮；新增统一配置路径模块。
+48. `feature/device-connection-management-and-logger`
+   - 左侧设备管理和连接管理变为可用模块；设备支持统一查看、重命名、禁用/启用和踢出绑定；连接管理集中展示直连、Relay、错误分类和诊断入口；新增统一日志基础模块。
 
 ## 16. 待确认项
 

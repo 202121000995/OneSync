@@ -42,6 +42,9 @@ type taskManager interface {
 	Stop(ctx context.Context, taskID string) error
 	Delete(ctx context.Context, taskID string) error
 	UpdateIgnoreRules(ctx context.Context, taskID string, rules []string) error
+	RenameDevice(ctx context.Context, taskID, alias string) error
+	SetDeviceDisabled(ctx context.Context, taskID string, disabled bool) error
+	ClearDeviceBinding(ctx context.Context, taskID string) error
 	Get(ctx context.Context, taskID string) (task.Task, error)
 	List(ctx context.Context) ([]task.Task, error)
 }
@@ -196,6 +199,8 @@ func NewServerWithOptions(manager taskManager, links *syncauth.LinkService, cred
 	mux.HandleFunc("POST /api/tasks/{id}/start", server.startTask)
 	mux.HandleFunc("POST /api/tasks/{id}/stop", server.stopTask)
 	mux.HandleFunc("PATCH /api/tasks/{id}", server.updateTask)
+	mux.HandleFunc("PATCH /api/tasks/{id}/device", server.updateDevice)
+	mux.HandleFunc("POST /api/tasks/{id}/device/kick", server.kickDevice)
 	mux.HandleFunc("POST /api/tasks/{id}/ignore-preview", server.previewIgnored)
 	mux.HandleFunc("GET /api/tasks/{id}/diagnostics", server.taskDiagnostics)
 	mux.HandleFunc("DELETE /api/tasks/{id}", server.deleteTask)
@@ -442,6 +447,47 @@ func (s *Server) updateTask(writer http.ResponseWriter, request *http.Request) {
 		return
 	}
 	writeJSON(writer, http.StatusOK, map[string]string{"status": "updated"})
+}
+
+func (s *Server) updateDevice(writer http.ResponseWriter, request *http.Request) {
+	taskID := request.PathValue("id")
+	var input struct {
+		Alias    *string `json:"alias"`
+		Disabled *bool   `json:"disabled"`
+	}
+	if err := decodeJSON(writer, request, &input); err != nil {
+		return
+	}
+	if input.Disabled != nil && *input.Disabled {
+		_ = s.manager.Stop(request.Context(), taskID)
+	}
+	if input.Alias != nil {
+		if err := s.manager.RenameDevice(request.Context(), taskID, *input.Alias); err != nil {
+			writeAPIError(writer, statusForTaskError(err), err)
+			return
+		}
+	}
+	if input.Disabled != nil {
+		if err := s.manager.SetDeviceDisabled(request.Context(), taskID, *input.Disabled); err != nil {
+			writeAPIError(writer, statusForTaskError(err), err)
+			return
+		}
+	}
+	writeJSON(writer, http.StatusOK, map[string]string{"status": "updated"})
+}
+
+func (s *Server) kickDevice(writer http.ResponseWriter, request *http.Request) {
+	taskID := request.PathValue("id")
+	_ = s.manager.Stop(request.Context(), taskID)
+	if err := s.credentials.UnbindPeer(taskID); err != nil {
+		writeAPIError(writer, http.StatusInternalServerError, err)
+		return
+	}
+	if err := s.manager.ClearDeviceBinding(request.Context(), taskID); err != nil {
+		writeAPIError(writer, statusForTaskError(err), err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, map[string]string{"status": "kicked"})
 }
 
 func (s *Server) ignoreTemplates(writer http.ResponseWriter, _ *http.Request) {
@@ -858,6 +904,8 @@ func (s *Server) diagnosticText(tasks []task.Task) string {
 		fmt.Fprintf(&builder, "  全局大小: %d 字节 / %d 文件\n", item.Size.StandardBytes, item.Size.StandardFiles)
 		fmt.Fprintf(&builder, "  累计接收: %d 字节\n", item.Traffic.ReceivedBytes)
 		fmt.Fprintf(&builder, "  累计发送: %d 字节\n", item.Traffic.SentBytes)
+		fmt.Fprintf(&builder, "  设备名称: %s\n", emptyText(item.Devices.Alias))
+		fmt.Fprintf(&builder, "  设备禁用: %s\n", yesNo(item.DeviceDisabled))
 		fmt.Fprintf(&builder, "  同步设备: %d / %d\n", item.Devices.Connected, item.Devices.Total)
 		fmt.Fprintf(&builder, "  连接方式: %s\n", emptyText(item.Devices.Connection))
 		fmt.Fprintf(&builder, "  设备详情源端地址: %s\n", emptyText(item.Devices.Endpoint))

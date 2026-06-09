@@ -11,7 +11,6 @@ import (
 	"log"
 	"net"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -22,6 +21,7 @@ import (
 	"github.com/202121000995/OneSync/internal/client"
 	"github.com/202121000995/OneSync/internal/config"
 	"github.com/202121000995/OneSync/internal/diagnostic"
+	"github.com/202121000995/OneSync/internal/logger"
 	"github.com/202121000995/OneSync/internal/netutil"
 	"github.com/202121000995/OneSync/internal/platform"
 	"github.com/202121000995/OneSync/internal/task"
@@ -133,18 +133,7 @@ func webAuthStore(paths config.Paths, webBind string, enabled bool) (*webauth.St
 }
 
 func configureLogging(logPath string) (*os.File, error) {
-	if logPath == "" {
-		return nil, nil
-	}
-	if err := os.MkdirAll(filepath.Dir(logPath), 0o700); err != nil {
-		return nil, fmt.Errorf("create log directory: %w", err)
-	}
-	file, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
-	if err != nil {
-		return nil, fmt.Errorf("open log file: %w", err)
-	}
-	log.SetOutput(file)
-	return file, nil
+	return logger.OpenPrivateLog(logPath)
 }
 
 func loadServerTLS(certificatePath, privateKeyPath string) (*tls.Config, error) {

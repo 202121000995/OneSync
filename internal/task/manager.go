@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -146,6 +147,10 @@ func (m *Manager) Start(ctx context.Context, taskID string) error {
 		m.mu.Unlock()
 		return fmt.Errorf("task %q is already running", taskID)
 	}
+	if task.DeviceDisabled {
+		m.mu.Unlock()
+		return fmt.Errorf("task %q device is disabled", taskID)
+	}
 	runCtx, cancel := context.WithCancel(context.Background())
 	runtime := &runtimeTask{cancel: cancel, done: make(chan struct{})}
 	m.runtimes[taskID] = runtime
@@ -251,6 +256,89 @@ func (m *Manager) UpdateIgnoreRules(ctx context.Context, taskID string, rules []
 	}
 	previous := task
 	task.IgnoreRules = append([]string(nil), rules...)
+	task.UpdatedAt = m.now().UTC()
+	m.tasks[taskID] = task
+	if err := m.store.save(m.tasks); err != nil {
+		m.tasks[taskID] = previous
+		return err
+	}
+	return nil
+}
+
+// RenameDevice stores a friendly device name for one task.
+func (m *Manager) RenameDevice(ctx context.Context, taskID, alias string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if len(alias) > 128 || strings.ContainsRune(alias, '\x00') {
+		return errors.New("device name is invalid")
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	task, exists := m.tasks[taskID]
+	if !exists {
+		return ErrTaskNotFound
+	}
+	previous := task
+	task.Devices.Alias = strings.TrimSpace(alias)
+	task.UpdatedAt = m.now().UTC()
+	m.tasks[taskID] = task
+	if err := m.store.save(m.tasks); err != nil {
+		m.tasks[taskID] = previous
+		return err
+	}
+	return nil
+}
+
+// SetDeviceDisabled toggles whether one task may connect to its peer.
+func (m *Manager) SetDeviceDisabled(ctx context.Context, taskID string, disabled bool) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	task, exists := m.tasks[taskID]
+	if !exists {
+		return ErrTaskNotFound
+	}
+	previous := task
+	task.DeviceDisabled = disabled
+	if disabled {
+		task.Devices.Connected = 0
+		task.Logs = append(task.Logs, LogEntry{Time: m.now().UTC(), Level: "warning", Message: "设备已禁用"})
+	} else {
+		task.Logs = append(task.Logs, LogEntry{Time: m.now().UTC(), Level: "info", Message: "设备已启用"})
+	}
+	if len(task.Logs) > 200 {
+		task.Logs = append([]LogEntry(nil), task.Logs[len(task.Logs)-200:]...)
+	}
+	task.UpdatedAt = m.now().UTC()
+	m.tasks[taskID] = task
+	if err := m.store.save(m.tasks); err != nil {
+		m.tasks[taskID] = previous
+		return err
+	}
+	return nil
+}
+
+// ClearDeviceBinding removes the currently remembered peer details for one task.
+func (m *Manager) ClearDeviceBinding(ctx context.Context, taskID string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	task, exists := m.tasks[taskID]
+	if !exists {
+		return ErrTaskNotFound
+	}
+	previous := task
+	alias := task.Devices.Alias
+	task.Devices = DeviceStats{Alias: alias, Total: 1, TLS: "TLS 1.3"}
+	task.Logs = append(task.Logs, LogEntry{Time: m.now().UTC(), Level: "warning", Message: "已踢出并清除设备绑定"})
+	if len(task.Logs) > 200 {
+		task.Logs = append([]LogEntry(nil), task.Logs[len(task.Logs)-200:]...)
+	}
 	task.UpdatedAt = m.now().UTC()
 	m.tasks[taskID] = task
 	if err := m.store.save(m.tasks); err != nil {

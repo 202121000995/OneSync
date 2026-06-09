@@ -8,6 +8,8 @@ const joinDialog = document.querySelector("#join-dialog");
 const settingsDialog = document.querySelector("#settings-dialog");
 const logsDialog = document.querySelector("#logs-dialog");
 const devicesDialog = document.querySelector("#devices-dialog");
+const deviceManagerDialog = document.querySelector("#device-manager-dialog");
+const connectionManagerDialog = document.querySelector("#connection-manager-dialog");
 const aboutDialog = document.querySelector("#about-dialog");
 const settingsForm = document.querySelector("#settings-form");
 const authForm = document.querySelector("#auth-form");
@@ -27,6 +29,8 @@ const settingsButton = document.querySelector("#toolbar-settings");
 const deleteButton = document.querySelector("#toolbar-delete");
 const settingsSummary = document.querySelector("#settings-summary");
 const logsList = document.querySelector("#logs-list");
+const deviceManagerList = document.querySelector("#device-manager-list");
+const connectionManagerList = document.querySelector("#connection-manager-list");
 const ignoreTemplate = document.querySelector("#ignore-template");
 const ignoreSamplePath = document.querySelector("#ignore-sample-path");
 const ignorePreviewResult = document.querySelector("#ignore-preview-result");
@@ -256,6 +260,11 @@ function deviceDetailCell(task) {
     box.append(address);
   }
   return box;
+}
+
+function deviceDisplayName(task) {
+  const devices = task.devices || {};
+  return devices.alias || (devices.peer_id ? shortPeerID(devices.peer_id) : `${task.id} 的设备`);
 }
 
 function localSizeLabel(task) {
@@ -570,6 +579,8 @@ function openDevicesDialog(task) {
   const devices = task.devices || {};
   const rows = [
     ["状态", stateLabel(task)],
+    ["设备名称", deviceDisplayName(task)],
+    ["是否禁用", task.device_disabled ? "已禁用" : "未禁用"],
     ["同步设备", deviceCountLabel(task)],
     ["连接", devices.connection || "等待连接"],
     ["源端地址", devices.endpoint || task.peer_address || "-"],
@@ -614,6 +625,110 @@ function openDevicesDialog(task) {
   devicesDialog.showModal();
 }
 
+function openDeviceManager() {
+  const cards = tasksCache.map(renderDeviceManagerCard);
+  deviceManagerList.replaceChildren(...(cards.length ? cards : [plainHint("暂无设备。")]));
+  if (!deviceManagerDialog.open) deviceManagerDialog.showModal();
+}
+
+function renderDeviceManagerCard(task) {
+  const devices = task.devices || {};
+  const card = document.createElement("section");
+  card.className = `manager-card ${task.device_disabled ? "disabled" : ""}`;
+  const title = document.createElement("h3");
+  title.textContent = `${deviceDisplayName(task)} · ${task.id}`;
+  const detail = document.createElement("p");
+  detail.textContent = `${roleLabel(task)} · ${stateLabel(task)} · ${deviceCountLabel(task)} · ${devices.connection || "等待连接"} · ${devices.relay_endpoint || task.relay_url || "无 Relay"}`;
+  const actions = document.createElement("div");
+  actions.className = "inline-actions";
+  actions.append(actionButton("重命名", () => renameDevice(task), { secondary: true, compact: true }));
+  actions.append(actionButton(task.device_disabled ? "启用" : "禁用", () => setDeviceDisabled(task, !task.device_disabled), { secondary: true, compact: true }));
+  actions.append(actionButton("踢出", () => kickDevice(task), { danger: true, compact: true }));
+  card.append(title, detail, actions);
+  return card;
+}
+
+async function renameDevice(task) {
+  const name = prompt("请输入设备名称", deviceDisplayName(task));
+  if (name === null) return;
+  try {
+    await api(`/api/tasks/${encodeURIComponent(task.id)}/device`, {
+      method: "PATCH",
+      body: JSON.stringify({ alias: name.trim() }),
+    });
+    notify("设备名称已更新");
+    await loadTasks();
+    openDeviceManager();
+  } catch (error) { notify(error.message); }
+}
+
+async function setDeviceDisabled(task, disabled) {
+  try {
+    await api(`/api/tasks/${encodeURIComponent(task.id)}/device`, {
+      method: "PATCH",
+      body: JSON.stringify({ disabled }),
+    });
+    notify(disabled ? "设备已禁用" : "设备已启用");
+    await loadTasks();
+    openDeviceManager();
+  } catch (error) { notify(error.message); }
+}
+
+async function kickDevice(task) {
+  if (!confirm(`踢出「${deviceDisplayName(task)}」？\n\n这会停止任务并清除当前设备绑定，不会删除同步目录文件。`)) return;
+  try {
+    await api(`/api/tasks/${encodeURIComponent(task.id)}/device/kick`, { method: "POST", body: "{}" });
+    notify("设备已踢出");
+    await loadTasks();
+    openDeviceManager();
+  } catch (error) { notify(error.message); }
+}
+
+function openConnectionManager() {
+  const cards = tasksCache.map(renderConnectionCard);
+  connectionManagerList.replaceChildren(...(cards.length ? cards : [plainHint("暂无连接。")]));
+  if (!connectionManagerDialog.open) connectionManagerDialog.showModal();
+}
+
+function renderConnectionCard(task) {
+  const devices = task.devices || {};
+  const card = document.createElement("section");
+  card.className = "manager-card";
+  const title = document.createElement("h3");
+  title.textContent = `${task.id} · ${stateLabel(task)} · ${devices.connection || "等待连接"}`;
+  const detail = document.createElement("p");
+  const direct = devices.endpoint || task.peer_address || "-";
+  const relay = devices.relay_endpoint || task.relay_url || "-";
+  detail.textContent = `直连：${direct} · Relay：${relay} · 最近连接：${devices.last_seen ? new Date(devices.last_seen).toLocaleString() : "-"} · 错误分类：${errorCategory(task.last_error)}`;
+  const error = document.createElement("p");
+  error.className = task.last_error ? "error" : "muted";
+  error.textContent = task.last_error || "暂无错误";
+  const actions = document.createElement("div");
+  actions.className = "inline-actions";
+  actions.append(actionButton("复制诊断", async () => {
+    selectedTaskId = task.id;
+    await copyDiagnostics();
+  }, { secondary: true, compact: true }));
+  actions.append(actionButton("重新连接", async () => {
+    await taskAction(task.id, "start");
+  }, { secondary: true, compact: true }));
+  card.append(title, detail, error, actions);
+  return card;
+}
+
+function errorCategory(message) {
+  const text = String(message || "").toLowerCase();
+  if (!text) return "-";
+  if (text.includes("credential")) return "同步链接/凭据";
+  if (text.includes("certificate") || text.includes("tls") || text.includes("x509")) return "TLS 证书";
+  if (text.includes("relay")) return "Relay 连接";
+  if (text.includes("connect") || text.includes("connection") || text.includes("timeout")) return "网络连接";
+  if (text.includes("scan") || text.includes("stat") || text.includes("permission") || text.includes("path")) return "本地文件/权限";
+  if (text.includes("disk") || text.includes("space")) return "磁盘空间";
+  if (text.includes("authentication")) return "同步认证";
+  return "其他";
+}
+
 function deviceCountLabel(task) {
   const devices = task.devices || {};
   const total = Math.max(Number(devices.total || 0), 1);
@@ -625,6 +740,12 @@ function deviceConnected(task) {
   const devices = task.devices || {};
   if (Number(devices.connected || 0) > 0) return true;
   return Boolean(devices.last_seen && isRunningTask(task) && task.role === "target");
+}
+
+function shortPeerID(peerID) {
+  const value = String(peerID || "");
+  if (!value) return "-";
+  return value.length <= 12 ? value : `${value.slice(0, 6)}...${value.slice(-6)}`;
 }
 
 function renderLogEntry(entry) {
@@ -945,11 +1066,17 @@ document.querySelector("#close-create-dialog").addEventListener("click", () => c
 document.querySelector("#close-join-dialog").addEventListener("click", () => joinDialog.close());
 document.querySelector("#close-settings-dialog").addEventListener("click", () => settingsDialog.close());
 document.querySelector("#open-logs").addEventListener("click", openLogsDialog);
+document.querySelector("#open-device-manager").addEventListener("click", openDeviceManager);
+document.querySelector("#open-connection-manager").addEventListener("click", openConnectionManager);
 document.querySelector("#open-about").addEventListener("click", () => aboutDialog.showModal());
 document.querySelector("#apply-ignore-template").addEventListener("click", applyIgnoreTemplate);
 document.querySelector("#preview-ignore").addEventListener("click", previewIgnoreRules);
 document.querySelector("#copy-diagnostics").addEventListener("click", copyDiagnostics);
 document.querySelector("#download-diagnostics").addEventListener("click", downloadDiagnostics);
+document.querySelector("#copy-all-diagnostics").addEventListener("click", async () => {
+  selectedTaskId = "";
+  await copyDiagnostics();
+});
 settingsForm.addEventListener("submit", saveSettings);
 startStopButton.addEventListener("click", toggleSelectedTask);
 rescanButton.addEventListener("click", rescanSelectedTask);

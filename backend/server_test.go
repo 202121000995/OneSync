@@ -82,6 +82,18 @@ func TestTaskAPI(t *testing.T) {
 	if got := manager.tasks["photos"].IgnoreRules; len(got) != 2 || got[0] != "*.tmp" || got[1] != "cache/" {
 		t.Fatalf("IgnoreRules = %+v", got)
 	}
+
+	device := jsonRequest(http.MethodPatch, "http://127.0.0.1/api/tasks/photos/device", map[string]any{
+		"alias": "办公室电脑", "disabled": true,
+	})
+	response = httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, device)
+	if response.Code != http.StatusOK {
+		t.Fatalf("device update status = %d, body = %s", response.Code, response.Body.String())
+	}
+	if got := manager.tasks["photos"]; got.Devices.Alias != "办公室电脑" || !got.DeviceDisabled {
+		t.Fatalf("device state = %+v disabled=%t", got.Devices, got.DeviceDisabled)
+	}
 }
 
 func TestManagementAuthSetupAndLogin(t *testing.T) {
@@ -545,6 +557,34 @@ func (m *fakeManager) UpdateIgnoreRules(_ context.Context, id string, rules []st
 		return task.ErrTaskNotFound
 	}
 	found.IgnoreRules = append([]string(nil), rules...)
+	m.tasks[id] = found
+	return nil
+}
+func (m *fakeManager) RenameDevice(_ context.Context, id, alias string) error {
+	found, ok := m.tasks[id]
+	if !ok {
+		return task.ErrTaskNotFound
+	}
+	found.Devices.Alias = alias
+	m.tasks[id] = found
+	return nil
+}
+func (m *fakeManager) SetDeviceDisabled(_ context.Context, id string, disabled bool) error {
+	found, ok := m.tasks[id]
+	if !ok {
+		return task.ErrTaskNotFound
+	}
+	found.DeviceDisabled = disabled
+	m.tasks[id] = found
+	return nil
+}
+func (m *fakeManager) ClearDeviceBinding(_ context.Context, id string) error {
+	found, ok := m.tasks[id]
+	if !ok {
+		return task.ErrTaskNotFound
+	}
+	found.Devices.PeerID = ""
+	found.Devices.Connected = 0
 	m.tasks[id] = found
 	return nil
 }

@@ -88,6 +88,11 @@ button.suggestion:hover { background: #dcebdd; }
 .log-entry.error { color: #b42318; }
 .log-entry.warning { color: #9a5b13; }
 .devices-body { display: grid; gap: 14px; }
+.manager-list { display: grid; gap: 10px; max-height: 520px; overflow: auto; }
+.manager-card { border: 1px solid #dfe8df; border-radius: 14px; padding: 12px; background: #fbfdfb; display: grid; gap: 8px; }
+.manager-card h3 { margin: 0; font-size: 15px; }
+.manager-card p { margin: 0; font-size: 13px; }
+.manager-card.disabled { opacity: .68; border-color: #fecdca; }
 .detail-table { width: 100%; border-collapse: collapse; border: 1px solid #dfe8df; border-radius: 12px; overflow: hidden; background: #fbfdfb; }
 .detail-table td { padding: 11px 12px; border-bottom: 1px solid #edf1ed; font-size: 14px; }
 .detail-table tr:last-child td { border-bottom: 0; }
