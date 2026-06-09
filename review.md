@@ -1846,6 +1846,7 @@
 审核说明：
 
 - 新增 `clients/win7-qt` 独立工程，Win7 兼容客户端不混入当前 Go 主客户端。
+- 同时提供 CMake 与 qmake 工程入口；没有 CMake 的环境可以先用 Qt 5 自带 qmake 验证。
 - Qt 客户端骨架包含主窗口、同步链接粘贴、目标目录选择、链接解析、链接摘要展示和诊断日志导出。
 - 同步链接解析已对齐当前 Go 主线的 Base64URL JSON 格式，校验版本、会话编号、源端地址、Relay 地址/令牌关系、32 字节同步令牌和过期时间。
 - 文档明确 Win7 第一版先做目标端接收，源端创建链接仍由 Win10/Linux 主客户端承担。
@@ -1855,7 +1856,10 @@
 
 - `go test ./...` 通过。
 - `git diff --check` 通过。
-- 本机未安装 `cmake`，因此 Win7 Qt 工程尚未在本机完成 CMake 配置和编译；后续需要在安装 Qt 5.12/5.15 与 CMake 的 Windows 构建机上验证。
+- 本机未安装 `cmake`，但已确认存在 Qt 5.12.12 qmake。
+- `qmake OneSyncWin7.pro` 在英文临时路径配置通过。
+- `make -C /private/tmp/onesync-win7-qmake-build2` 通过，已完成 Mac 上 Qt 源码编译验证。
+- 发现 Qt 5.12 qmake 在中文路径下会把 `同步软件` 转成 `????`，后续 Qt 打包脚本需要先复制到英文临时路径。
 
 剩余风险：
 

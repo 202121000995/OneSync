@@ -32,6 +32,26 @@
 
 ## 构建示例
 
+### 使用 qmake
+
+如果本机没有 CMake，但安装了 Qt 5，可以直接使用 qmake：
+
+```bat
+qmake OneSyncWin7.pro
+nmake
+```
+
+macOS 上用于源码编译验证：
+
+```sh
+/Users/apple/Qt5.12.12/5.12.12/clang_64/bin/qmake OneSyncWin7.pro
+make
+```
+
+如果工程路径包含中文，Qt 5.12 的 qmake 可能把路径转成 `????`，导致编译器找不到源码。打包脚本应先把本工程复制到英文临时目录再构建。
+
+### 使用 CMake
+
 在安装 Qt 5 和 CMake 后：
 
 ```bat
