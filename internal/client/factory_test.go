@@ -16,6 +16,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -102,6 +103,30 @@ func TestRunnersKeepSynchronizingUntilCanceled(t *testing.T) {
 	waitForTestFile(t, targetFile, "second")
 	cancel()
 	waitRunnerCancellation(t, results)
+}
+
+func TestFactoryReportsMissingCredentialWithoutLeakingPath(t *testing.T) {
+	_, clientTLS := clientTestTLS(t)
+	credentialDir := filepath.Join(t.TempDir(), "credentials")
+	store, err := auth.NewCredentialStore(credentialDir)
+	if err != nil {
+		t.Fatalf("NewCredentialStore() error = %v", err)
+	}
+	factory := testFactory(t, store, nil, clientTLS)
+
+	_, err = factory.Create(context.Background(), task.Task{
+		ID: "source", Role: task.RoleSource, SourcePath: t.TempDir(),
+	})
+	if err == nil {
+		t.Fatal("Create() error = nil, want missing credential error")
+	}
+	message := err.Error()
+	if !strings.Contains(message, "task credential is missing") {
+		t.Fatalf("Create() error = %q, want friendly missing credential message", message)
+	}
+	if strings.Contains(message, credentialDir) {
+		t.Fatalf("Create() leaked credential path: %q", message)
+	}
 }
 
 func TestRunnerReportsContinuousStates(t *testing.T) {

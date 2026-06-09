@@ -186,6 +186,7 @@ If "测试连接" fails for Relay:
 If a task starts and then fails:
 
 - Check the latest error on the task card.
+- If the task says its credential is missing, generate a link for the source task before starting it. For a target task, join the synchronization link again.
 - Check that source and target folders exist and are writable by the running user.
 - Check that the link has not expired. Links are valid for 24 hours and are consumed by the first successful target.
 - If the first target already joined successfully, generate a fresh link for another target.

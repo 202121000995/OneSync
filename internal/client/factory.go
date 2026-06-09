@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/202121000995/OneSync/internal/auth"
@@ -76,9 +77,9 @@ func NewFactory(config Config) (*Factory, error) {
 
 // Create loads private task material and creates one fresh runner.
 func (f *Factory) Create(_ context.Context, definition task.Task) (task.Runner, error) {
-	credential, err := f.credentials.Load(definition.ID)
+	credential, err := f.loadCredential(definition.ID)
 	if err != nil {
-		return nil, fmt.Errorf("load task credential: %w", err)
+		return nil, err
 	}
 	if definition.Role == task.RoleSource && f.serverTLS == nil && credential.RelayEndpoint == "" {
 		return nil, errors.New("source task requires a TLS certificate or Relay endpoint")
@@ -135,9 +136,9 @@ func (r *runner) run(ctx context.Context, taskID string, reporter task.StateRepo
 }
 
 func (r *runner) runCycle(ctx context.Context, taskID string, reporter task.StateReporter) error {
-	credential, err := r.factory.credentials.Load(r.task.ID)
+	credential, err := r.factory.loadCredential(r.task.ID)
 	if err != nil {
-		return fmt.Errorf("load task credential: %w", err)
+		return err
 	}
 	token, err := base64.RawURLEncoding.DecodeString(credential.Token)
 	if err != nil || len(token) != 32 {
@@ -196,6 +197,17 @@ func (r *runner) runCycle(ctx context.Context, taskID string, reporter task.Stat
 		return err
 	}
 	return engine.Run(ctx, taskID)
+}
+
+func (f *Factory) loadCredential(taskID string) (auth.Credential, error) {
+	credential, err := f.credentials.Load(taskID)
+	if err == nil {
+		return credential, nil
+	}
+	if errors.Is(err, os.ErrNotExist) {
+		return auth.Credential{}, errors.New("task credential is missing; for a source task, generate a synchronization link before starting; for a target task, join the link again")
+	}
+	return auth.Credential{}, fmt.Errorf("load task credential: %w", err)
 }
 
 func reportState(ctx context.Context, reporter task.StateReporter, state string) error {

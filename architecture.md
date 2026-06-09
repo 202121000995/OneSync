@@ -574,6 +574,8 @@ V1 不引入数据库。配置与任务状态使用本地文件持久化：
     - 增加 Windows/Linux 验收启动脚本模板并随验收包分发。
 29. `feature/acceptance-preflight-checklist`
     - 增加真实多机器验收前检查清单并随验收包分发。
+30. `feature/friendly-missing-credential-error`
+    - 缺失任务凭据时展示可操作提示，避免暴露内部凭据文件路径。
 
 ## 16. 待确认项
 
