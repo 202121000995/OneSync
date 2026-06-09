@@ -1521,3 +1521,30 @@
 剩余风险：
 
 - `gh-proxy.org` 是第三方代理，稳定性和安全性不由 OneSync 控制；生产环境更建议自建下载镜像或提供国内下载源。
+
+## Linux OneSync 命令菜单审核
+
+审核分支：`feature/linux-onesync-command-menu`
+
+审核结论：通过。
+
+审核说明：
+
+- 新增 `onesync-menu`，用于安装后提供中文命令菜单。
+- Relay-only 服务器安装后，输入 `onesync` 会显示 Relay 状态、日志、启动、停止、重启、升级和卸载命令及中文含义。
+- 客户端安装后也会安装同一个 `onesync` 菜单。
+- Linux 客户端实际二进制安装为 `onesyncd`，避免和菜单命令冲突。
+- 客户端和 Relay 卸载时会根据另一种服务是否存在决定是否保留菜单命令。
+- Linux 验收包会给 `onesync-menu` 设置执行权限，安装后可作为 `/usr/local/bin/onesync` 直接运行。
+- Quickstart 已说明安装后可运行 `onesync` 查看中文命令菜单。
+
+验证结果：
+
+- `sh -n packaging/acceptance-scripts/linux/onesync-menu` 通过。
+- `sh -n packaging/acceptance-scripts/linux/onesyncctl` 通过。
+- `sh -n packaging/acceptance-scripts/linux/onesync-relayctl` 通过。
+- `sh -n packaging/package-acceptance.sh` 通过。
+
+剩余风险：
+
+- 当前菜单是说明型入口，不做交互选择；后续可扩展成数字菜单。

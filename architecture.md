@@ -604,6 +604,8 @@ V1 不引入数据库。配置与任务状态使用本地文件持久化：
    - 新增 Relay TLS 一键部署脚本，从 GitHub 最新 Release 下载 Linux 包、安装、启动并输出可填写的 Relay TLS 地址。
 44. `feature/relaytls-github-proxy`
    - Relay TLS 一键部署脚本支持 `GH_PROXY`，用于中国大陆等无法直连 GitHub 的服务器下载 raw 脚本、GitHub API 和 Release 包。
+45. `feature/linux-onesync-command-menu`
+   - Linux 安装后提供 `onesync` 中文命令菜单，解释客户端和 Relay 的状态、日志、重启、升级和卸载命令。
 
 ## 16. 待确认项
 

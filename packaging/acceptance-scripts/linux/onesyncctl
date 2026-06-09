@@ -29,7 +29,10 @@ install_service() {
 		exit 1
 	fi
 	install -d "$INSTALL_DIR" "$DATA_DIR" "$LOG_DIR"
-	install -m 0755 "$dir/onesync" "$INSTALL_DIR/onesync"
+	install -m 0755 "$dir/onesync" "$INSTALL_DIR/onesyncd"
+	if [ -x "$dir/onesync-menu" ]; then
+		install -m 0755 "$dir/onesync-menu" "$INSTALL_DIR/onesync"
+	fi
 	if [ -x "$dir/onesync-cert" ]; then
 		install -m 0755 "$dir/onesync-cert" "$INSTALL_DIR/onesync-cert"
 	fi
@@ -42,7 +45,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=$INSTALL_DIR/onesync -data-dir $DATA_DIR -port $PORT -web-bind $WEB_BIND -web-auth -sync-port $SYNC_PORT -log-file $LOG_DIR/onesync.log
+ExecStart=$INSTALL_DIR/onesyncd -data-dir $DATA_DIR -port $PORT -web-bind $WEB_BIND -web-auth -sync-port $SYNC_PORT -log-file $LOG_DIR/onesync.log
 Restart=on-failure
 RestartSec=5
 
@@ -81,9 +84,12 @@ upgrade_service() {
 		was_active=1
 		systemctl stop "$SERVICE"
 	fi
-	install -m 0755 "$stage/onesync" "$INSTALL_DIR/onesync"
+	install -m 0755 "$stage/onesync" "$INSTALL_DIR/onesyncd"
 	install -m 0755 "$stage/onesync-cert" "$INSTALL_DIR/onesync-cert"
 	install -m 0755 "$stage/onesyncctl" "$INSTALL_DIR/onesyncctl"
+	if [ -x "$stage/onesync-menu" ]; then
+		install -m 0755 "$stage/onesync-menu" "$INSTALL_DIR/onesync"
+	fi
 	if [ "$was_active" -eq 1 ]; then
 		systemctl start "$SERVICE"
 	fi
@@ -96,7 +102,10 @@ uninstall_service() {
 	systemctl disable "$SERVICE" 2>/dev/null || true
 	rm -f /etc/systemd/system/$SERVICE
 	systemctl daemon-reload
-	rm -f "$INSTALL_DIR/onesync" "$INSTALL_DIR/onesyncctl"
+	rm -f "$INSTALL_DIR/onesyncd" "$INSTALL_DIR/onesyncctl"
+	if [ ! -x "$INSTALL_DIR/onesync-relayctl" ]; then
+		rm -f "$INSTALL_DIR/onesync"
+	fi
 	printf 'OneSync uninstalled. Data remains at %s and logs remain at %s.\n' "$DATA_DIR" "$LOG_DIR"
 }
 

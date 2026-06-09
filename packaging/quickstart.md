@@ -70,6 +70,8 @@ sudo onesyncctl uninstall
 
 The Linux service listens on `0.0.0.0:8765` by default and requires a management account. Open `http://server-ip:8765`, then set the account and password on first access. To keep it local-only instead, install with `sudo ONESYNC_WEB_BIND=127.0.0.1 ./onesyncctl install`.
 
+After installing the Linux client or Relay, run `onesync` to show a Chinese command menu with common status, log, restart, upgrade, and uninstall commands.
+
 For a Linux Relay server, use the one-command Relay TLS deployment script. `RELAY_HOSTS` is the Relay server domain or public IP without the port, and `RELAY_PORT` is the port clients will use:
 
 ```sh

@@ -38,6 +38,9 @@ install_service() {
 	install -m 0755 "$dir/onesync-relay" "$INSTALL_DIR/onesync-relay"
 	install -m 0755 "$dir/onesync-cert" "$INSTALL_DIR/onesync-cert"
 	install -m 0755 "$0" "$INSTALL_DIR/onesync-relayctl"
+	if [ -x "$dir/onesync-menu" ]; then
+		install -m 0755 "$dir/onesync-menu" "$INSTALL_DIR/onesync"
+	fi
 	if [ ! -f "$CERT" ] || [ ! -f "$KEY" ]; then
 		hosts=${RELAY_HOSTS:-$(default_hosts)}
 		"$INSTALL_DIR/onesync-cert" -hosts "$hosts" -cert "$CERT" -key "$KEY"
@@ -98,6 +101,9 @@ upgrade_service() {
 	install -m 0755 "$stage/onesync-relay" "$INSTALL_DIR/onesync-relay"
 	install -m 0755 "$stage/onesync-cert" "$INSTALL_DIR/onesync-cert"
 	install -m 0755 "$stage/onesync-relayctl" "$INSTALL_DIR/onesync-relayctl"
+	if [ -x "$stage/onesync-menu" ]; then
+		install -m 0755 "$stage/onesync-menu" "$INSTALL_DIR/onesync"
+	fi
 	if [ "$was_active" -eq 1 ]; then
 		systemctl start "$SERVICE"
 	fi
@@ -111,6 +117,9 @@ uninstall_service() {
 	rm -f /etc/systemd/system/$SERVICE
 	systemctl daemon-reload
 	rm -f "$INSTALL_DIR/onesync-relay" "$INSTALL_DIR/onesync-relayctl"
+	if [ ! -x "$INSTALL_DIR/onesyncctl" ]; then
+		rm -f "$INSTALL_DIR/onesync"
+	fi
 	printf 'OneSync Relay uninstalled. Certificate remains at %s and logs remain at %s.\n' "$CONFIG_DIR" "$LOG_DIR"
 }
 
