@@ -2,6 +2,8 @@
 
 This guide is for a small private acceptance test with two computers.
 
+For formal acceptance runs, copy `packaging/acceptance-report.md` and fill it in while testing.
+
 OneSync has two different local addresses:
 
 - Management page: `http://127.0.0.1:8765`, only opened on the same computer.
