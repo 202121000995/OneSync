@@ -180,12 +180,43 @@ async function loadEndpointSuggestions() {
 
 function renderEndpointSuggestions(suggestions) {
   endpointSuggestions.replaceChildren();
-  if (!suggestions.length) {
+  const certificateSuggestions = certificateEndpointSuggestions();
+  const localSuggestions = uniqueEndpoints(suggestions)
+    .filter((suggestion) => !certificateSuggestions.includes(suggestion));
+  if (!certificateSuggestions.length && !localSuggestions.length) {
     endpointSuggestions.textContent = "没有发现局域网 IPv4 地址，请手动填写。";
     return;
   }
+  if (certificateSuggestions.length) {
+    appendSuggestionGroup("证书地址：", certificateSuggestions);
+  }
+  if (localSuggestions.length) {
+    appendSuggestionGroup("本机地址：", localSuggestions);
+  }
+}
+
+function certificateEndpointSuggestions() {
+  if (!appConfig.direct_tls_configured) return [];
+  const hosts = appConfig.direct_tls_hosts || [];
+  return uniqueEndpoints(hosts
+    .map((host) => certificateHostEndpoint(host, appConfig.sync_port))
+    .filter(Boolean));
+}
+
+function certificateHostEndpoint(host, port) {
+  const value = String(host || "").trim();
+  if (!value || value.startsWith("*.")) return "";
+  if (value.includes(":") && !value.startsWith("[")) return `[${value}]:${port}`;
+  return `${value}:${port}`;
+}
+
+function uniqueEndpoints(values) {
+  return [...new Set((values || []).map((value) => String(value || "").trim()).filter(Boolean))];
+}
+
+function appendSuggestionGroup(labelText, suggestions) {
   const label = document.createElement("span");
-  label.textContent = "可选地址：";
+  label.textContent = labelText;
   endpointSuggestions.append(label);
   for (const suggestion of suggestions) {
     const button = document.createElement("button");
