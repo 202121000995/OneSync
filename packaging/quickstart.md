@@ -27,6 +27,14 @@ Make sure the target computer can reach the source synchronization endpoint. If 
 
 ## Build
 
+For acceptance runs, build all test binaries and checksums in one step:
+
+```sh
+packaging/build-acceptance.sh dist/acceptance
+```
+
+Copy the needed binaries from `dist/acceptance` to the source, target, and Relay computers. Record `dist/acceptance/SHA256SUMS.txt` in the acceptance report.
+
 Build the three programs:
 
 ```sh

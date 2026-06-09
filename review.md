@@ -1032,3 +1032,29 @@
 
 - 模板本身不执行自动测试，真实结果仍依赖测试人员按环境填写。
 - 首轮多机器验收完成后，需要把发现的问题转成可复现缺陷和后续修复任务。
+
+## 验收构建脚本审核
+
+审核分支：`feature/acceptance-build-script`
+
+审核结论：通过。
+
+审核说明：
+
+- 新增 `packaging/build-acceptance.sh`，一键构建 Windows amd64 主程序、Windows amd64 证书工具、Linux amd64 主程序、Linux amd64 证书工具和 Linux amd64 Relay。
+- 构建脚本输出 `BUILD.txt`，记录提交、Go 版本和输出目录。
+- 构建脚本输出 `SHA256SUMS.txt`，供验收报告记录和跨机器核对。
+- 脚本使用临时 Go 构建缓存，避免依赖用户目录写权限。
+- Quickstart 增加验收构建脚本用法，验收报告模板提示记录 `SHA256SUMS.txt`。
+- 未修改程序行为、同步协议或管理页面。
+
+验证结果：
+
+- `GO_BIN=/Users/apple/Library/Go/sdk/go1.26.3/bin/go packaging/build-acceptance.sh /private/tmp/onesync-acceptance-artifacts-2` 通过。
+- `go test ./...` 通过。
+- `go vet ./...` 通过。
+
+剩余风险：
+
+- 脚本当前只构建 Windows amd64 和 Linux amd64 验收产物，不生成安装器或压缩包。
+- 输出目录若已有旧产物会被同名文件覆盖；正式发布前仍需清理或使用新的输出目录。

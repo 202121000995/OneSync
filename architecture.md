@@ -566,6 +566,8 @@ V1 不引入数据库。配置与任务状态使用本地文件持久化：
     - 增加管理页静态资源和关键前端交互结构回归测试。
 25. `feature/acceptance-report-template`
     - 增加真实多机器验收报告模板。
+26. `feature/acceptance-build-script`
+    - 增加验收构建脚本和 SHA-256 清单生成。
 
 ## 16. 待确认项
 
