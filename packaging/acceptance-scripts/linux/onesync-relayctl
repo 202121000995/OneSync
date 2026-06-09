@@ -58,6 +58,9 @@ install_service() {
 	if [ -x "$dir/onesyncr-menu" ]; then
 		install -m 0755 "$dir/onesyncr-menu" "$INSTALL_DIR/onesyncr"
 	fi
+	if [ ! -x "$INSTALL_DIR/onesyncctl" ]; then
+		rm -f "$INSTALL_DIR/onesync"
+	fi
 	if [ ! -f "$CERT" ] || [ ! -f "$KEY" ]; then
 		hosts=${RELAY_HOSTS:-$(default_hosts)}
 		"$INSTALL_DIR/onesync-cert" -hosts "$hosts" -cert "$CERT" -key "$KEY"
@@ -121,6 +124,9 @@ upgrade_service() {
 	install -m 0755 "$stage/onesync-relayctl" "$INSTALL_DIR/onesync-relayctl"
 	if [ -x "$stage/onesyncr-menu" ]; then
 		install -m 0755 "$stage/onesyncr-menu" "$INSTALL_DIR/onesyncr"
+	fi
+	if [ ! -x "$INSTALL_DIR/onesyncctl" ]; then
+		rm -f "$INSTALL_DIR/onesync"
 	fi
 	if [ "$was_active" -eq 1 ]; then
 		systemctl start "$SERVICE"
