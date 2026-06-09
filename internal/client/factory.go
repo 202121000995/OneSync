@@ -13,6 +13,7 @@ import (
 	"github.com/202121000995/OneSync/internal/auth"
 	"github.com/202121000995/OneSync/internal/filewatch"
 	"github.com/202121000995/OneSync/internal/network"
+	"github.com/202121000995/OneSync/internal/scanner"
 	"github.com/202121000995/OneSync/internal/sync"
 	"github.com/202121000995/OneSync/internal/task"
 )
@@ -163,14 +164,18 @@ func (r *runner) runCycle(ctx context.Context, taskID string, reporter task.Stat
 		if err != nil {
 			return err
 		}
-		defer connection.session.Close()
+		session := meteredSession{base: connection.session, reporter: trafficReporter(reporter)}
+		defer session.Close()
+		addLog(ctx, reporter, "info", "连接成功")
 		if err := reportState(ctx, reporter, task.StateSyncing); err != nil {
 			return err
 		}
 		if _, err := r.factory.credentials.Claim(r.task.ID, credential.Token, connection.peerID); err != nil {
 			return fmt.Errorf("claim target identity: %w", err)
 		}
-		engine, err := sync.DefaultSourceEngine(r.task.SourcePath, connection.session, progressReporter(reporter))
+		engine, err := sync.DefaultSourceEngineWithOptions(r.task.SourcePath, session, scanner.Options{
+			IgnoreRules: r.task.IgnoreRules,
+		}, progressReporter(reporter))
 		if err != nil {
 			return err
 		}
@@ -193,11 +198,15 @@ func (r *runner) runCycle(ctx context.Context, taskID string, reporter task.Stat
 	if err != nil {
 		return err
 	}
+	session = meteredSession{base: session, reporter: trafficReporter(reporter)}
 	defer session.Close()
+	addLog(ctx, reporter, "info", "连接成功")
 	if err := reportState(ctx, reporter, task.StateSyncing); err != nil {
 		return err
 	}
-	engine, err := sync.DefaultTargetEngine(r.task.TargetPath, session, progressReporter(reporter))
+	engine, err := sync.DefaultTargetEngineWithOptions(r.task.TargetPath, session, scanner.Options{
+		IgnoreRules: r.task.IgnoreRules,
+	}, progressReporter(reporter))
 	if err != nil {
 		return err
 	}
@@ -248,4 +257,45 @@ func reportState(ctx context.Context, reporter task.StateReporter, state string)
 func progressReporter(reporter task.StateReporter) sync.ProgressReporter {
 	progressReporter, _ := reporter.(sync.ProgressReporter)
 	return progressReporter
+}
+
+func trafficReporter(reporter task.StateReporter) task.TrafficReporter {
+	trafficReporter, _ := reporter.(task.TrafficReporter)
+	return trafficReporter
+}
+
+func addLog(ctx context.Context, reporter task.StateReporter, level, message string) {
+	logReporter, _ := reporter.(task.LogReporter)
+	if logReporter != nil {
+		_ = logReporter.AddLog(ctx, level, message)
+	}
+}
+
+type meteredSession struct {
+	base     network.Session
+	reporter task.TrafficReporter
+}
+
+func (s meteredSession) Send(ctx context.Context, message network.Message) error {
+	err := s.base.Send(ctx, message)
+	if err == nil && s.reporter != nil {
+		_ = s.reporter.AddTraffic(ctx, 0, messageWireSize(message))
+	}
+	return err
+}
+
+func (s meteredSession) Receive(ctx context.Context) (network.Message, error) {
+	message, err := s.base.Receive(ctx)
+	if err == nil && s.reporter != nil {
+		_ = s.reporter.AddTraffic(ctx, messageWireSize(message), 0)
+	}
+	return message, err
+}
+
+func (s meteredSession) Close() error {
+	return s.base.Close()
+}
+
+func messageWireSize(message network.Message) uint64 {
+	return uint64(1 + 1 + 8 + 4 + len(message.Payload))
 }

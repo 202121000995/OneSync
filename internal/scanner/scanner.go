@@ -10,6 +10,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"time"
@@ -39,17 +40,22 @@ type Scanner interface {
 // Options controls optional work performed during a scan.
 type Options struct {
 	ComputeHash bool
+	IgnoreRules []string
 }
 
 type filesystemScanner struct {
 	computeHash bool
+	ignoreRules []ignoreRule
 }
 
 const reservedTransferDirectory = ".onesync-part"
 
 // New returns a filesystem scanner configured with options.
 func New(options Options) Scanner {
-	return &filesystemScanner{computeHash: options.ComputeHash}
+	return &filesystemScanner{
+		computeHash: options.ComputeHash,
+		ignoreRules: parseIgnoreRules(options.IgnoreRules),
+	}
 }
 
 func (s *filesystemScanner) Scan(ctx context.Context, root string) (Snapshot, error) {
@@ -91,6 +97,16 @@ func (s *filesystemScanner) Scan(ctx context.Context, root string) (Snapshot, er
 			return fmt.Errorf("walk %q: %w", path, walkErr)
 		}
 		if path == absoluteRoot || entry.IsDir() {
+			if path != absoluteRoot && entry.IsDir() {
+				relativePath, err := filepath.Rel(absoluteRoot, path)
+				if err != nil {
+					return fmt.Errorf("make %q relative to scan root: %w", path, err)
+				}
+				relativePath = filepath.ToSlash(relativePath)
+				if s.ignored(relativePath, true) {
+					return filepath.SkipDir
+				}
+			}
 			if path != absoluteRoot && entry.IsDir() && entry.Name() == reservedTransferDirectory {
 				return filepath.SkipDir
 			}
@@ -119,6 +135,9 @@ func (s *filesystemScanner) Scan(ctx context.Context, root string) (Snapshot, er
 		if relativePath == "." || relativePath == "" || strings.HasPrefix(relativePath, "../") {
 			return fmt.Errorf("invalid relative path %q", relativePath)
 		}
+		if s.ignored(relativePath, false) {
+			return nil
+		}
 
 		fileHash := ""
 		if s.computeHash {
@@ -145,6 +164,52 @@ func (s *filesystemScanner) Scan(ctx context.Context, root string) (Snapshot, er
 	}
 
 	return snapshot, nil
+}
+
+type ignoreRule struct {
+	pattern string
+	dirOnly bool
+}
+
+func parseIgnoreRules(rules []string) []ignoreRule {
+	parsed := make([]ignoreRule, 0, len(rules))
+	for _, raw := range rules {
+		rule := strings.TrimSpace(raw)
+		if rule == "" || strings.HasPrefix(rule, "#") {
+			continue
+		}
+		rule = filepath.ToSlash(rule)
+		rule = strings.TrimPrefix(rule, "/")
+		dirOnly := strings.HasSuffix(rule, "/")
+		rule = strings.TrimSuffix(rule, "/")
+		if rule == "" {
+			continue
+		}
+		parsed = append(parsed, ignoreRule{pattern: rule, dirOnly: dirOnly})
+	}
+	return parsed
+}
+
+func (s *filesystemScanner) ignored(relativePath string, isDir bool) bool {
+	for _, rule := range s.ignoreRules {
+		if rule.dirOnly && !isDir && !strings.HasPrefix(relativePath, rule.pattern+"/") {
+			continue
+		}
+		if relativePath == rule.pattern || strings.HasPrefix(relativePath, rule.pattern+"/") {
+			return true
+		}
+		if !strings.Contains(rule.pattern, "/") {
+			matched, err := path.Match(rule.pattern, path.Base(relativePath))
+			if err == nil && matched {
+				return true
+			}
+		}
+		matched, err := path.Match(rule.pattern, relativePath)
+		if err == nil && matched {
+			return true
+		}
+	}
+	return false
 }
 
 func rootID(absoluteRoot string) string {

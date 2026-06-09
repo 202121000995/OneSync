@@ -303,11 +303,17 @@ func (g *cycleGroup) Do(ctx context.Context, key string, run func() error) error
 
 // DefaultSourceEngine creates a source engine using production implementations.
 func DefaultSourceEngine(root string, session network.Session, reporters ...ProgressReporter) (*Engine, error) {
+	return DefaultSourceEngineWithOptions(root, session, scanner.Options{ComputeHash: true}, reporters...)
+}
+
+// DefaultSourceEngineWithOptions creates a source engine with custom scanner options.
+func DefaultSourceEngineWithOptions(root string, session network.Session, options scanner.Options, reporters ...ProgressReporter) (*Engine, error) {
+	options.ComputeHash = true
 	return NewEngine(Config{
 		Role:     RoleSource,
 		Root:     root,
 		Session:  session,
-		Scanner:  scanner.New(scanner.Options{ComputeHash: true}),
+		Scanner:  scanner.New(options),
 		Differ:   NewDiffer(),
 		Sender:   transfer.Sender{},
 		Progress: firstProgressReporter(reporters),
@@ -316,11 +322,17 @@ func DefaultSourceEngine(root string, session network.Session, reporters ...Prog
 
 // DefaultTargetEngine creates a target engine using production implementations.
 func DefaultTargetEngine(root string, session network.Session, reporters ...ProgressReporter) (*Engine, error) {
+	return DefaultTargetEngineWithOptions(root, session, scanner.Options{ComputeHash: true}, reporters...)
+}
+
+// DefaultTargetEngineWithOptions creates a target engine with custom scanner options.
+func DefaultTargetEngineWithOptions(root string, session network.Session, options scanner.Options, reporters ...ProgressReporter) (*Engine, error) {
+	options.ComputeHash = true
 	return NewEngine(Config{
 		Role:     RoleTarget,
 		Root:     root,
 		Session:  session,
-		Scanner:  scanner.New(scanner.Options{ComputeHash: true}),
+		Scanner:  scanner.New(options),
 		Receiver: transfer.Receiver{Root: root},
 		Progress: firstProgressReporter(reporters),
 	})

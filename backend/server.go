@@ -34,6 +34,7 @@ type taskManager interface {
 	Start(ctx context.Context, taskID string) error
 	Stop(ctx context.Context, taskID string) error
 	Delete(ctx context.Context, taskID string) error
+	UpdateIgnoreRules(ctx context.Context, taskID string, rules []string) error
 	Get(ctx context.Context, taskID string) (task.Task, error)
 	List(ctx context.Context) ([]task.Task, error)
 }
@@ -60,6 +61,7 @@ type Options struct {
 	DirectTLSConfigured  bool
 	DirectTLSHosts       []string
 	DirectTLSCertificate string
+	Version              string
 }
 
 // Server provides the local management API and web page.
@@ -73,6 +75,7 @@ type Server struct {
 	directTLSConfigured  bool
 	directTLSHosts       []string
 	directTLSCertificate string
+	version              string
 	handler              http.Handler
 }
 
@@ -96,6 +99,10 @@ func NewServerWithOptions(manager taskManager, links *auth.LinkService, credenti
 		directTLSConfigured:  options.DirectTLSConfigured,
 		directTLSHosts:       append([]string(nil), options.DirectTLSHosts...),
 		directTLSCertificate: options.DirectTLSCertificate,
+		version:              options.Version,
+	}
+	if server.version == "" {
+		server.version = "dev"
 	}
 	if server.syncPort == 0 {
 		server.syncPort = DefaultSyncPort
@@ -113,6 +120,7 @@ func NewServerWithOptions(manager taskManager, links *auth.LinkService, credenti
 	mux.HandleFunc("POST /api/tasks", server.createTask)
 	mux.HandleFunc("POST /api/tasks/{id}/start", server.startTask)
 	mux.HandleFunc("POST /api/tasks/{id}/stop", server.stopTask)
+	mux.HandleFunc("PATCH /api/tasks/{id}", server.updateTask)
 	mux.HandleFunc("DELETE /api/tasks/{id}", server.deleteTask)
 	mux.HandleFunc("POST /api/links", server.issueLink)
 	mux.HandleFunc("POST /api/links/join", server.joinLink)
@@ -178,6 +186,7 @@ func (s *Server) config(writer http.ResponseWriter, _ *http.Request) {
 		"direct_tls_configured": s.directTLSConfigured,
 		"direct_tls_hosts":      directTLSHosts,
 		"direct_tls_endpoints":  certificateEndpoints(directTLSHosts, s.syncPort),
+		"version":               s.version,
 	})
 }
 
@@ -251,6 +260,20 @@ func (s *Server) stopTask(writer http.ResponseWriter, request *http.Request) {
 		return
 	}
 	writeJSON(writer, http.StatusOK, map[string]string{"status": "stopped"})
+}
+
+func (s *Server) updateTask(writer http.ResponseWriter, request *http.Request) {
+	var input struct {
+		IgnoreRules []string `json:"ignore_rules"`
+	}
+	if err := decodeJSON(writer, request, &input); err != nil {
+		return
+	}
+	if err := s.manager.UpdateIgnoreRules(request.Context(), request.PathValue("id"), input.IgnoreRules); err != nil {
+		writeAPIError(writer, statusForTaskError(err), err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, map[string]string{"status": "updated"})
 }
 
 func (s *Server) deleteTask(writer http.ResponseWriter, request *http.Request) {

@@ -62,6 +62,27 @@ func TestScanComputesMD5WhenEnabled(t *testing.T) {
 	}
 }
 
+func TestScanAppliesIgnoreRules(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "keep.txt"), "keep")
+	writeFile(t, filepath.Join(root, "skip.tmp"), "skip")
+	writeFile(t, filepath.Join(root, "cache", "nested.txt"), "skip")
+	writeFile(t, filepath.Join(root, "logs", "debug.txt"), "skip")
+
+	snapshot, err := New(Options{IgnoreRules: []string{"*.tmp", "cache/", "logs/debug.txt"}}).Scan(context.Background(), root)
+	if err != nil {
+		t.Fatalf("Scan() error = %v", err)
+	}
+	if _, exists := snapshot.Files["keep.txt"]; !exists {
+		t.Fatal("keep.txt was not scanned")
+	}
+	for _, ignored := range []string{"skip.tmp", "cache/nested.txt", "logs/debug.txt"} {
+		if _, exists := snapshot.Files[ignored]; exists {
+			t.Fatalf("%s was not ignored", ignored)
+		}
+	}
+}
+
 func TestScanRootIDIsStableAndDoesNotExposeRoot(t *testing.T) {
 	root := t.TempDir()
 	scanner := New(Options{})

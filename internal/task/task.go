@@ -35,8 +35,24 @@ type Task struct {
 	State       string             `json:"state"`
 	LastError   string             `json:"last_error,omitempty"`
 	Progress    *progress.Snapshot `json:"progress,omitempty"`
+	IgnoreRules []string           `json:"ignore_rules,omitempty"`
+	Traffic     TrafficStats       `json:"traffic,omitempty"`
+	Logs        []LogEntry         `json:"logs,omitempty"`
 	CreatedAt   time.Time          `json:"created_at"`
 	UpdatedAt   time.Time          `json:"updated_at"`
+}
+
+// TrafficStats stores cumulative task traffic counters.
+type TrafficStats struct {
+	ReceivedBytes uint64 `json:"received_bytes,omitempty"`
+	SentBytes     uint64 `json:"sent_bytes,omitempty"`
+}
+
+// LogEntry records a task lifecycle event for the management page.
+type LogEntry struct {
+	Time    time.Time `json:"time"`
+	Level   string    `json:"level"`
+	Message string    `json:"message"`
 }
 
 func validateTask(task Task) error {
@@ -79,6 +95,12 @@ func validateTask(task Task) error {
 			return err
 		}
 	}
+	if err := validateIgnoreRules(task.IgnoreRules); err != nil {
+		return err
+	}
+	if err := validateLogs(task.Logs); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -91,6 +113,39 @@ func validatePersistedTask(task Task) error {
 	}
 	if task.CreatedAt.IsZero() || task.UpdatedAt.IsZero() || task.UpdatedAt.Before(task.CreatedAt) {
 		return errors.New("persisted task timestamps are invalid")
+	}
+	return nil
+}
+
+func validateIgnoreRules(rules []string) error {
+	if len(rules) > 1000 {
+		return errors.New("ignore rules exceed 1000 lines")
+	}
+	for _, rule := range rules {
+		if len(rule) > 512 {
+			return errors.New("ignore rule exceeds 512 characters")
+		}
+		if strings.ContainsRune(rule, '\x00') {
+			return errors.New("ignore rule contains null byte")
+		}
+	}
+	return nil
+}
+
+func validateLogs(logs []LogEntry) error {
+	if len(logs) > 200 {
+		return errors.New("task logs exceed 200 entries")
+	}
+	for _, entry := range logs {
+		if entry.Level != "" && entry.Level != "info" && entry.Level != "error" && entry.Level != "warning" {
+			return fmt.Errorf("invalid task log level %q", entry.Level)
+		}
+		if len(entry.Message) > 2048 {
+			return errors.New("task log message exceeds 2048 characters")
+		}
+		if strings.ContainsRune(entry.Message, '\x00') {
+			return errors.New("task log message contains null byte")
+		}
 	}
 	return nil
 }

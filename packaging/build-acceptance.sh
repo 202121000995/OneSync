@@ -21,15 +21,20 @@ build() {
 	goarch=$2
 	output=$3
 	package=$4
+	ldflags=${5:-}
 	printf 'building %s\n' "$output"
-	GOOS=$goos GOARCH=$goarch "$GO_BIN" build -trimpath -o "$OUT/$output" "$package"
+	if [ -n "$ldflags" ]; then
+		GOOS=$goos GOARCH=$goarch "$GO_BIN" build -trimpath -ldflags "$ldflags" -o "$OUT/$output" "$package"
+	else
+		GOOS=$goos GOARCH=$goarch "$GO_BIN" build -trimpath -o "$OUT/$output" "$package"
+	fi
 }
 
 cd "$ROOT"
 
-build windows amd64 onesync-windows-amd64.exe ./cmd/onesync
+build windows amd64 onesync-windows-amd64.exe ./cmd/onesync "-X main.version=$commit"
 build windows amd64 onesync-cert-windows-amd64.exe ./cmd/onesync-cert
-build linux amd64 onesync-linux-amd64 ./cmd/onesync
+build linux amd64 onesync-linux-amd64 ./cmd/onesync "-X main.version=$commit"
 build linux amd64 onesync-cert-linux-amd64 ./cmd/onesync-cert
 build linux amd64 onesync-relay-linux-amd64 ./cmd/relay
 

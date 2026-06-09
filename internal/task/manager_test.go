@@ -188,6 +188,38 @@ func TestManagerDeleteRemovesTaskAndPersists(t *testing.T) {
 	}
 }
 
+func TestManagerUpdatesIgnoreRulesAndRuntimeMetadata(t *testing.T) {
+	storePath := filepath.Join(t.TempDir(), "tasks.json")
+	manager := newTestManager(t, storePath, &fakeFactory{})
+	createSourceTask(t, manager, "task")
+
+	if err := manager.UpdateIgnoreRules(context.Background(), "task", []string{"*.tmp", "cache/"}); err != nil {
+		t.Fatalf("UpdateIgnoreRules() error = %v", err)
+	}
+	reporter := taskStateReporter{manager: manager, taskID: "task"}
+	if err := reporter.AddTraffic(context.Background(), 123, 456); err != nil {
+		t.Fatalf("AddTraffic() error = %v", err)
+	}
+	if err := reporter.AddLog(context.Background(), "info", "连接成功"); err != nil {
+		t.Fatalf("AddLog() error = %v", err)
+	}
+
+	reloaded := newTestManager(t, storePath, &fakeFactory{})
+	found, err := reloaded.Get(context.Background(), "task")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if len(found.IgnoreRules) != 2 || found.IgnoreRules[0] != "*.tmp" || found.IgnoreRules[1] != "cache/" {
+		t.Fatalf("IgnoreRules = %+v", found.IgnoreRules)
+	}
+	if found.Traffic.ReceivedBytes != 123 || found.Traffic.SentBytes != 456 {
+		t.Fatalf("Traffic = %+v", found.Traffic)
+	}
+	if len(found.Logs) != 1 || found.Logs[0].Message != "连接成功" {
+		t.Fatalf("Logs = %+v", found.Logs)
+	}
+}
+
 func TestManagerDeleteStopsRunningTask(t *testing.T) {
 	runner := &fakeRunner{started: make(chan struct{}), waitForCancel: true}
 	manager := newTestManager(t, filepath.Join(t.TempDir(), "tasks.json"), &fakeFactory{runner: runner})

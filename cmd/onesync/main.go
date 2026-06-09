@@ -26,6 +26,8 @@ import (
 	"github.com/202121000995/OneSync/internal/task"
 )
 
+var version = "dev"
+
 func main() {
 	defaultDataDir, err := dataDirectory()
 	if err != nil {
@@ -86,6 +88,7 @@ func main() {
 		DirectTLSConfigured:  serverTLS != nil,
 		DirectTLSHosts:       serverCertificateHosts(serverTLS),
 		DirectTLSCertificate: serverCertificatePEM(serverTLS),
+		Version:              version,
 	})
 	if err != nil {
 		log.Fatal(err)

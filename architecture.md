@@ -588,6 +588,8 @@ V1 不引入数据库。配置与任务状态使用本地文件持久化：
    - 源端启动时自动生成并加载本地 TLS 证书，源端用户无需手动运行证书脚本。
 36. `feature/windows-task-table-ui`
    - Windows 验收包提供 `OneSync.exe` 直接启动入口，管理页改为同步任务表格主界面，并按 MD5 判断文件差异。
+37. `feature/task-params-logs-stats-icon`
+   - 增加任务参数忽略规则、任务日志、接收/发送流量统计、关于版本号和 Windows 包图标资产。
 
 ## 16. 待确认项
 

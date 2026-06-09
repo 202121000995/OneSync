@@ -69,6 +69,18 @@ func TestTaskAPI(t *testing.T) {
 	if response.Code != http.StatusOK || !bytes.Contains(response.Body.Bytes(), []byte("photos")) {
 		t.Fatalf("list status = %d, body = %s", response.Code, response.Body.String())
 	}
+
+	update := jsonRequest(http.MethodPatch, "http://127.0.0.1/api/tasks/photos", map[string]any{
+		"ignore_rules": []string{"*.tmp", "cache/"},
+	})
+	response = httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, update)
+	if response.Code != http.StatusOK {
+		t.Fatalf("update status = %d, body = %s", response.Code, response.Body.String())
+	}
+	if got := manager.tasks["photos"].IgnoreRules; len(got) != 2 || got[0] != "*.tmp" || got[1] != "cache/" {
+		t.Fatalf("IgnoreRules = %+v", got)
+	}
 }
 
 func TestLinkIssueAndJoinStoresCredentialSeparately(t *testing.T) {
@@ -415,6 +427,15 @@ func (m *fakeManager) Delete(_ context.Context, id string) error {
 		return task.ErrTaskNotFound
 	}
 	delete(m.tasks, id)
+	return nil
+}
+func (m *fakeManager) UpdateIgnoreRules(_ context.Context, id string, rules []string) error {
+	found, ok := m.tasks[id]
+	if !ok {
+		return task.ErrTaskNotFound
+	}
+	found.IgnoreRules = append([]string(nil), rules...)
+	m.tasks[id] = found
 	return nil
 }
 

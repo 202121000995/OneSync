@@ -5,6 +5,9 @@ const dialog = document.querySelector("#link-dialog");
 const createDialog = document.querySelector("#create-dialog");
 const joinDialog = document.querySelector("#join-dialog");
 const settingsDialog = document.querySelector("#settings-dialog");
+const logsDialog = document.querySelector("#logs-dialog");
+const aboutDialog = document.querySelector("#about-dialog");
+const settingsForm = document.querySelector("#settings-form");
 const linkForm = document.querySelector("#link-form");
 const generatedLink = document.querySelector("#generated-link");
 const endpointSuggestions = document.querySelector("#endpoint-suggestions");
@@ -16,11 +19,14 @@ const rescanButton = document.querySelector("#toolbar-rescan");
 const settingsButton = document.querySelector("#toolbar-settings");
 const deleteButton = document.querySelector("#toolbar-delete");
 const settingsSummary = document.querySelector("#settings-summary");
-const defaultConfig = { sync_port: 7443, direct_tls_configured: false, direct_tls_hosts: [], direct_tls_endpoints: [] };
+const logsList = document.querySelector("#logs-list");
+const aboutVersion = document.querySelector("#about-version");
+const defaultConfig = { sync_port: 7443, direct_tls_configured: false, direct_tls_hosts: [], direct_tls_endpoints: [], version: "dev" };
 const sourceLinksStorageKey = "onesync.sourceLinks.v1";
 let appConfig = { ...defaultConfig };
 let tasksCache = [];
 let selectedTaskId = "";
+let trafficSnapshot = { time: Date.now(), tasks: {} };
 
 async function api(path, options = {}) {
   const response = await fetch(path, {
@@ -42,9 +48,10 @@ async function loadTasks() {
   statusText.textContent = "正在加载";
   try {
     const { tasks } = await api("/api/tasks", { headers: {} });
+    const rates = trafficRates(tasks || []);
     tasksCache = tasks || [];
     if (selectedTaskId && !tasksCache.some((task) => task.id === selectedTaskId)) selectedTaskId = "";
-    list.replaceChildren(...(tasksCache.length ? tasksCache.map(renderTaskRow) : [emptyTaskRow()]));
+    list.replaceChildren(...(tasksCache.length ? tasksCache.map((task) => renderTaskRow(task, rates[task.id] || {})) : [emptyTaskRow()]));
     statusText.textContent = `${tasks.length} 个任务`;
     updateToolbar();
   } catch (error) {
@@ -53,7 +60,7 @@ async function loadTasks() {
   }
 }
 
-function renderTaskRow(task) {
+function renderTaskRow(task, rate = {}) {
   const row = document.createElement("tr");
   row.className = `${taskClass(task)} ${task.id === selectedTaskId ? "selected" : ""}`;
   row.title = [taskStateDetail(task), sourceReadinessWarning(task), task.last_error].filter(Boolean).join("\n");
@@ -68,14 +75,14 @@ function renderTaskRow(task) {
   });
 
   appendCell(row, selector, "select-col");
-  appendCell(row, roleLabel(task));
+  appendCell(row, typeLabel(task));
   appendCell(row, taskNameCell(task));
   appendCell(row, statusCell(task));
   appendCell(row, syncDeviceCell(task));
   appendCell(row, localSizeLabel(task));
   appendCell(row, standardSizeLabel(task));
-  appendCell(row, "0 B/s", "muted");
-  appendCell(row, "0 B/s", "muted");
+  appendCell(row, formatRate(rate.received || 0), "muted");
+  appendCell(row, formatRate(rate.sent || 0), "muted");
   return row;
 }
 
@@ -96,6 +103,10 @@ function appendCell(row, content, className = "") {
   else cell.textContent = content;
   row.append(cell);
   return cell;
+}
+
+function typeLabel(task) {
+  return task.role === "source" ? "发送" : "接收";
 }
 
 function roleLabel(task) {
@@ -169,7 +180,7 @@ function standardSizeLabel(task) {
 
 function selectTask(taskId) {
   selectedTaskId = taskId;
-  list.replaceChildren(...(tasksCache.length ? tasksCache.map(renderTaskRow) : [emptyTaskRow()]));
+  list.replaceChildren(...(tasksCache.length ? tasksCache.map((task) => renderTaskRow(task)) : [emptyTaskRow()]));
   updateToolbar();
 }
 
@@ -306,7 +317,80 @@ function openSettingsForSelectedTask() {
   const task = selectedTask();
   if (!task) return;
   settingsSummary.textContent = `当前任务：${task.id} · ${roleLabel(task)} · ${task.role === "source" ? task.source_path : task.target_path}`;
+  settingsForm.elements.ignore_rules.value = (task.ignore_rules || []).join("\n");
   settingsDialog.showModal();
+}
+
+async function saveSettings(event) {
+  event.preventDefault();
+  const task = selectedTask();
+  if (!task) return;
+  const rules = settingsForm.elements.ignore_rules.value
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith("#"));
+  try {
+    await api(`/api/tasks/${encodeURIComponent(task.id)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ ignore_rules: rules }),
+    });
+    settingsDialog.close();
+    notify("参数已保存");
+    loadTasks();
+  } catch (error) { notify(error.message); }
+}
+
+function openLogsDialog() {
+  const task = selectedTask();
+  const logs = task ? (task.logs || []) : tasksCache.flatMap((item) => (item.logs || []).map((entry) => ({ ...entry, task_id: item.id })));
+  logsList.replaceChildren(...(logs.length ? logs.slice(-200).reverse().map(renderLogEntry) : [emptyLogEntry()]));
+  logsDialog.showModal();
+}
+
+function renderLogEntry(entry) {
+  const row = document.createElement("p");
+  row.className = `log-entry ${entry.level || "info"}`;
+  const time = entry.time ? new Date(entry.time).toLocaleString() : "";
+  row.textContent = `${time}${entry.task_id ? ` · ${entry.task_id}` : ""} · ${entry.message || ""}`;
+  return row;
+}
+
+function emptyLogEntry() {
+  const row = document.createElement("p");
+  row.className = "hint";
+  row.textContent = "暂无日志。";
+  return row;
+}
+
+function trafficRates(tasks) {
+  const now = Date.now();
+  const seconds = Math.max((now - trafficSnapshot.time) / 1000, 1);
+  const rates = {};
+  const next = {};
+  for (const task of tasks) {
+    const traffic = task.traffic || {};
+    const previous = trafficSnapshot.tasks[task.id] || { received: traffic.received_bytes || 0, sent: traffic.sent_bytes || 0 };
+    const received = traffic.received_bytes || 0;
+    const sent = traffic.sent_bytes || 0;
+    rates[task.id] = {
+      received: Math.max(0, (received - previous.received) / seconds),
+      sent: Math.max(0, (sent - previous.sent) / seconds),
+    };
+    next[task.id] = { received, sent };
+  }
+  trafficSnapshot = { time: now, tasks: next };
+  return rates;
+}
+
+function formatRate(bytesPerSecond) {
+  const units = ["B/s", "KB/s", "MB/s", "GB/s"];
+  let value = bytesPerSecond;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit++;
+  }
+  return `${value < 10 && unit > 0 ? value.toFixed(2) : Math.round(value)} ${units[unit]}`;
 }
 
 async function runTaskAction(id, action) {
@@ -567,6 +651,10 @@ document.querySelector("#open-create").addEventListener("click", () => createDia
 document.querySelector("#open-join").addEventListener("click", () => joinDialog.showModal());
 document.querySelector("#close-create-dialog").addEventListener("click", () => createDialog.close());
 document.querySelector("#close-join-dialog").addEventListener("click", () => joinDialog.close());
+document.querySelector("#close-settings-dialog").addEventListener("click", () => settingsDialog.close());
+document.querySelector("#open-logs").addEventListener("click", openLogsDialog);
+document.querySelector("#open-about").addEventListener("click", () => aboutDialog.showModal());
+settingsForm.addEventListener("submit", saveSettings);
 startStopButton.addEventListener("click", toggleSelectedTask);
 rescanButton.addEventListener("click", rescanSelectedTask);
 settingsButton.addEventListener("click", openSettingsForSelectedTask);
@@ -621,6 +709,7 @@ function linkExpiryText(value) {
 async function loadConfig() {
   try {
     appConfig = { ...defaultConfig, ...(await api("/api/config", { headers: {} })) };
+    aboutVersion.textContent = appConfig.version || "dev";
   } catch (error) {
     notify(error.message);
   }

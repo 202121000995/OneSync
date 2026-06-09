@@ -28,6 +28,16 @@ type ProgressReporter interface {
 	SetProgress(ctx context.Context, snapshot progress.Snapshot) error
 }
 
+// TrafficReporter lets long-running runners publish network traffic counters.
+type TrafficReporter interface {
+	AddTraffic(ctx context.Context, receivedBytes, sentBytes uint64) error
+}
+
+// LogReporter lets long-running runners publish task events.
+type LogReporter interface {
+	AddLog(ctx context.Context, level, message string) error
+}
+
 // ReportingRunner performs a task and reports intermediate states.
 type ReportingRunner interface {
 	RunWithReporter(ctx context.Context, taskID string, reporter StateReporter) error
@@ -133,6 +143,10 @@ func (m *Manager) Start(ctx context.Context, taskID string) error {
 	task.State = StateConnecting
 	task.LastError = ""
 	task.Progress = nil
+	task.Logs = append(task.Logs, LogEntry{Time: m.now().UTC(), Level: "info", Message: "任务正在启动"})
+	if len(task.Logs) > 200 {
+		task.Logs = append([]LogEntry(nil), task.Logs[len(task.Logs)-200:]...)
+	}
 	task.UpdatedAt = m.now().UTC()
 	m.tasks[taskID] = task
 	if err := m.store.save(m.tasks); err != nil {
@@ -203,6 +217,31 @@ func (m *Manager) Delete(ctx context.Context, taskID string) error {
 		return ErrTaskNotFound
 	}
 	delete(m.tasks, taskID)
+	if err := m.store.save(m.tasks); err != nil {
+		m.tasks[taskID] = previous
+		return err
+	}
+	return nil
+}
+
+// UpdateIgnoreRules persists user-editable ignore rules for one task.
+func (m *Manager) UpdateIgnoreRules(ctx context.Context, taskID string, rules []string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := validateIgnoreRules(rules); err != nil {
+		return err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	task, exists := m.tasks[taskID]
+	if !exists {
+		return ErrTaskNotFound
+	}
+	previous := task
+	task.IgnoreRules = append([]string(nil), rules...)
+	task.UpdatedAt = m.now().UTC()
+	m.tasks[taskID] = task
 	if err := m.store.save(m.tasks); err != nil {
 		m.tasks[taskID] = previous
 		return err
@@ -298,6 +337,20 @@ func (r taskStateReporter) SetProgress(ctx context.Context, snapshot progress.Sn
 	return r.manager.setProgress(r.taskID, snapshot)
 }
 
+func (r taskStateReporter) AddTraffic(ctx context.Context, receivedBytes, sentBytes uint64) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return r.manager.addTraffic(r.taskID, receivedBytes, sentBytes)
+}
+
+func (r taskStateReporter) AddLog(ctx context.Context, level, message string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return r.manager.addLog(r.taskID, level, message)
+}
+
 func boundedError(err error) string {
 	const limit = 4096
 	message := err.Error()
@@ -314,6 +367,17 @@ func (m *Manager) setState(taskID, state, lastError string) error {
 	previous := task
 	task.State = state
 	task.LastError = lastError
+	switch state {
+	case StateConnecting:
+		task.Logs = append(task.Logs, LogEntry{Time: m.now().UTC(), Level: "info", Message: "正在连接同步设备"})
+	case StateSyncing:
+		task.Logs = append(task.Logs, LogEntry{Time: m.now().UTC(), Level: "info", Message: "发起同步"})
+	case StateFailed:
+		task.Logs = append(task.Logs, LogEntry{Time: m.now().UTC(), Level: "error", Message: lastError})
+	}
+	if len(task.Logs) > 200 {
+		task.Logs = append([]LogEntry(nil), task.Logs[len(task.Logs)-200:]...)
+	}
 	task.UpdatedAt = m.now().UTC()
 	m.tasks[taskID] = task
 	if err := m.store.save(m.tasks); err != nil {
@@ -338,12 +402,76 @@ func (m *Manager) setProgress(taskID string, snapshot progress.Snapshot) error {
 	return nil
 }
 
+func (m *Manager) addTraffic(taskID string, receivedBytes, sentBytes uint64) error {
+	if receivedBytes == 0 && sentBytes == 0 {
+		return nil
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	task, exists := m.tasks[taskID]
+	if !exists {
+		return ErrTaskNotFound
+	}
+	previous := task
+	task.Traffic.ReceivedBytes += receivedBytes
+	task.Traffic.SentBytes += sentBytes
+	task.UpdatedAt = m.now().UTC()
+	m.tasks[taskID] = task
+	if err := m.store.save(m.tasks); err != nil {
+		m.tasks[taskID] = previous
+		return err
+	}
+	return nil
+}
+
+func (m *Manager) addLog(taskID, level, message string) error {
+	if level == "" {
+		level = "info"
+	}
+	entry := LogEntry{
+		Time:    m.now().UTC(),
+		Level:   level,
+		Message: boundedError(errors.New(message)),
+	}
+	if err := validateLogs([]LogEntry{entry}); err != nil {
+		return err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	task, exists := m.tasks[taskID]
+	if !exists {
+		return ErrTaskNotFound
+	}
+	previous := task
+	task.Logs = append(task.Logs, entry)
+	if len(task.Logs) > 200 {
+		task.Logs = append([]LogEntry(nil), task.Logs[len(task.Logs)-200:]...)
+	}
+	task.UpdatedAt = m.now().UTC()
+	m.tasks[taskID] = task
+	if err := m.store.save(m.tasks); err != nil {
+		m.tasks[taskID] = previous
+		return err
+	}
+	return nil
+}
+
 func (m *Manager) finishRun(taskID string, runtime *runtimeTask, state, lastError string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	task := m.tasks[taskID]
 	task.State = state
 	task.LastError = lastError
+	if lastError != "" {
+		task.Logs = append(task.Logs, LogEntry{Time: m.now().UTC(), Level: "error", Message: lastError})
+	} else if state == StateIdle {
+		task.Logs = append(task.Logs, LogEntry{Time: m.now().UTC(), Level: "info", Message: "同步完成，等待下一轮"})
+	} else if state == StateStopped {
+		task.Logs = append(task.Logs, LogEntry{Time: m.now().UTC(), Level: "info", Message: "任务已停止"})
+	}
+	if len(task.Logs) > 200 {
+		task.Logs = append([]LogEntry(nil), task.Logs[len(task.Logs)-200:]...)
+	}
 	task.UpdatedAt = m.now().UTC()
 	m.tasks[taskID] = task
 	delete(m.runtimes, taskID)

@@ -15,8 +15,8 @@
         <button class="nav-item" type="button" disabled>设备管理</button>
         <button class="nav-item" type="button" disabled>连接管理</button>
         <button class="nav-item" type="button" disabled>设置</button>
-        <button class="nav-item" type="button" disabled>日志</button>
-        <button class="nav-item" type="button" disabled>关于</button>
+        <button id="open-logs" class="nav-item" type="button">日志</button>
+        <button id="open-about" class="nav-item" type="button">关于</button>
       </nav>
     </aside>
 
@@ -33,7 +33,7 @@
         <div class="toolbar-left">
           <button id="toolbar-start-stop" class="secondary" type="button" disabled>暂停/开始</button>
           <button id="toolbar-rescan" class="secondary" type="button" disabled>重新扫描</button>
-          <button id="toolbar-settings" class="secondary" type="button" disabled>设置</button>
+          <button id="toolbar-settings" class="secondary" type="button" disabled>参数</button>
           <button id="toolbar-delete" class="secondary danger" type="button" disabled>删除</button>
         </div>
         <div class="toolbar-right">
@@ -115,11 +115,33 @@
     </dialog>
 
     <dialog id="settings-dialog">
-      <form method="dialog">
-        <h2>任务设置</h2>
+      <form id="settings-form">
+        <h2>任务参数</h2>
         <p id="settings-summary" class="hint">请选择一个同步任务。</p>
-        <label>忽略规则<textarea rows="6" placeholder="后续用于填写不需要同步的文件或文件夹规则" disabled></textarea></label>
-        <p class="hint warning">忽略规则设置入口已预留，后端规则保存会在下一步接入。</p>
+        <label>忽略文件<textarea name="ignore_rules" rows="7" placeholder="一行一个规则，例如：&#10;*.tmp&#10;cache/&#10;logs/debug.txt"></textarea></label>
+        <p class="hint">空行和 # 开头的注释会被忽略；目录规则用 / 结尾，例如 cache/。</p>
+        <div class="dialog-actions">
+          <button type="submit">保存参数</button>
+          <button id="close-settings-dialog" class="secondary" type="button">关闭</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="logs-dialog">
+      <form method="dialog">
+        <h2>任务日志</h2>
+        <div id="logs-list" class="logs-list">暂无日志。</div>
+        <div class="dialog-actions">
+          <button class="secondary" type="submit">关闭</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="about-dialog">
+      <form method="dialog">
+        <h2>关于 OneSync</h2>
+        <p>版本号：<strong id="about-version">dev</strong></p>
+        <p class="hint">OneSync 当前为验收测试版。</p>
         <div class="dialog-actions">
           <button class="secondary" type="submit">关闭</button>
         </div>
