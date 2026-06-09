@@ -8,7 +8,7 @@ const endpointSuggestions = document.querySelector("#endpoint-suggestions");
 const connectionResult = document.querySelector("#connection-result");
 const testLinkButton = document.querySelector("#test-link");
 const linkReadinessHint = document.querySelector("#link-readiness-hint");
-const defaultConfig = { sync_port: 7443, direct_tls_configured: false, direct_tls_hosts: [] };
+const defaultConfig = { sync_port: 7443, direct_tls_configured: false, direct_tls_hosts: [], direct_tls_endpoints: [] };
 let appConfig = { ...defaultConfig };
 
 async function api(path, options = {}) {
@@ -197,6 +197,8 @@ function renderEndpointSuggestions(suggestions) {
 
 function certificateEndpointSuggestions() {
   if (!appConfig.direct_tls_configured) return [];
+  const configuredEndpoints = uniqueEndpoints(appConfig.direct_tls_endpoints || []);
+  if (configuredEndpoints.length) return configuredEndpoints;
   const hosts = appConfig.direct_tls_hosts || [];
   return uniqueEndpoints(hosts
     .map((host) => certificateHostEndpoint(host, appConfig.sync_port))

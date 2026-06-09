@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"github.com/202121000995/OneSync/internal/auth"
@@ -235,8 +236,24 @@ func TestConfigAPIReportsSyncPort(t *testing.T) {
 	if response.Code != http.StatusOK ||
 		!bytes.Contains(response.Body.Bytes(), []byte(`"sync_port":9443`)) ||
 		!bytes.Contains(response.Body.Bytes(), []byte(`"direct_tls_configured":true`)) ||
-		!bytes.Contains(response.Body.Bytes(), []byte(`"direct_tls_hosts":["192.168.1.10","source.local"]`)) {
+		!bytes.Contains(response.Body.Bytes(), []byte(`"direct_tls_hosts":["192.168.1.10","source.local"]`)) ||
+		!bytes.Contains(response.Body.Bytes(), []byte(`"direct_tls_endpoints":["192.168.1.10:9443","source.local:9443"]`)) {
 		t.Fatalf("config response status = %d, body = %s", response.Code, response.Body.String())
+	}
+}
+
+func TestCertificateEndpoints(t *testing.T) {
+	got := certificateEndpoints([]string{
+		"192.168.1.10",
+		"source.local",
+		"::1",
+		"*.example.com",
+		"192.168.1.10",
+		" ",
+	}, 9443)
+	want := []string{"192.168.1.10:9443", "source.local:9443", "[::1]:9443"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("certificateEndpoints() = %v, want %v", got, want)
 	}
 }
 

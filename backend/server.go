@@ -172,7 +172,26 @@ func (s *Server) config(writer http.ResponseWriter, _ *http.Request) {
 		"sync_port":             s.syncPort,
 		"direct_tls_configured": s.directTLSConfigured,
 		"direct_tls_hosts":      directTLSHosts,
+		"direct_tls_endpoints":  certificateEndpoints(directTLSHosts, s.syncPort),
 	})
+}
+
+func certificateEndpoints(hosts []string, port int) []string {
+	endpoints := make([]string, 0, len(hosts))
+	seen := make(map[string]struct{}, len(hosts))
+	for _, host := range hosts {
+		value := strings.TrimSpace(host)
+		if value == "" || strings.HasPrefix(value, "*.") {
+			continue
+		}
+		endpoint := net.JoinHostPort(value, strconv.Itoa(port))
+		if _, exists := seen[endpoint]; exists {
+			continue
+		}
+		seen[endpoint] = struct{}{}
+		endpoints = append(endpoints, endpoint)
+	}
+	return endpoints
 }
 
 func (s *Server) endpointSuggestions(writer http.ResponseWriter, request *http.Request) {
