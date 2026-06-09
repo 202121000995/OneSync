@@ -1,11 +1,15 @@
 @echo off
 setlocal
 
-rem Edit SOURCE_HOSTS before running. Include the source LAN IP used by target computers.
-set SOURCE_HOSTS=192.168.1.10,localhost,127.0.0.1
+rem Override SOURCE_HOSTS only when automatic IP detection is not enough.
+if "%SOURCE_HOSTS%"=="" (
+  for /f "usebackq delims=" %%H in (`powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0detect-source-hosts.ps1"`) do set "SOURCE_HOSTS=%%H"
+)
+if "%SOURCE_HOSTS%"=="" set "SOURCE_HOSTS=localhost,127.0.0.1"
 
 if not exist certs mkdir certs
 
+echo Source certificate hosts: %SOURCE_HOSTS%
 onesync-cert.exe -hosts "%SOURCE_HOSTS%" -cert certs\source.crt -key certs\source.key
 
 echo.

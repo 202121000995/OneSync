@@ -38,6 +38,7 @@ copy_common "$windows_stage"
 cp "$ARTIFACT_DIR/onesync-windows-amd64.exe" "$windows_stage/onesync.exe"
 cp "$ARTIFACT_DIR/onesync-cert-windows-amd64.exe" "$windows_stage/onesync-cert.exe"
 cp "$ROOT"/packaging/acceptance-scripts/windows/*.cmd "$windows_stage/"
+cp "$ROOT"/packaging/acceptance-scripts/windows/*.ps1 "$windows_stage/"
 
 copy_common "$linux_stage"
 cp "$ARTIFACT_DIR/onesync-linux-amd64" "$linux_stage/onesync"

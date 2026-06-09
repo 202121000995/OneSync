@@ -45,7 +45,7 @@ packaging/package-acceptance.sh dist/acceptance dist/acceptance-packages
 Copy the Windows zip to Windows source or target computers. Copy the Linux tar.gz to Linux source, target, or Relay computers. Record `dist/acceptance-packages/PACKAGE-SHA256SUMS.txt` in the acceptance report.
 Each package also includes `preflight-checklist.md`.
 
-The packages include starter scripts. Edit the host values first, then use:
+The packages include starter scripts. The source certificate script automatically detects private IPv4 addresses on the source computer, then the web page lets you choose or type the endpoint used in the link:
 
 - Windows source: `make-source-cert.cmd`, then `start-source.cmd`.
 - Windows target: run `start-target.cmd`, then paste the generated link.
@@ -73,15 +73,19 @@ GOOS=linux GOARCH=amd64 go build -o onesync-cert-linux ./cmd/onesync-cert
 
 ## Create a local certificate
 
-Generate a TLS certificate on the source computer. Include every name or IP address the target computer will use to connect.
+Generate a TLS certificate on the source computer. The starter script includes detected private IPv4 addresses, `localhost`, and `127.0.0.1`.
 
 ```sh
-onesync-cert -hosts 192.168.1.10,localhost,127.0.0.1 -cert source.crt -key source.key
+# Windows
+make-source-cert.cmd
+
+# Linux
+./make-source-cert.sh
 ```
 
 Keep `source.key` private. The source public certificate is included in generated synchronization links, so direct-mode targets do not need a separate `source.crt` file.
 
-The generated certificate is a local self-signed certificate for private testing or small trusted deployments. It is not a production certificate lifecycle system.
+The generated certificate is a local self-signed certificate for private testing or small trusted deployments. It is not a production certificate lifecycle system. If automatic IP detection misses the address you need, set `SOURCE_HOSTS` manually before running the certificate script.
 
 If the source LAN IP changes, generate a new certificate that includes the new IP address. Certificate verification is strict, so a certificate for `192.168.1.10` will not verify when the target connects to `192.168.1.25`.
 
@@ -101,7 +105,7 @@ If you intentionally run without a source certificate, fill the Relay TLS addres
 
 If the link dialog says the source certificate does not contain the endpoint host, choose one of the "证书地址" buttons when it is reachable from the target computer, or regenerate the certificate with the IP address or DNS name that the target computer will use.
 
-Create a source task and choose the folder to send. Click "生成链接并启动". In the dialog, first try a "证书地址" suggestion. If it is not reachable from the target computer, choose a suggested private IPv4 endpoint or enter the source synchronization endpoint manually, for example:
+Create a source task and choose the folder to send. Click "生成链接并启动". In the dialog, first try a "证书地址" suggestion that the target computer can reach. If it is not reachable, enter another source synchronization endpoint manually, for example:
 
 ```text
 192.168.1.10:7443

@@ -1209,3 +1209,30 @@
 
 - 链接会变长；当前限制仍覆盖本地自签证书验收场景。
 - Relay 使用自签证书时，Relay 证书仍需要通过 `-ca` 信任，除非后续也把 Relay 证书纳入链接或改用正式证书。
+
+## 源端证书地址自动检测审核
+
+审核分支：`feature/auto-detect-source-hosts`
+
+审核结论：通过。
+
+审核说明：
+
+- Windows 验收包新增 `detect-source-hosts.ps1`，从 `ipconfig` 输出中提取私有 IPv4 地址，避免用户手工编辑脚本里的示例 IP。
+- Windows `make-source-cert.cmd` 自动调用检测脚本，并把检测到的地址、`localhost` 和 `127.0.0.1` 写入源端证书。
+- Linux `make-source-cert.sh` 自动从 `ip`、`hostname -I` 或 `ifconfig` 输出中提取私有 IPv4 地址。
+- 用户仍可通过 `SOURCE_HOSTS` 覆盖自动检测结果，适配多网卡、VPN 或特殊网络。
+- 打包脚本会把 Windows `.ps1` 辅助脚本放入验收包。
+- Quickstart 和 preflight checklist 已改为“网页选择/手动输入可达地址”，不再要求先修改脚本里的内网 IP。
+
+验证结果：
+
+- `for script in packaging/acceptance-scripts/linux/*.sh; do sh -n "$script" || exit 1; done` 通过。
+- `GO_BIN=/Users/apple/Library/Go/sdk/go1.26.3/bin/go packaging/package-acceptance.sh /private/tmp/onesync-acceptance-artifacts-hosts /private/tmp/onesync-acceptance-packages-hosts` 通过。
+- `go test ./...` 通过。
+- `go vet ./...` 通过。
+
+剩余风险：
+
+- 自动检测只选择私有 IPv4 地址，不会自动判断哪个地址对目标端实际可达；网页仍保留候选选择和手动输入。
+- 如果源端 IP 后续变化，需要重新运行证书脚本并重新生成同步链接。
