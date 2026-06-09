@@ -3,6 +3,9 @@
 #include "TargetConnector.h"
 
 #include <QBoxLayout>
+#include <QAction>
+#include <QApplication>
+#include <QCloseEvent>
 #include <QDateTime>
 #include <QFile>
 #include <QFileDialog>
@@ -13,9 +16,12 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QMessageBox>
+#include <QMenu>
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QStandardPaths>
+#include <QStyle>
+#include <QSystemTrayIcon>
 #include <QThread>
 #include <QTextEdit>
 
@@ -83,6 +89,7 @@ MainWindow::MainWindow(QWidget* parent)
     layout->addWidget(logEdit, 1);
 
     setCentralWidget(root);
+    setupTray();
     appendLog(QStringLiteral("OneSync Win7 Qt 客户端已启动。"));
 }
 
@@ -185,6 +192,71 @@ void MainWindow::exportDiagnostics()
     }
     file.write(diagnosticsText().toUtf8());
     appendLog(QStringLiteral("诊断日志已保存：%1").arg(fileName));
+}
+
+void MainWindow::showFromTray()
+{
+    showNormal();
+    raise();
+    activateWindow();
+}
+
+void MainWindow::quitFromTray()
+{
+    if (connectionThread != nullptr && connectionThread->isRunning()) {
+        QMessageBox::information(this, QStringLiteral("正在同步"), QStringLiteral("当前同步仍在运行，请完成后再退出。"));
+        return;
+    }
+    exiting = true;
+    qApp->quit();
+}
+
+void MainWindow::closeEvent(QCloseEvent* event)
+{
+    if (exiting || trayIcon == nullptr || !trayIcon->isVisible()) {
+        QMainWindow::closeEvent(event);
+        return;
+    }
+    hide();
+    event->ignore();
+    if (!trayCloseTipShown) {
+        trayCloseTipShown = true;
+        trayIcon->showMessage(
+            QStringLiteral("OneSync 仍在运行"),
+            QStringLiteral("窗口已最小化到托盘。右键托盘图标可以显示或退出。"),
+            QSystemTrayIcon::Information,
+            3000
+        );
+    }
+}
+
+void MainWindow::setupTray()
+{
+    if (!QSystemTrayIcon::isSystemTrayAvailable()) {
+        appendLog(QStringLiteral("系统托盘不可用。"));
+        return;
+    }
+
+    trayMenu = new QMenu(this);
+    auto* showAction = new QAction(QStringLiteral("显示 OneSync"), this);
+    auto* quitAction = new QAction(QStringLiteral("退出"), this);
+    connect(showAction, &QAction::triggered, this, &MainWindow::showFromTray);
+    connect(quitAction, &QAction::triggered, this, &MainWindow::quitFromTray);
+    trayMenu->addAction(showAction);
+    trayMenu->addSeparator();
+    trayMenu->addAction(quitAction);
+
+    trayIcon = new QSystemTrayIcon(this);
+    trayIcon->setIcon(style()->standardIcon(QStyle::SP_ComputerIcon));
+    trayIcon->setToolTip(QStringLiteral("OneSync Win7"));
+    trayIcon->setContextMenu(trayMenu);
+    connect(trayIcon, &QSystemTrayIcon::activated, this, [this](QSystemTrayIcon::ActivationReason reason) {
+        if (reason == QSystemTrayIcon::Trigger || reason == QSystemTrayIcon::DoubleClick) {
+            showFromTray();
+        }
+    });
+    trayIcon->show();
+    appendLog(QStringLiteral("系统托盘已启用。"));
 }
 
 void MainWindow::appendLog(const QString& message)

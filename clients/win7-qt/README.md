@@ -20,6 +20,8 @@
 - 接收 `FileBegin`、`FileChunk`、`FileEnd`。
 - 写入 `.onesync-part` 临时文件。
 - 校验 SHA-256 和文件大小后覆盖目标文件。
+- 最小化到托盘，托盘菜单支持显示窗口和退出。
+- Windows qmake 打包时使用 OneSync 图标。
 - 导出诊断文本。
 
 注意：macOS 上的 Qt 只能生成 macOS 可执行文件，不能直接生成 Windows `.exe`。Win7 `.exe` 需要在 Windows Qt 5 环境里构建，或准备 Windows 交叉编译工具链。
@@ -27,7 +29,7 @@
 尚未接入：
 
 - 断点续传真实场景校准。
-- 托盘和后台常驻。
+- Win7 实机托盘行为验收。
 
 ## 技术选择
 

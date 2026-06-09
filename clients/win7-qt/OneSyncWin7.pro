@@ -8,6 +8,7 @@ TEMPLATE = app
 
 win32 {
     DEFINES += WINVER=0x0601 _WIN32_WINNT=0x0601 NOMINMAX
+    RC_ICONS = ../../packaging/icons/OneSync.ico
 }
 
 SOURCES += \
