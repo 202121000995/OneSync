@@ -1,5 +1,6 @@
 #include "TargetConnector.h"
 
+#include "FileReceiver.h"
 #include "PeerIdentity.h"
 #include "SnapshotScanner.h"
 
@@ -92,7 +93,7 @@ void TargetConnector::run()
         emit finished(false, error);
         return;
     }
-    emit finished(true, QStringLiteral("已完成连接、认证、快照上报和同步计划接收。文件接收协议下一步接入。"));
+    emit finished(true, QStringLiteral("本轮同步完成。"));
 }
 
 bool TargetConnector::connectTls(QSslSocket* socket, const Endpoint& endpoint, int timeoutMs, QString* error)
@@ -183,18 +184,24 @@ bool TargetConnector::receivePlan(QSslSocket* socket, QString* error)
         return false;
     }
 
-    if (operationCount > 0) {
-        if (error != nullptr) {
-            *error = QStringLiteral("源端计划发送 %1 个文件；Win7 文件接收协议下一步接入。").arg(operationCount);
-        }
-        return false;
-    }
-
     const QByteArray ack = SyncProtocol::buildFrame(SyncProtocol::MessageAck, planFrame.requestID, QByteArray());
     if (!writeAll(socket, ack, kSyncMessageTimeoutMs, error)) {
         return false;
     }
-    emit logMessage(QStringLiteral("同步计划为空，已确认。"));
+    emit logMessage(QStringLiteral("同步计划已确认。"));
+
+    for (int index = 0; index < operationCount; ++index) {
+        SyncProtocol::Frame begin;
+        if (!readFrame(socket, kSyncMessageTimeoutMs, &begin, error)) {
+            return false;
+        }
+        QString transferredPath;
+        emit logMessage(QStringLiteral("开始接收文件：%1 / %2").arg(index + 1).arg(operationCount));
+        if (!FileReceiver::receive(socket, targetFolder, begin, &transferredPath, error)) {
+            return false;
+        }
+        emit logMessage(QStringLiteral("文件接收完成：%1").arg(transferredPath));
+    }
 
     SyncProtocol::Frame complete;
     if (!readFrame(socket, kSyncMessageTimeoutMs, &complete, error)) {
@@ -210,7 +217,7 @@ bool TargetConnector::receivePlan(QSslSocket* socket, QString* error)
     if (!writeAll(socket, completeAck, kSyncMessageTimeoutMs, error)) {
         return false;
     }
-    emit logMessage(QStringLiteral("空同步已完成。"));
+    emit logMessage(QStringLiteral("本轮同步已完成。"));
     return true;
 }
 

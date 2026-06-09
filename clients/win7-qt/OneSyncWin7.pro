@@ -13,6 +13,7 @@ win32 {
 SOURCES += \
     src/main.cpp \
     src/Endpoint.cpp \
+    src/FileReceiver.cpp \
     src/MainWindow.cpp \
     src/PeerIdentity.cpp \
     src/SnapshotScanner.cpp \
@@ -22,6 +23,7 @@ SOURCES += \
 
 HEADERS += \
     src/Endpoint.h \
+    src/FileReceiver.h \
     src/MainWindow.h \
     src/PeerIdentity.h \
     src/SnapshotScanner.h \

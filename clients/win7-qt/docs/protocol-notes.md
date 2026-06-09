@@ -153,9 +153,12 @@ Win7 客户端不要依赖系统 TLS 能力，建议：
 - 扫描目标目录并生成 OneSync snapshot JSON。
 - 发送 `SnapshotResponse`。
 - 接收 `SyncPlan`，空同步时确认完成。
+- 接收 `FileBegin`、`FileChunk`、`FileEnd`。
+- 写入 `.onesync-part` 临时目录。
+- 校验文件大小和 SHA-256 后替换目标文件。
 
 下一步：
 
-- 接收 `FileBegin`、`FileChunk`、`FileEnd`。
-- 写入 `.onesync-part` 临时目录。
-- 校验文件大小和哈希后替换目标文件。
+- 在 Windows Qt 5 环境打出 Win7 exe 包。
+- Win7 实机验证 TLS、Relay、文件接收和断点续传。
+- 补托盘和后台常驻。

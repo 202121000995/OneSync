@@ -1852,6 +1852,7 @@
 - 同步链接解析已对齐当前 Go 主线的 Base64URL JSON 格式，校验版本、会话编号、源端地址、Relay 地址/令牌关系、32 字节同步令牌和过期时间。
 - Win7 Qt 客户端新增目标端稳定 `peer_id`、直连/Relay 地址解析、TLS 连接、Relay v2 target 登记和源端同步认证帧。
 - Win7 Qt 客户端新增目标端目录扫描、MD5 快照生成、`SnapshotResponse` 上报和 `SyncPlan` 接收；空同步时可完成确认。
+- Win7 Qt 客户端新增文件接收链路：解析 `FileBegin`/`FileChunk`/`FileEnd`，写入 `.onesync-part`，按 SHA-256 和大小校验后覆盖目标文件。
 - 文档明确 Win7 第一版先做目标端接收，源端创建链接仍由 Win10/Linux 主客户端承担。
 - 协议 notes 记录了 Relay 登记、网络帧、目标端认证、同步流程、文件接收和 TLS 约束，便于后续继续实现。
 
@@ -1861,11 +1862,11 @@
 - `git diff --check` 通过。
 - 本机未安装 `cmake`，但已确认存在 Qt 5.12.12 qmake。
 - `qmake OneSyncWin7.pro` 在英文临时路径配置通过。
-- `make -C /private/tmp/onesync-win7-qmake-build2` 通过，已完成 Mac 上 Qt 源码编译验证，包含新增的 Relay/TLS/认证/快照代码。
+- `make -C /private/tmp/onesync-win7-qmake-build2` 通过，已完成 Mac 上 Qt 源码编译验证，包含新增的 Relay/TLS/认证/快照/文件接收代码。
 - 发现 Qt 5.12 qmake 在中文路径下会把 `同步软件` 转成 `????`，后续 Qt 打包脚本需要先复制到英文临时路径。
 - 当前 Mac 只有 Qt macOS/Android/iOS 套件，没有 Windows Qt 套件、MinGW 或 Wine，因此本机无法直接产出 Windows `.exe`。
 
 剩余风险：
 
-- 当前 Win7 Qt 客户端尚未接入文件接收、临时文件落盘、哈希校验和替换目标文件。
+- 当前 Win7 Qt 客户端尚未在 Windows Qt 5 环境打包出 exe，也尚未在 Win7 实机完成 TLS、Relay、文件接收和断点续传验收。
 - Win7 TLS 兼容需要随程序分发 OpenSSL，并在服务端确认 TLS 1.2/1.3 兼容策略。

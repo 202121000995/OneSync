@@ -17,13 +17,16 @@
 - 向源端发送带 `peer_id` 的同步认证帧。
 - 等待源端 `SnapshotRequest`，扫描目标目录并上报快照。
 - 接收源端同步计划；空同步时可确认完成。
+- 接收 `FileBegin`、`FileChunk`、`FileEnd`。
+- 写入 `.onesync-part` 临时文件。
+- 校验 SHA-256 和文件大小后覆盖目标文件。
 - 导出诊断文本。
 
 注意：macOS 上的 Qt 只能生成 macOS 可执行文件，不能直接生成 Windows `.exe`。Win7 `.exe` 需要在 Windows Qt 5 环境里构建，或准备 Windows 交叉编译工具链。
 
 尚未接入：
 
-- 文件接收和断点续传。
+- 断点续传真实场景校准。
 - 托盘和后台常驻。
 
 ## 技术选择
