@@ -21,6 +21,8 @@ button { border: 0; border-radius: 11px; padding: 11px 16px; background: #237a4b
 button:hover { background: #19643c; }
 button:disabled { cursor: wait; opacity: .7; }
 button.secondary { background: #e7eee8; color: #334239; }
+button.danger { background: #fee4e2; color: #b42318; }
+button.danger:hover { background: #fecdca; }
 .form-actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
 .hint { margin: 8px 0 14px; font-size: 13px; line-height: 1.45; }
 .hint.success { color: #237a4b; }
@@ -34,12 +36,22 @@ button.suggestion:hover { background: #dcebdd; }
 #status { color: #77847b; font-size: 14px; }
 .task { padding: 16px 0; border-top: 1px solid #edf1ed; }
 .task:first-child { border-top: 0; }
+.task-running { border-left: 4px solid #237a4b; padding-left: 14px; }
+.task-failed { border-left: 4px solid #b42318; padding-left: 14px; }
+.task-stopped { border-left: 4px solid #77847b; padding-left: 14px; }
 .task h3 { margin: 0 0 5px; }
 .task p { margin: 0; font-size: 14px; }
+.task .state-detail { margin-top: 5px; color: #334239; font-weight: 650; }
 .task .warning { margin-top: 5px; font-size: 13px; line-height: 1.45; }
 .task .progress { margin-top: 5px; color: #2d7a4e; }
 .actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 .badge { display: inline-block; border-radius: 999px; padding: 4px 9px; background: #eef4ef; color: #496052; font-size: 12px; }
+.badge.connecting, .badge.syncing, .badge.idle { background: #dcf4e4; color: #116236; }
+.badge.failed { background: #fee4e2; color: #b42318; }
+.badge.stopped { background: #eef1ef; color: #5e6b63; }
+.source-link { margin-top: 12px; padding: 12px; border: 1px solid #dfe8df; border-radius: 14px; background: #fbfdfb; }
+.source-link p { margin-bottom: 10px; color: #334239; }
+.inline-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .error { color: #b42318 !important; }
 dialog { width: min(620px, calc(100% - 32px)); border: 0; border-radius: 20px; padding: 24px; box-shadow: 0 24px 90px rgba(0,0,0,.2); }
 dialog::backdrop { background: rgba(20, 32, 24, .45); }

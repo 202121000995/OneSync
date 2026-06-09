@@ -33,6 +33,7 @@ type taskManager interface {
 	Create(ctx context.Context, task task.Task) error
 	Start(ctx context.Context, taskID string) error
 	Stop(ctx context.Context, taskID string) error
+	Delete(ctx context.Context, taskID string) error
 	Get(ctx context.Context, taskID string) (task.Task, error)
 	List(ctx context.Context) ([]task.Task, error)
 }
@@ -112,6 +113,7 @@ func NewServerWithOptions(manager taskManager, links *auth.LinkService, credenti
 	mux.HandleFunc("POST /api/tasks", server.createTask)
 	mux.HandleFunc("POST /api/tasks/{id}/start", server.startTask)
 	mux.HandleFunc("POST /api/tasks/{id}/stop", server.stopTask)
+	mux.HandleFunc("DELETE /api/tasks/{id}", server.deleteTask)
 	mux.HandleFunc("POST /api/links", server.issueLink)
 	mux.HandleFunc("POST /api/links/join", server.joinLink)
 	mux.HandleFunc("POST /api/links/test", server.testLink)
@@ -249,6 +251,19 @@ func (s *Server) stopTask(writer http.ResponseWriter, request *http.Request) {
 		return
 	}
 	writeJSON(writer, http.StatusOK, map[string]string{"status": "stopped"})
+}
+
+func (s *Server) deleteTask(writer http.ResponseWriter, request *http.Request) {
+	taskID := request.PathValue("id")
+	if err := s.manager.Delete(request.Context(), taskID); err != nil {
+		writeAPIError(writer, statusForTaskError(err), err)
+		return
+	}
+	if err := s.credentials.Delete(taskID); err != nil {
+		writeAPIError(writer, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
 func (s *Server) issueLink(writer http.ResponseWriter, request *http.Request) {

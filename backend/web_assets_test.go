@@ -45,8 +45,12 @@ func TestWebScriptKeepsReadinessRegressionsCovered(t *testing.T) {
 		"本机地址：",
 		"请填写 Relay TLS 地址",
 		"当前源端证书不包含",
-		"同步链接已生成，源端任务正在启动",
+		"同步链接已生成；源端任务已使用这个链接启动",
 		"已加入同步，目标端任务正在启动",
+		"最近生成的源端链接",
+		"重启不会改变这个链接",
+		"删除",
+		"不会删除你的同步目录文件",
 	}
 	for _, text := range required {
 		if !strings.Contains(script, text) {

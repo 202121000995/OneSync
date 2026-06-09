@@ -9,6 +9,7 @@ const connectionResult = document.querySelector("#connection-result");
 const testLinkButton = document.querySelector("#test-link");
 const linkReadinessHint = document.querySelector("#link-readiness-hint");
 const defaultConfig = { sync_port: 7443, direct_tls_configured: false, direct_tls_hosts: [], direct_tls_endpoints: [] };
+const sourceLinksStorageKey = "onesync.sourceLinks.v1";
 let appConfig = { ...defaultConfig };
 
 async function api(path, options = {}) {
@@ -42,27 +43,77 @@ async function loadTasks() {
 
 function renderTask(task) {
   const item = document.createElement("article");
-  item.className = "task";
+  item.className = `task ${taskClass(task)}`;
   const details = document.createElement("div");
   const path = task.role === "source" ? task.source_path : task.target_path;
-  details.innerHTML = `<h3></h3><p></p><p class="warning"></p><p class="progress"></p><p class="error"></p>`;
+  details.innerHTML = `<h3></h3><p></p><p class="state-detail"></p><p class="warning"></p><p class="progress"></p><p class="error"></p>`;
   details.querySelector("h3").textContent = task.id;
   details.querySelector("p").textContent = `${task.role === "source" ? "源端" : "目标端"} · ${path} · `;
   const badge = document.createElement("span");
-  badge.className = "badge";
+  badge.className = `badge ${task.state || "unknown"}`;
   badge.textContent = stateLabel(task.state);
   details.querySelector("p").append(badge);
+  details.querySelector(".state-detail").textContent = taskStateDetail(task);
   details.querySelector(".warning").textContent = sourceReadinessWarning(task);
   details.querySelector(".progress").textContent = progressLabel(task.progress);
   details.querySelector(".error").textContent = task.last_error || "";
+  if (task.role === "source") {
+    const savedLink = savedSourceLink(task.id);
+    if (savedLink) details.append(renderSavedSourceLink(task.id, savedLink));
+  }
 
   const actions = document.createElement("div");
   actions.className = "actions";
-  actions.append(actionButton("启动", () => taskAction(task.id, "start")));
-  actions.append(actionButton("停止", () => taskAction(task.id, "stop"), true));
-  if (task.role === "source") actions.append(actionButton("生成链接并启动", () => issueLink(task.id)));
+  actions.append(actionButton("启动", () => taskAction(task.id, "start"), { disabled: isRunningTask(task) }));
+  actions.append(actionButton("停止", () => taskAction(task.id, "stop"), { secondary: true, disabled: !isRunningTask(task) }));
+  if (task.role === "source") actions.append(actionButton(savedSourceLink(task.id) ? "重新生成链接" : "生成链接并启动", () => issueLink(task.id)));
+  actions.append(actionButton("删除", () => deleteTask(task), { danger: true }));
   item.append(details, actions);
   return item;
+}
+
+function taskClass(task) {
+  if (task.state === "failed") return "task-failed";
+  if (isRunningTask(task)) return "task-running";
+  if (task.state === "stopped") return "task-stopped";
+  return "";
+}
+
+function isRunningTask(task) {
+  return ["connecting", "syncing", "idle"].includes(task.state);
+}
+
+function taskStateDetail(task) {
+  if (task.state === "connecting") return "运行中：正在等待对端连接。源端可直接复制最近链接给目标端。";
+  if (task.state === "syncing") return "运行中：正在同步文件。";
+  if (task.state === "idle") return "运行中：等待下一轮同步或新的对端连接。";
+  if (task.state === "failed") return "已失败：请查看下方错误信息。";
+  if (task.state === "stopped") return "已停止：需要时可以手动启动。";
+  return "未启动：源端请先生成链接，目标端请先加入链接。";
+}
+
+function renderSavedSourceLink(taskId, savedLink) {
+  const box = document.createElement("div");
+  box.className = "source-link";
+  const summary = document.createElement("p");
+  summary.textContent = `最近生成的源端链接：${savedLink.endpoint || "未记录地址"} · ${linkExpiryText(savedLink.expires_at)} · 重启不会改变这个链接`;
+  const actions = document.createElement("div");
+  actions.className = "inline-actions";
+  actions.append(actionButton("复制链接", async () => {
+    await navigator.clipboard.writeText(savedLink.link);
+    notify("源端链接已复制");
+  }, { secondary: true }));
+  actions.append(actionButton("显示链接", () => {
+    generatedLink.value = savedLink.link;
+    linkForm.elements.task_id.value = taskId;
+    dialog.showModal();
+  }, { secondary: true }));
+  actions.append(actionButton("清除记录", () => {
+    forgetSourceLink(taskId);
+    loadTasks();
+  }, { secondary: true }));
+  box.append(summary, actions);
+  return box;
 }
 
 function progressLabel(progress) {
@@ -74,19 +125,23 @@ function progressLabel(progress) {
 
 function stateLabel(state) {
   return ({
-    created: "已创建",
-    connecting: "连接中",
-    syncing: "同步中",
-    idle: "等待下一轮",
+    created: "未启动",
+    connecting: "运行中：连接中",
+    syncing: "运行中：同步中",
+    idle: "运行中：等待",
     failed: "失败",
     stopped: "已停止",
   })[state] || state;
 }
 
-function actionButton(label, action, secondary = false) {
+function actionButton(label, action, options = {}) {
   const button = document.createElement("button");
   button.textContent = label;
-  if (secondary) button.className = "secondary";
+  const classes = [];
+  if (options.secondary) classes.push("secondary");
+  if (options.danger) classes.push("danger");
+  button.className = classes.join(" ");
+  if (options.disabled) button.disabled = true;
   button.addEventListener("click", action);
   return button;
 }
@@ -101,6 +156,18 @@ async function taskAction(id, action) {
 
 async function runTaskAction(id, action) {
   return api(`/api/tasks/${encodeURIComponent(id)}/${action}`, { method: "POST", body: "{}" });
+}
+
+async function deleteTask(task) {
+  const role = task.role === "source" ? "源端" : "目标端";
+  const confirmed = confirm(`删除同步任务「${task.id}」？\n\n这会移除这个${role}任务和它保存的连接信息，不会删除你的同步目录文件。`);
+  if (!confirmed) return;
+  try {
+    await api(`/api/tasks/${encodeURIComponent(task.id)}`, { method: "DELETE" });
+    if (task.role === "source") forgetSourceLink(task.id);
+    notify("任务已删除");
+    loadTasks();
+  } catch (error) { notify(error.message); }
 }
 
 function issueLink(taskId) {
@@ -172,11 +239,27 @@ linkForm.addEventListener("submit", async (event) => {
       }),
     });
     generatedLink.value = result.link;
-    await runTaskAction(data.get("task_id"), "start");
-    notify("同步链接已生成，源端任务正在启动");
+    saveSourceLink(data.get("task_id"), {
+      link: result.link,
+      endpoint,
+      relay_endpoint: relayEndpoint,
+      expires_at: result.expires_at,
+      created_at: new Date().toISOString(),
+    });
+    await restartTask(data.get("task_id"));
+    notify("同步链接已生成；源端任务已使用这个链接启动");
     setTimeout(loadTasks, 300);
   } catch (error) { notify(error.message); }
 });
+
+async function restartTask(taskId) {
+  try {
+    await runTaskAction(taskId, "stop");
+  } catch {
+    // A stale or already stopped task should not prevent starting with the new link.
+  }
+  await runTaskAction(taskId, "start");
+}
 
 async function loadEndpointSuggestions() {
   endpointSuggestions.textContent = "正在查找本机地址";
@@ -332,6 +415,40 @@ document.querySelector("#copy-link").addEventListener("click", async () => {
   notify("链接已复制");
 });
 document.querySelector("#close-link-dialog").addEventListener("click", () => dialog.close());
+
+function sourceLinks() {
+  try {
+    return JSON.parse(localStorage.getItem(sourceLinksStorageKey) || "{}");
+  } catch {
+    return {};
+  }
+}
+
+function savedSourceLink(taskId) {
+  const saved = sourceLinks()[taskId];
+  if (!saved || !saved.link) return null;
+  return saved;
+}
+
+function saveSourceLink(taskId, link) {
+  const links = sourceLinks();
+  links[taskId] = link;
+  localStorage.setItem(sourceLinksStorageKey, JSON.stringify(links));
+}
+
+function forgetSourceLink(taskId) {
+  const links = sourceLinks();
+  delete links[taskId];
+  localStorage.setItem(sourceLinksStorageKey, JSON.stringify(links));
+}
+
+function linkExpiryText(value) {
+  if (!value) return "有效期未知";
+  const expiresAt = new Date(value);
+  if (Number.isNaN(expiresAt.getTime())) return "有效期未知";
+  if (expiresAt.getTime() <= Date.now()) return "可能已过期";
+  return `有效至 ${expiresAt.toLocaleString()}`;
+}
 
 async function loadConfig() {
   try {

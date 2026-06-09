@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -158,6 +159,50 @@ func TestLinkIssueRejectsUnusableSourceWithoutTLSOrRelay(t *testing.T) {
 	}
 	if _, err := credentials.Load("source"); err == nil {
 		t.Fatal("rejected source link stored credentials")
+	}
+}
+
+func TestDeleteTaskRemovesCredential(t *testing.T) {
+	manager := &fakeManager{tasks: map[string]task.Task{
+		"source": {ID: "source", Role: task.RoleSource, SourcePath: "/private/source"},
+	}}
+	credentials, err := auth.NewCredentialStore(filepath.Join(t.TempDir(), "credentials"))
+	if err != nil {
+		t.Fatalf("NewCredentialStore() error = %v", err)
+	}
+	server, err := NewServerWithOptions(manager, auth.NewLinkService(), credentials, Options{
+		DirectTLSConfigured:  true,
+		DirectTLSCertificate: testCertificatePEM(t),
+	})
+	if err != nil {
+		t.Fatalf("NewServerWithOptions() error = %v", err)
+	}
+
+	issue := jsonRequest(http.MethodPost, "http://127.0.0.1/api/links", map[string]any{
+		"task_id": "source", "endpoint": "192.168.1.10:7443",
+	})
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, issue)
+	if response.Code != http.StatusCreated {
+		t.Fatalf("issue status = %d, body = %s", response.Code, response.Body.String())
+	}
+	if _, err := credentials.Load("source"); err != nil {
+		t.Fatalf("Load(source) error = %v", err)
+	}
+
+	request := jsonRequest(http.MethodDelete, "http://127.0.0.1/api/tasks/source", map[string]any{})
+	response = httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("delete status = %d, body = %s", response.Code, response.Body.String())
+	}
+	if _, exists := manager.tasks["source"]; exists {
+		t.Fatal("deleted task still exists")
+	}
+	if _, err := credentials.Load("source"); err == nil {
+		t.Fatal("deleted task credential still exists")
+	} else if !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("Load(source) error = %v, want os.ErrNotExist", err)
 	}
 }
 
@@ -365,6 +410,13 @@ func (m *fakeManager) Create(_ context.Context, created task.Task) error {
 
 func (m *fakeManager) Start(context.Context, string) error { return nil }
 func (m *fakeManager) Stop(context.Context, string) error  { return nil }
+func (m *fakeManager) Delete(_ context.Context, id string) error {
+	if _, ok := m.tasks[id]; !ok {
+		return task.ErrTaskNotFound
+	}
+	delete(m.tasks, id)
+	return nil
+}
 
 func (m *fakeManager) Get(_ context.Context, id string) (task.Task, error) {
 	found, ok := m.tasks[id]

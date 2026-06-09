@@ -170,6 +170,46 @@ func (m *Manager) Stop(ctx context.Context, taskID string) error {
 	}
 }
 
+// Delete removes a task after stopping any active runtime.
+func (m *Manager) Delete(ctx context.Context, taskID string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	m.mu.RLock()
+	_, exists := m.tasks[taskID]
+	runtime := m.runtimes[taskID]
+	m.mu.RUnlock()
+	if !exists {
+		return ErrTaskNotFound
+	}
+
+	if runtime != nil {
+		runtime.cancel()
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-runtime.done:
+			if runtime.err != nil {
+				return runtime.err
+			}
+		}
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	previous, exists := m.tasks[taskID]
+	if !exists {
+		return ErrTaskNotFound
+	}
+	delete(m.tasks, taskID)
+	if err := m.store.save(m.tasks); err != nil {
+		m.tasks[taskID] = previous
+		return err
+	}
+	return nil
+}
+
 // Get returns one persistent task snapshot.
 func (m *Manager) Get(ctx context.Context, taskID string) (Task, error) {
 	if err := ctx.Err(); err != nil {

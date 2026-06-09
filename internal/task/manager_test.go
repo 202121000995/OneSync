@@ -166,6 +166,47 @@ func TestManagerStopCancelsRunningTask(t *testing.T) {
 	}
 }
 
+func TestManagerDeleteRemovesTaskAndPersists(t *testing.T) {
+	storePath := filepath.Join(t.TempDir(), "tasks.json")
+	manager := newTestManager(t, storePath, &fakeFactory{})
+	createSourceTask(t, manager, "task")
+
+	if err := manager.Delete(context.Background(), "task"); err != nil {
+		t.Fatalf("Delete() error = %v", err)
+	}
+	if _, err := manager.Get(context.Background(), "task"); !errors.Is(err, ErrTaskNotFound) {
+		t.Fatalf("Get() error = %v, want ErrTaskNotFound", err)
+	}
+
+	reloaded := newTestManager(t, storePath, &fakeFactory{})
+	tasks, err := reloaded.List(context.Background())
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if len(tasks) != 0 {
+		t.Fatalf("reloaded tasks = %+v, want empty", tasks)
+	}
+}
+
+func TestManagerDeleteStopsRunningTask(t *testing.T) {
+	runner := &fakeRunner{started: make(chan struct{}), waitForCancel: true}
+	manager := newTestManager(t, filepath.Join(t.TempDir(), "tasks.json"), &fakeFactory{runner: runner})
+	createSourceTask(t, manager, "task")
+
+	if err := manager.Start(context.Background(), "task"); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	<-runner.started
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := manager.Delete(ctx, "task"); err != nil {
+		t.Fatalf("Delete() error = %v", err)
+	}
+	if _, err := manager.Get(context.Background(), "task"); !errors.Is(err, ErrTaskNotFound) {
+		t.Fatalf("Get() error = %v, want ErrTaskNotFound", err)
+	}
+}
+
 func TestManagerStopCancelsConnectingFactory(t *testing.T) {
 	factory := &fakeFactory{waitForCancel: true, started: make(chan struct{})}
 	manager := newTestManager(t, filepath.Join(t.TempDir(), "tasks.json"), factory)
