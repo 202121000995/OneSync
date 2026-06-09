@@ -5,6 +5,7 @@ REPO=${ONESYNC_REPO:-202121000995/OneSync}
 RELAY_PORT=${RELAY_PORT:-443}
 ACTION=${1:-install}
 GH_PROXY=${GH_PROXY:-}
+RELEASE_TAG=${ONESYNC_RELEASE_TAG:-${RELEASE_TAG:-}}
 
 need_root() {
 	if [ "$(id -u)" -ne 0 ]; then
@@ -21,6 +22,11 @@ need_command() {
 }
 
 latest_linux_package_url() {
+	if [ -n "$RELEASE_TAG" ]; then
+		release_commit=${RELEASE_TAG#acceptance-}
+		printf 'https://github.com/%s/releases/download/%s/onesync-acceptance-linux-amd64-%s.tar.gz\n' "$REPO" "$RELEASE_TAG" "$release_commit"
+		return
+	fi
 	api="https://api.github.com/repos/$REPO/releases/latest"
 	curl -fsSL "$(proxy_url "$api")" |
 		sed -n 's/.*"browser_download_url": "\(.*onesync-acceptance-linux-amd64.*\.tar\.gz\)".*/\1/p' |
@@ -47,7 +53,7 @@ install_relay() {
 	if [ -z "${RELAY_HOSTS:-}" ]; then
 		printf 'RELAY_HOSTS is required. Example:\n' >&2
 		printf '  curl -fsSL https://raw.githubusercontent.com/%s/main/packaging/acceptance-scripts/linux/deploy-relaytls.sh | sudo env RELAY_HOSTS=1.2.3.4 RELAY_PORT=443 RELAY_TOKEN=your-secret sh\n' "$REPO" >&2
-		printf '  curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/%s/main/packaging/acceptance-scripts/linux/deploy-relaytls.sh | sudo env RELAY_HOSTS=1.2.3.4 RELAY_PORT=443 RELAY_TOKEN=your-secret GH_PROXY=https://gh-proxy.org/ sh\n' "$REPO" >&2
+		printf '  curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/%s/main/packaging/acceptance-scripts/linux/deploy-relaytls.sh | sudo env RELAY_HOSTS=1.2.3.4 RELAY_PORT=443 RELAY_TOKEN=your-secret RELEASE_TAG=acceptance-f93bf8a GH_PROXY=https://gh-proxy.org/ sh\n' "$REPO" >&2
 		exit 1
 	fi
 
@@ -62,6 +68,7 @@ install_relay() {
 	url=$(latest_linux_package_url)
 	if [ -z "$url" ]; then
 		printf 'Cannot find latest OneSync Linux package from GitHub repo %s.\n' "$REPO" >&2
+		printf 'If GitHub API is blocked by the proxy, retry with RELEASE_TAG=acceptance-f93bf8a.\n' >&2
 		exit 1
 	fi
 
@@ -89,7 +96,7 @@ install_relay() {
 	first_host=$(printf '%s' "$RELAY_HOSTS" | cut -d, -f1)
 	printf '\nRelay TLS address for OneSync link:\n%s:%s\n' "$first_host" "$RELAY_PORT"
 	printf '\nRelay token for OneSync link:\n'
-	onesync-relayctl token
+	/usr/local/bin/onesync-relayctl token
 	printf '\nCommon menu command:\n'
 	printf '  onesyncr\n'
 	printf '\nCommon commands:\n'

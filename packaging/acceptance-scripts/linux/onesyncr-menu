@@ -30,7 +30,7 @@ else
   curl -fsSL https://raw.githubusercontent.com/202121000995/OneSync/main/packaging/acceptance-scripts/linux/deploy-relaytls.sh | sudo env RELAY_HOSTS=你的域名或IP RELAY_PORT=7443 RELAY_TOKEN=自定义令牌 sh
 
   中国大陆服务器可用代理：
-  curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/202121000995/OneSync/main/packaging/acceptance-scripts/linux/deploy-relaytls.sh | sudo env RELAY_HOSTS=你的域名或IP RELAY_PORT=7443 RELAY_TOKEN=自定义令牌 GH_PROXY=https://gh-proxy.org/ sh
+  curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/202121000995/OneSync/main/packaging/acceptance-scripts/linux/deploy-relaytls.sh | sudo env RELAY_HOSTS=你的域名或IP RELAY_PORT=7443 RELAY_TOKEN=自定义令牌 RELEASE_TAG=acceptance-f93bf8a GH_PROXY=https://gh-proxy.org/ sh
 EOF
 fi
 

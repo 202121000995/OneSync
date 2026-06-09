@@ -1699,3 +1699,27 @@
 剩余风险：
 
 - Relay 令牌目前随同步链接发给目标端；这满足“一段链接粘贴加入”，但链接泄露时也会泄露 Relay 使用权限。后续可增加 Relay 令牌轮换、按链接派生短期 Relay 令牌或服务端访问控制。
+
+## Linux 部署脚本代理兜底审核
+
+审核分支：`feature/linux-deploy-release-tag-fallback`
+
+审核结论：通过。
+
+审核说明：
+
+- Linux Relay 一键部署脚本支持 `RELEASE_TAG` / `ONESYNC_RELEASE_TAG`，可在 GitHub API 被代理返回 403 时直接下载指定 Release 包。
+- Linux 客户端一键部署脚本同步支持 `RELEASE_TAG` / `ONESYNC_RELEASE_TAG`。
+- Relay 部署脚本最后显示令牌时改用 `/usr/local/bin/onesync-relayctl token`，避免刚安装后当前 shell 找不到命令。
+- Quickstart 和中文菜单里的代理安装命令已补充固定 Release 参数。
+
+验证结果：
+
+- `sh -n packaging/acceptance-scripts/linux/deploy-relaytls.sh` 通过。
+- `sh -n packaging/acceptance-scripts/linux/deploy-onesync.sh` 通过。
+- `sh -n packaging/acceptance-scripts/linux/onesyncr-menu` 通过。
+- `sh -n packaging/acceptance-scripts/linux/onesync-menu` 通过。
+
+剩余风险：
+
+- `RELEASE_TAG` 需要填写存在的验收版本；如果要完全自动取最新版，仍依赖 GitHub API 或其他可访问的版本索引。

@@ -4,6 +4,7 @@ set -eu
 REPO=${ONESYNC_REPO:-202121000995/OneSync}
 ACTION=${1:-install}
 GH_PROXY=${GH_PROXY:-}
+RELEASE_TAG=${ONESYNC_RELEASE_TAG:-${RELEASE_TAG:-}}
 
 need_root() {
 	if [ "$(id -u)" -ne 0 ]; then
@@ -36,6 +37,11 @@ proxy_url() {
 }
 
 latest_linux_package_url() {
+	if [ -n "$RELEASE_TAG" ]; then
+		release_commit=${RELEASE_TAG#acceptance-}
+		printf 'https://github.com/%s/releases/download/%s/onesync-acceptance-linux-amd64-%s.tar.gz\n' "$REPO" "$RELEASE_TAG" "$release_commit"
+		return
+	fi
 	api="https://api.github.com/repos/$REPO/releases/latest"
 	curl -fsSL "$(proxy_url "$api")" |
 		sed -n 's/.*"browser_download_url": "\(.*onesync-acceptance-linux-amd64.*\.tar\.gz\)".*/\1/p' |
@@ -54,6 +60,7 @@ install_client() {
 	url=$(latest_linux_package_url)
 	if [ -z "$url" ]; then
 		printf 'Cannot find latest OneSync Linux package from GitHub repo %s.\n' "$REPO" >&2
+		printf 'If GitHub API is blocked by the proxy, retry with RELEASE_TAG=acceptance-f93bf8a.\n' >&2
 		exit 1
 	fi
 
