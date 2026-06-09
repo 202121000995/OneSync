@@ -15,6 +15,7 @@ SOURCES += \
     src/Endpoint.cpp \
     src/MainWindow.cpp \
     src/PeerIdentity.cpp \
+    src/SnapshotScanner.cpp \
     src/SyncLink.cpp \
     src/SyncProtocol.cpp \
     src/TargetConnector.cpp
@@ -23,6 +24,7 @@ HEADERS += \
     src/Endpoint.h \
     src/MainWindow.h \
     src/PeerIdentity.h \
+    src/SnapshotScanner.h \
     src/SyncLink.h \
     src/SyncProtocol.h \
     src/TargetConnector.h

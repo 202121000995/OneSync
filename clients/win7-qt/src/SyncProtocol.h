@@ -8,6 +8,10 @@ namespace SyncProtocol {
 
 const quint8 RelayRoleTarget = 2;
 const quint8 MessageAuthenticate = 2;
+const quint8 MessageSnapshotRequest = 3;
+const quint8 MessageSnapshotResponse = 4;
+const quint8 MessageSyncPlan = 5;
+const quint8 MessageSyncComplete = 9;
 const quint8 MessageAck = 10;
 const quint8 MessageError = 11;
 

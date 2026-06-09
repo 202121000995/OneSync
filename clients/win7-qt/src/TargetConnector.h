@@ -26,6 +26,8 @@ private:
     bool connectTls(QSslSocket* socket, const Endpoint& endpoint, int timeoutMs, QString* error);
     bool registerRelay(QSslSocket* socket, const QByteArray& token, QString* error);
     bool authenticate(QSslSocket* socket, const QByteArray& token, const QString& peerID, QString* error);
+    bool respondSnapshot(QSslSocket* socket, QString* error);
+    bool receivePlan(QSslSocket* socket, QString* error);
     bool writeAll(QSslSocket* socket, const QByteArray& data, int timeoutMs, QString* error);
     QByteArray readExact(QSslSocket* socket, int size, int timeoutMs, QString* error);
     bool readFrame(QSslSocket* socket, int timeoutMs, SyncProtocol::Frame* frame, QString* error);

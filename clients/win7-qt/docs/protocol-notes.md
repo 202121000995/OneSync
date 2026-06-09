@@ -149,9 +149,13 @@ Win7 客户端不要依赖系统 TLS 能力，建议：
 - TLS socket 建连。
 - Relay v2 target 登记。
 - `Authenticate` 帧发送和 `Ack` 校验。
+- 接收 `SnapshotRequest`。
+- 扫描目标目录并生成 OneSync snapshot JSON。
+- 发送 `SnapshotResponse`。
+- 接收 `SyncPlan`，空同步时确认完成。
 
 下一步：
 
-- 接收 `SnapshotRequest`。
-- 扫描目标目录并生成 OneSync snapshot JSON。
-- 接收 `SyncPlan` 和文件分块。
+- 接收 `FileBegin`、`FileChunk`、`FileEnd`。
+- 写入 `.onesync-part` 临时目录。
+- 校验文件大小和哈希后替换目标文件。

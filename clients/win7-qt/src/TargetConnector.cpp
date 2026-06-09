@@ -1,9 +1,12 @@
 #include "TargetConnector.h"
 
 #include "PeerIdentity.h"
+#include "SnapshotScanner.h"
 
 #include <QElapsedTimer>
 #include <QFileInfo>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QSslCertificate>
 #include <QtEndian>
 
@@ -11,6 +14,7 @@ namespace {
 const int kTlsTimeoutMs = 15000;
 const int kRelayWaitTimeoutMs = 30000;
 const int kAuthenticationTimeoutMs = 15000;
+const int kSyncMessageTimeoutMs = 30000;
 const int kMaxPayload = 16 * 1024 * 1024;
 const quint64 kAuthenticationRequestID = 1;
 
@@ -80,7 +84,15 @@ void TargetConnector::run()
     }
 
     emit statusChanged(QStringLiteral("运行-已连接源端"));
-    emit finished(true, QStringLiteral("连接和认证成功。文件接收协议下一步接入。"));
+    if (!respondSnapshot(&socket, &error)) {
+        emit finished(false, error);
+        return;
+    }
+    if (!receivePlan(&socket, &error)) {
+        emit finished(false, error);
+        return;
+    }
+    emit finished(true, QStringLiteral("已完成连接、认证、快照上报和同步计划接收。文件接收协议下一步接入。"));
 }
 
 bool TargetConnector::connectTls(QSslSocket* socket, const Endpoint& endpoint, int timeoutMs, QString* error)
@@ -101,6 +113,104 @@ bool TargetConnector::connectTls(QSslSocket* socket, const Endpoint& endpoint, i
         }
         return false;
     }
+    return true;
+}
+
+bool TargetConnector::respondSnapshot(QSslSocket* socket, QString* error)
+{
+    emit logMessage(QStringLiteral("等待源端请求目标端快照。"));
+    SyncProtocol::Frame request;
+    if (!readFrame(socket, kSyncMessageTimeoutMs, &request, error)) {
+        return false;
+    }
+    if (request.type != SyncProtocol::MessageSnapshotRequest) {
+        if (error != nullptr) {
+            *error = QStringLiteral("源端没有按预期请求目标端快照。");
+        }
+        return false;
+    }
+
+    emit logMessage(QStringLiteral("开始扫描目标端目录。"));
+    QByteArray snapshotJson;
+    quint64 fileCount = 0;
+    quint64 byteCount = 0;
+    if (!SnapshotScanner::scanToJson(targetFolder, &snapshotJson, &fileCount, &byteCount, error)) {
+        return false;
+    }
+
+    emit logMessage(QStringLiteral("目标端快照完成：%1 个文件，%2 字节。").arg(fileCount).arg(byteCount));
+    const QByteArray response = SyncProtocol::buildFrame(
+        SyncProtocol::MessageSnapshotResponse,
+        request.requestID,
+        snapshotJson
+    );
+    if (!writeAll(socket, response, kSyncMessageTimeoutMs, error)) {
+        return false;
+    }
+    emit logMessage(QStringLiteral("已发送目标端快照，等待源端同步计划。"));
+    return true;
+}
+
+bool TargetConnector::receivePlan(QSslSocket* socket, QString* error)
+{
+    SyncProtocol::Frame planFrame;
+    if (!readFrame(socket, kSyncMessageTimeoutMs, &planFrame, error)) {
+        return false;
+    }
+    if (planFrame.type != SyncProtocol::MessageSyncPlan) {
+        if (error != nullptr) {
+            *error = QStringLiteral("源端没有按预期发送同步计划。");
+        }
+        return false;
+    }
+
+    QJsonParseError parseError;
+    const QJsonDocument document = QJsonDocument::fromJson(planFrame.payload, &parseError);
+    if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
+        if (error != nullptr) {
+            *error = QStringLiteral("同步计划格式不正确。");
+        }
+        return false;
+    }
+    const QJsonObject object = document.object();
+    const int operationCount = object.value(QStringLiteral("operation_count")).toInt(-1);
+    const double standardBytes = object.value(QStringLiteral("standard_bytes")).toDouble(0);
+    emit logMessage(QStringLiteral("收到同步计划：%1 个文件，标准大小约 %2 字节。").arg(operationCount).arg(qulonglong(standardBytes)));
+    if (operationCount < 0) {
+        if (error != nullptr) {
+            *error = QStringLiteral("同步计划文件数量不正确。");
+        }
+        return false;
+    }
+
+    if (operationCount > 0) {
+        if (error != nullptr) {
+            *error = QStringLiteral("源端计划发送 %1 个文件；Win7 文件接收协议下一步接入。").arg(operationCount);
+        }
+        return false;
+    }
+
+    const QByteArray ack = SyncProtocol::buildFrame(SyncProtocol::MessageAck, planFrame.requestID, QByteArray());
+    if (!writeAll(socket, ack, kSyncMessageTimeoutMs, error)) {
+        return false;
+    }
+    emit logMessage(QStringLiteral("同步计划为空，已确认。"));
+
+    SyncProtocol::Frame complete;
+    if (!readFrame(socket, kSyncMessageTimeoutMs, &complete, error)) {
+        return false;
+    }
+    if (complete.type != SyncProtocol::MessageSyncComplete) {
+        if (error != nullptr) {
+            *error = QStringLiteral("源端没有按预期发送同步完成消息。");
+        }
+        return false;
+    }
+    const QByteArray completeAck = SyncProtocol::buildFrame(SyncProtocol::MessageAck, complete.requestID, QByteArray());
+    if (!writeAll(socket, completeAck, kSyncMessageTimeoutMs, error)) {
+        return false;
+    }
+    emit logMessage(QStringLiteral("空同步已完成。"));
     return true;
 }
 

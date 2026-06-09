@@ -18,6 +18,8 @@ add_executable(OneSyncWin7 WIN32
     src/MainWindow.h
     src/PeerIdentity.cpp
     src/PeerIdentity.h
+    src/SnapshotScanner.cpp
+    src/SnapshotScanner.h
     src/SyncProtocol.cpp
     src/SyncProtocol.h
     src/SyncLink.cpp
