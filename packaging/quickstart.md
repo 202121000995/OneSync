@@ -70,7 +70,19 @@ sudo onesyncctl uninstall
 
 The Linux service listens on `0.0.0.0:8765` by default and requires a management account. Open `http://server-ip:8765`, then set the account and password on first access. To keep it local-only instead, install with `sudo ONESYNC_WEB_BIND=127.0.0.1 ./onesyncctl install`.
 
-For a Linux Relay server, set the Relay certificate hosts to the exact domain or IP that source and target computers will use:
+For a Linux Relay server, use the one-command Relay TLS deployment script. `RELAY_HOSTS` is the Relay server domain or public IP without the port, and `RELAY_PORT` is the port clients will use:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/202121000995/OneSync/main/packaging/acceptance-scripts/linux/deploy-relaytls.sh | sudo env RELAY_HOSTS=203.0.113.10 RELAY_PORT=443 sh
+```
+
+After deployment, enter this Relay TLS address when generating a synchronization link:
+
+```text
+203.0.113.10:443
+```
+
+If you already downloaded the Linux package, you can also install Relay from the extracted directory:
 
 ```sh
 sudo RELAY_HOSTS=relay.example.com,203.0.113.10 ./onesync-relayctl install

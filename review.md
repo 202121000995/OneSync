@@ -1475,3 +1475,28 @@
 
 - 自定义端口仍需要用户在服务器防火墙和云安全组放行。
 - 使用用户自带证书时，证书必须覆盖同步链接里填写的 Relay 域名或 IP。
+
+## Relay TLS 一键部署审核
+
+审核分支：`feature/relaytls-one-command-deploy`
+
+审核结论：通过。
+
+审核说明：
+
+- 新增 `deploy-relaytls.sh`，支持从 GitHub 最新 Release 自动下载 Linux 包。
+- 一键脚本以 `RELAY_HOSTS=1.2.3.4 RELAY_PORT=443` 为主流程，自动调用包内 `onesync-relayctl install`。
+- 安装后自动重启 `onesync-relay.service`，显示服务状态，并输出同步链接里应填写的 Relay TLS 地址。
+- 一键脚本支持 `install`、`upgrade`、`uninstall` 三种动作。
+- Linux 打包脚本会自动把该脚本放进 Linux tar.gz。
+- Quickstart 已把一键部署脚本作为 Relay TLS 主安装方式。
+
+验证结果：
+
+- `sh -n packaging/acceptance-scripts/linux/deploy-relaytls.sh` 通过。
+- `sh -n packaging/acceptance-scripts/linux/onesync-relayctl` 通过。
+
+剩余风险：
+
+- 一键部署依赖 GitHub、`curl`、`tar` 和 systemd；离线或非 systemd Linux 仍需手动安装。
+- `RELAY_HOSTS` 必须填写客户端实际访问的公网 IP 或域名，且对应端口需要防火墙放行。

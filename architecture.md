@@ -600,6 +600,8 @@ V1 不引入数据库。配置与任务状态使用本地文件持久化：
    - Linux service 支持远程管理页访问、首次设置管理账号密码，并为 Linux 客户端和 Relay 控制命令增加 GitHub 升级能力。
 42. `feature/relay-port-and-cert-options`
    - Relay 安装脚本支持 `RELAY_PORT` 自定义端口，并明确自动生成证书与用户自带证书两种安装方式。
+43. `feature/relaytls-one-command-deploy`
+   - 新增 Relay TLS 一键部署脚本，从 GitHub 最新 Release 下载 Linux 包、安装、启动并输出可填写的 Relay TLS 地址。
 
 ## 16. 待确认项
 
