@@ -49,13 +49,20 @@ latest_linux_package_url() {
 		return
 	fi
 	if [ -n "$RELEASE_TAG" ]; then
-		release_commit=${RELEASE_TAG#acceptance-}
-		printf 'https://github.com/%s/releases/download/%s/onesync-acceptance-linux-amd64-%s.tar.gz\n' "$REPO" "$RELEASE_TAG" "$release_commit"
+		case "$RELEASE_TAG" in
+			acceptance-*)
+				release_commit=${RELEASE_TAG#acceptance-}
+				printf 'https://github.com/%s/releases/download/%s/onesync-acceptance-linux-amd64-%s.tar.gz\n' "$REPO" "$RELEASE_TAG" "$release_commit"
+				;;
+			*)
+				printf 'https://github.com/%s/releases/download/%s/onesync-linux-amd64-%s.tar.gz\n' "$REPO" "$RELEASE_TAG" "$RELEASE_TAG"
+				;;
+		esac
 		return
 	fi
 	api="https://api.github.com/repos/$REPO/releases/latest"
 	curl -fsSL "$(proxy_url "$api")" |
-		sed -n 's/.*"browser_download_url": "\(.*onesync-acceptance-linux-amd64.*\.tar\.gz\)".*/\1/p' |
+		sed -n 's/.*"browser_download_url": "\(.*onesync.*linux-amd64.*\.tar\.gz\)".*/\1/p' |
 		head -n 1
 }
 
@@ -71,7 +78,7 @@ install_client() {
 	url=$(latest_linux_package_url)
 	if [ -z "$url" ]; then
 		printf 'Cannot find latest OneSync Linux package from GitHub repo %s.\n' "$REPO" >&2
-		printf 'If GitHub API is blocked by the proxy, retry with RELEASE_TAG=acceptance-xxxxxxx or PACKAGE_URL=https://...tar.gz.\n' >&2
+		printf 'If GitHub API is blocked by the proxy, retry with RELEASE_TAG=v1.00 or PACKAGE_URL=https://...tar.gz.\n' >&2
 		exit 1
 	fi
 
@@ -79,7 +86,7 @@ install_client() {
 	printf 'Downloading OneSync Linux package:\n%s\n' "$download_url"
 	curl -fL "$download_url" -o "$tmp/onesync-linux.tar.gz"
 	tar -xzf "$tmp/onesync-linux.tar.gz" -C "$tmp"
-	stage=$(find "$tmp" -maxdepth 1 -type d -name 'onesync-acceptance-linux-amd64-*' | head -n 1)
+	stage=$(find "$tmp" -maxdepth 1 -type d \( -name 'onesync-linux-amd64-*' -o -name 'onesync-acceptance-linux-amd64-*' \) | head -n 1)
 	if [ -z "$stage" ]; then
 		printf 'Downloaded package has no Linux stage directory.\n' >&2
 		exit 1

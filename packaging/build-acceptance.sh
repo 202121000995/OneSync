@@ -15,6 +15,13 @@ commit=$(
 	cd "$ROOT"
 	git rev-parse --short HEAD 2>/dev/null || printf unknown
 )
+version=${ONESYNC_VERSION:-}
+if [ -z "$version" ] && [ -f "$ROOT/VERSION" ]; then
+	version=$(tr -d '[:space:]' < "$ROOT/VERSION")
+fi
+if [ -z "$version" ]; then
+	version=$commit
+fi
 
 build() {
 	goos=$1
@@ -32,13 +39,14 @@ build() {
 
 cd "$ROOT"
 
-build windows amd64 onesync-windows-amd64.exe ./cmd/onesync "-H windowsgui -X main.version=$commit"
+build windows amd64 onesync-windows-amd64.exe ./cmd/onesync "-H windowsgui -X main.version=$version"
 build windows amd64 onesync-cert-windows-amd64.exe ./cmd/onesync-cert
-build linux amd64 onesync-linux-amd64 ./cmd/onesync "-X main.version=$commit"
+build linux amd64 onesync-linux-amd64 ./cmd/onesync "-X main.version=$version"
 build linux amd64 onesync-cert-linux-amd64 ./cmd/onesync-cert
 build linux amd64 onesync-relay-linux-amd64 ./cmd/relay
 
 {
+	printf 'version=%s\n' "$version"
 	printf 'commit=%s\n' "$commit"
 	printf 'go=%s\n' "$("$GO_BIN" version)"
 	printf 'output=%s\n' "$OUT"

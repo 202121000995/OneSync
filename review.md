@@ -1810,3 +1810,29 @@
 
 - 诊断包目前只包含客户端服务日志尾部；Relay 服务器日志仍需在 Relay 机器通过 `onesync-relayctl logs` 或服务器日志文件单独收集。
 - Windows 辅助脚本依赖本机管理页运行在默认 `127.0.0.1:8765`；如果用户改了管理端口，需要从页面内下载诊断包。
+
+## 发布版本号审核
+
+审核分支：`feature/release-versioning`
+
+审核结论：通过。
+
+审核说明：
+
+- 新增根目录 `VERSION`，当前发布版本为 `1.00`。
+- 构建脚本优先读取 `ONESYNC_VERSION`，其次读取 `VERSION`，并把发布版本注入 OneSync 主程序显示。
+- 打包脚本默认生成 `v1.00` 发布标签对应的包名：`onesync-windows-amd64-v1.00.zip` 和 `onesync-linux-amd64-v1.00.tar.gz`。
+- `BUILD.txt` 和 `MANIFEST.txt` 继续记录构建提交号，便于排查问题，但不再用提交短号作为发布版本。
+- Linux 一键安装、升级和 Relay 部署脚本支持 `RELEASE_TAG=v1.00`，同时保留旧 `acceptance-*` 包兼容逻辑。
+- README、quickstart 和中文菜单中的用户示例已改为 `v1.00`。
+
+验证结果：
+
+- `sh -n packaging/build-acceptance.sh` 通过。
+- `sh -n packaging/package-acceptance.sh` 通过。
+- Linux 客户端和 Relay 安装/升级脚本语法检查通过。
+- `go test ./...` 通过。
+
+剩余风险：
+
+- 后续发布新版本时需要先更新 `VERSION`，例如从 `1.00` 改为 `1.01`，再打包并发布 `v1.01`。

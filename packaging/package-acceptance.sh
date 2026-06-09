@@ -14,9 +14,17 @@ commit=$(
 	cd "$ROOT"
 	git rev-parse --short HEAD 2>/dev/null || printf unknown
 )
+version=${ONESYNC_VERSION:-}
+if [ -z "$version" ] && [ -f "$ROOT/VERSION" ]; then
+	version=$(tr -d '[:space:]' < "$ROOT/VERSION")
+fi
+if [ -z "$version" ]; then
+	version=$commit
+fi
+release_tag=${ONESYNC_RELEASE_TAG:-v$version}
 
-windows_name="onesync-acceptance-windows-amd64-$commit"
-linux_name="onesync-acceptance-linux-amd64-$commit"
+windows_name="onesync-windows-amd64-$release_tag"
+linux_name="onesync-linux-amd64-$release_tag"
 windows_stage="$PACKAGE_DIR/$windows_name"
 linux_stage="$PACKAGE_DIR/$linux_name"
 windows_zip="$PACKAGE_DIR/$windows_name.zip"
@@ -65,6 +73,8 @@ rm -f "$windows_zip" "$linux_tar"
 )
 
 {
+	printf 'version=%s\n' "$version"
+	printf 'release_tag=%s\n' "$release_tag"
 	printf 'commit=%s\n' "$commit"
 	printf 'artifact_dir=%s\n' "$ARTIFACT_DIR"
 	printf 'package_dir=%s\n' "$PACKAGE_DIR"
