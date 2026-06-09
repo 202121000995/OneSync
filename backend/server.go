@@ -2,8 +2,10 @@ package backend
 
 import (
 	"context"
+	"crypto/tls"
 	"embed"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
@@ -47,16 +49,67 @@ type endpointSuggester interface {
 	Suggestions(port int) ([]string, error)
 }
 
+type certificateFetcher interface {
+	Fetch(ctx context.Context, endpoint string) (string, error)
+}
+
 type localEndpointSuggester struct{}
 
 func (localEndpointSuggester) Suggestions(port int) ([]string, error) {
 	return netutil.LocalEndpointSuggestions(port)
 }
 
+type tlsCertificateFetcher struct {
+	timeout time.Duration
+}
+
+func (f tlsCertificateFetcher) Fetch(ctx context.Context, endpoint string) (string, error) {
+	endpoint = strings.TrimSpace(endpoint)
+	if endpoint == "" {
+		return "", errors.New("Relay endpoint is required")
+	}
+	host, _, err := net.SplitHostPort(endpoint)
+	if err != nil {
+		return "", fmt.Errorf("parse Relay endpoint: %w", err)
+	}
+	timeout := f.timeout
+	if timeout == 0 {
+		timeout = diagnostic.DefaultTimeout
+	}
+	checkContext, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	dialer := tls.Dialer{
+		NetDialer: &net.Dialer{},
+		Config: &tls.Config{
+			InsecureSkipVerify: true,
+			MinVersion:         tls.VersionTLS13,
+		},
+	}
+	connection, err := dialer.DialContext(checkContext, "tcp", endpoint)
+	if err != nil {
+		return "", fmt.Errorf("read Relay TLS certificate: %w", err)
+	}
+	defer connection.Close()
+	tlsConnection, ok := connection.(*tls.Conn)
+	if !ok {
+		return "", errors.New("Relay connection is not TLS")
+	}
+	state := tlsConnection.ConnectionState()
+	if len(state.PeerCertificates) == 0 {
+		return "", errors.New("Relay did not present a certificate")
+	}
+	certificate := state.PeerCertificates[0]
+	if err := certificate.VerifyHostname(strings.Trim(host, "[]")); err != nil {
+		return "", fmt.Errorf("Relay certificate does not match Relay address: %w", err)
+	}
+	return string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certificate.Raw})), nil
+}
+
 // Options controls optional management server dependencies.
 type Options struct {
 	ConnectionTester     connectionTester
 	EndpointSuggester    endpointSuggester
+	CertificateFetcher   certificateFetcher
 	SyncPort             int
 	DirectTLSConfigured  bool
 	DirectTLSHosts       []string
@@ -71,6 +124,7 @@ type Server struct {
 	credentials          *auth.CredentialStore
 	connectionTester     connectionTester
 	endpointSuggester    endpointSuggester
+	certificateFetcher   certificateFetcher
 	syncPort             int
 	directTLSConfigured  bool
 	directTLSHosts       []string
@@ -95,6 +149,7 @@ func NewServerWithOptions(manager taskManager, links *auth.LinkService, credenti
 		credentials:          credentials,
 		connectionTester:     options.ConnectionTester,
 		endpointSuggester:    options.EndpointSuggester,
+		certificateFetcher:   options.CertificateFetcher,
 		syncPort:             options.SyncPort,
 		directTLSConfigured:  options.DirectTLSConfigured,
 		directTLSHosts:       append([]string(nil), options.DirectTLSHosts...),
@@ -112,6 +167,9 @@ func NewServerWithOptions(manager taskManager, links *auth.LinkService, credenti
 	}
 	if server.endpointSuggester == nil {
 		server.endpointSuggester = localEndpointSuggester{}
+	}
+	if server.certificateFetcher == nil {
+		server.certificateFetcher = tlsCertificateFetcher{}
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/tasks", server.listTasks)
@@ -206,6 +264,22 @@ func certificateEndpoints(hosts []string, port int) []string {
 		endpoints = append(endpoints, endpoint)
 	}
 	return endpoints
+}
+
+func certificateBundle(certificates ...string) string {
+	var builder strings.Builder
+	for _, certificate := range certificates {
+		certificate = strings.TrimSpace(certificate)
+		if certificate == "" {
+			continue
+		}
+		if builder.Len() > 0 {
+			builder.WriteByte('\n')
+		}
+		builder.WriteString(certificate)
+		builder.WriteByte('\n')
+	}
+	return builder.String()
 }
 
 func (s *Server) endpointSuggestions(writer http.ResponseWriter, request *http.Request) {
@@ -314,6 +388,14 @@ func (s *Server) issueLink(writer http.ResponseWriter, request *http.Request) {
 	caCertificate := ""
 	if s.directTLSConfigured {
 		caCertificate = s.directTLSCertificate
+	}
+	if strings.TrimSpace(input.RelayEndpoint) != "" {
+		relayCertificate, err := s.certificateFetcher.Fetch(request.Context(), input.RelayEndpoint)
+		if err != nil {
+			writeAPIError(writer, http.StatusBadRequest, err)
+			return
+		}
+		caCertificate = certificateBundle(caCertificate, relayCertificate)
 	}
 	encoded, err := s.links.IssueWithCertificate(input.TaskID, input.Endpoint, input.RelayEndpoint, caCertificate)
 	if err != nil {

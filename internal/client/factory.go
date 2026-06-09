@@ -151,6 +151,10 @@ func (r *runner) runCycle(ctx context.Context, taskID string, reporter task.Stat
 		if credential.Used {
 			expectedPeerID = credential.PeerID
 		}
+		clientTLS, err := clientTLSForCredential(r.factory.clientTLS, credential)
+		if err != nil {
+			return err
+		}
 		connection, err := connectSource(
 			ctx,
 			credential,
@@ -158,7 +162,7 @@ func (r *runner) runCycle(ctx context.Context, taskID string, reporter task.Stat
 			[]byte(credential.Token),
 			expectedPeerID,
 			r.factory.serverTLS,
-			r.factory.clientTLS,
+			clientTLS,
 			r.factory.maxPayload,
 		)
 		if err != nil {

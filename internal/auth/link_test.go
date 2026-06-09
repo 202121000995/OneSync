@@ -71,6 +71,26 @@ func TestLinkCarriesSourceCertificate(t *testing.T) {
 	}
 }
 
+func TestLinkCarriesCertificateBundle(t *testing.T) {
+	service := NewLinkService()
+	service.random = fixedRandom
+	sourceCertificatePEM := testCertificatePEM(t)
+	relayCertificatePEM := testRelayCertificatePEM(t)
+	bundle := sourceCertificatePEM + "\n" + relayCertificatePEM
+
+	encoded, err := service.IssueWithCertificate("session-1", "192.168.1.10:7443", "relay.example:7443", bundle)
+	if err != nil {
+		t.Fatalf("IssueWithCertificate() error = %v", err)
+	}
+	link, err := service.Parse(encoded)
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+	if link.CACertificatePEM != bundle {
+		t.Fatal("parsed link did not preserve certificate bundle")
+	}
+}
+
 func TestLinkRejectsInvalidCertificate(t *testing.T) {
 	service := NewLinkService()
 	service.random = fixedRandom
@@ -113,6 +133,26 @@ func testCertificatePEM(t *testing.T) string {
 	keyPath := filepath.Join(root, "source.key")
 	if err := certutil.Generate(certutil.Options{
 		Hosts:    []string{"192.168.1.10"},
+		CertPath: certPath,
+		KeyPath:  keyPath,
+		Validity: time.Hour,
+	}); err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+	data, err := os.ReadFile(certPath)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	return string(data)
+}
+
+func testRelayCertificatePEM(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	certPath := filepath.Join(root, "relay.crt")
+	keyPath := filepath.Join(root, "relay.key")
+	if err := certutil.Generate(certutil.Options{
+		Hosts:    []string{"relay.example"},
 		CertPath: certPath,
 		KeyPath:  keyPath,
 		Validity: time.Hour,

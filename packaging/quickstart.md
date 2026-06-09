@@ -131,18 +131,7 @@ onesync-cert -hosts relay.example.com,203.0.113.10 -cert relay.crt -key relay.ke
 onesync-relay -listen :7443 -cert relay.crt -key relay.key
 ```
 
-If the Relay certificate is a different self-signed certificate, put the Relay public certificate into a CA bundle:
-
-```sh
-cp relay.crt onesync-relay-ca.crt
-```
-
-Start the source and target with the Relay CA bundle when testing Relay:
-
-```sh
-onesync -ca onesync-relay-ca.crt -sync-interval 10s
-onesync -ca onesync-relay-ca.crt -sync-interval 10s
-```
+The Relay certificate must contain the Relay address used by source and target computers. Use a public CA certificate for a public production Relay when possible. For private testing, a self-signed Relay certificate is acceptable; OneSync reads the Relay public certificate while generating the synchronization link and carries it in the link automatically.
 
 When generating the source link, keep the source TLS endpoint as the direct endpoint and enter the Relay TLS address in the optional Relay field, for example:
 
@@ -152,7 +141,7 @@ relay.example.com:7443
 
 Click "生成链接并启动源端" before testing the link on the target computer. In Relay mode, the source task registers with Relay and waits for the matching target.
 
-On the target computer, "测试连接" checks both the direct source endpoint and the Relay TLS endpoint when Relay is present. The target first tries the direct source endpoint. If it cannot connect or authenticate directly, it falls back to Relay.
+On the target computer, paste the synchronization link. The link already contains the public certificates needed for direct and Relay TLS verification. "测试连接" checks both the direct source endpoint and the Relay TLS endpoint when Relay is present. The target first tries the direct source endpoint. If it cannot connect or authenticate directly, it falls back to Relay.
 
 For Relay acceptance, keep the direct endpoint field filled with the source address shown in the link form, and fill the Relay field with the reachable Relay TLS address. The target first tries direct mode, then falls back to Relay when direct mode is not usable.
 
@@ -170,7 +159,7 @@ If "测试连接" fails for Relay:
 
 - Confirm `onesync-relay` is running with `-cert` and `-key`.
 - Confirm the Relay address in the link is reachable from both source and target.
-- Confirm both source and target trust the Relay certificate through `-ca` when the Relay certificate is self-signed.
+- Confirm the Relay certificate contains the exact Relay address used in the link. If the Relay IP or domain changes, regenerate the Relay certificate and generate a fresh synchronization link.
 - If direct mode is intentionally unavailable, a direct failure can be acceptable as long as the Relay result is usable.
 
 If a task starts and then fails:

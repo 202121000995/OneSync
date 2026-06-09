@@ -148,6 +148,60 @@ func TestLinkIssueAndJoinStoresCredentialSeparately(t *testing.T) {
 	}
 }
 
+func TestLinkIssueBundlesRelayCertificate(t *testing.T) {
+	manager := &fakeManager{tasks: map[string]task.Task{
+		"source": {ID: "source", Role: task.RoleSource, SourcePath: "/private/source"},
+	}}
+	credentials, err := auth.NewCredentialStore(filepath.Join(t.TempDir(), "credentials"))
+	if err != nil {
+		t.Fatalf("NewCredentialStore() error = %v", err)
+	}
+	sourceCertificatePEM := testCertificatePEM(t)
+	relayCertificatePEM := testRelayCertificatePEM(t)
+	fetcher := &fakeCertificateFetcher{certificate: relayCertificatePEM}
+	server, err := NewServerWithOptions(manager, auth.NewLinkService(), credentials, Options{
+		DirectTLSConfigured:  true,
+		DirectTLSCertificate: sourceCertificatePEM,
+		CertificateFetcher:   fetcher,
+	})
+	if err != nil {
+		t.Fatalf("NewServerWithOptions() error = %v", err)
+	}
+
+	issue := jsonRequest(http.MethodPost, "http://127.0.0.1/api/links", map[string]any{
+		"task_id": "source", "endpoint": "192.168.1.10:7443", "relay_endpoint": "relay.example:7443",
+	})
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, issue)
+	if response.Code != http.StatusCreated {
+		t.Fatalf("issue status = %d, body = %s", response.Code, response.Body.String())
+	}
+	var issued struct {
+		Link string `json:"link"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &issued); err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+	parsed, err := server.links.Parse(issued.Link)
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+	if fetcher.endpoint != "relay.example:7443" {
+		t.Fatalf("fetcher endpoint = %q", fetcher.endpoint)
+	}
+	if !bytes.Contains([]byte(parsed.CACertificatePEM), []byte(sourceCertificatePEM)) ||
+		!bytes.Contains([]byte(parsed.CACertificatePEM), []byte(relayCertificatePEM)) {
+		t.Fatal("link did not include both source and Relay certificates")
+	}
+	credential, err := credentials.Load("source")
+	if err != nil {
+		t.Fatalf("Load(source) error = %v", err)
+	}
+	if credential.CACertificatePEM != parsed.CACertificatePEM {
+		t.Fatal("source credential did not store bundled certificates")
+	}
+}
+
 func TestLinkIssueRejectsUnusableSourceWithoutTLSOrRelay(t *testing.T) {
 	manager := &fakeManager{tasks: map[string]task.Task{
 		"source": {ID: "source", Role: task.RoleSource, SourcePath: "/private/source"},
@@ -228,10 +282,12 @@ func TestLinkTestUsesConfiguredConnectionTester(t *testing.T) {
 	}
 	tester := &fakeConnectionTester{}
 	sourceCertificatePEM := testCertificatePEM(t)
+	relayCertificatePEM := testRelayCertificatePEM(t)
 	server, err := NewServerWithOptions(manager, auth.NewLinkService(), credentials, Options{
 		ConnectionTester:     tester,
 		DirectTLSConfigured:  true,
 		DirectTLSCertificate: sourceCertificatePEM,
+		CertificateFetcher:   &fakeCertificateFetcher{certificate: relayCertificatePEM},
 	})
 	if err != nil {
 		t.Fatalf("NewServerWithOptions() error = %v", err)
@@ -262,8 +318,9 @@ func TestLinkTestUsesConfiguredConnectionTester(t *testing.T) {
 	if tester.endpoint != "192.168.1.10:7443" || tester.relayEndpoint != "relay.example:7443" {
 		t.Fatalf("tester called with endpoint=%q relay=%q", tester.endpoint, tester.relayEndpoint)
 	}
-	if tester.caCertificatePEM != sourceCertificatePEM {
-		t.Fatal("tester did not receive link certificate")
+	if !bytes.Contains([]byte(tester.caCertificatePEM), []byte(sourceCertificatePEM)) ||
+		!bytes.Contains([]byte(tester.caCertificatePEM), []byte(relayCertificatePEM)) {
+		t.Fatal("tester did not receive bundled link certificates")
 	}
 	if !bytes.Contains(response.Body.Bytes(), []byte(`"usable":true`)) {
 		t.Fatalf("test response = %s", response.Body.String())
@@ -472,6 +529,20 @@ func (t *fakeConnectionTester) TestWithCertificate(_ context.Context, endpoint, 
 	}
 }
 
+type fakeCertificateFetcher struct {
+	endpoint    string
+	certificate string
+	err         error
+}
+
+func (f *fakeCertificateFetcher) Fetch(_ context.Context, endpoint string) (string, error) {
+	f.endpoint = endpoint
+	if f.err != nil {
+		return "", f.err
+	}
+	return f.certificate, nil
+}
+
 func testCertificatePEM(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
@@ -479,6 +550,26 @@ func testCertificatePEM(t *testing.T) string {
 	keyPath := filepath.Join(root, "source.key")
 	if err := certutil.Generate(certutil.Options{
 		Hosts:    []string{"192.168.1.10"},
+		CertPath: certPath,
+		KeyPath:  keyPath,
+		Validity: time.Hour,
+	}); err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+	data, err := os.ReadFile(certPath)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	return string(data)
+}
+
+func testRelayCertificatePEM(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	certPath := filepath.Join(root, "relay.crt")
+	keyPath := filepath.Join(root, "relay.key")
+	if err := certutil.Generate(certutil.Options{
+		Hosts:    []string{"relay.example"},
 		CertPath: certPath,
 		KeyPath:  keyPath,
 		Validity: time.Hour,

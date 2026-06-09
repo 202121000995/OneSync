@@ -590,6 +590,8 @@ V1 不引入数据库。配置与任务状态使用本地文件持久化：
    - Windows 验收包提供 `OneSync.exe` 直接启动入口，管理页改为同步任务表格主界面，并按 MD5 判断文件差异。
 37. `feature/task-params-logs-stats-icon`
    - 增加任务参数忽略规则、任务日志、接收/发送流量统计、关于版本号和 Windows 包图标资产。
+38. `feature/relay-cert-in-link`
+   - 生成链接时自动读取 Relay 公开证书并写入同步链接，源端和目标端无需手动复制 Relay 证书文件。
 
 ## 16. 待确认项
 

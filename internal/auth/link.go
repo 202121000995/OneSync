@@ -186,11 +186,24 @@ func validateLinkMetadata(sessionID, endpoint, relayEndpoint, caCertificatePEM s
 		if len(caCertificatePEM) > 8192 {
 			return errors.New("CA certificate is too large")
 		}
-		block, rest := pem.Decode([]byte(caCertificatePEM))
-		if block == nil || block.Type != "CERTIFICATE" || len(bytes.TrimSpace(rest)) != 0 {
-			return errors.New("CA certificate is invalid")
+		rest := []byte(caCertificatePEM)
+		found := false
+		for {
+			rest = bytes.TrimSpace(rest)
+			if len(rest) == 0 {
+				break
+			}
+			var block *pem.Block
+			block, rest = pem.Decode(rest)
+			if block == nil || block.Type != "CERTIFICATE" {
+				return errors.New("CA certificate is invalid")
+			}
+			if _, err := x509.ParseCertificate(block.Bytes); err != nil {
+				return errors.New("CA certificate is invalid")
+			}
+			found = true
 		}
-		if _, err := x509.ParseCertificate(block.Bytes); err != nil {
+		if !found {
 			return errors.New("CA certificate is invalid")
 		}
 	}
