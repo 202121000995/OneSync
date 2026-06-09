@@ -11,6 +11,7 @@ Use this template for real Windows/Linux multi-machine acceptance runs. Keep one
 - Source computer OS:
 - Target computer OS:
 - Relay computer OS:
+- Starter scripts used: Yes / No
 - Source LAN IP:
 - Synchronization port:
 - Relay endpoint:

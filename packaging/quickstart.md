@@ -43,6 +43,14 @@ packaging/package-acceptance.sh dist/acceptance dist/acceptance-packages
 
 Copy the Windows zip to Windows source or target computers. Copy the Linux tar.gz to Linux source, target, or Relay computers. Record `dist/acceptance-packages/PACKAGE-SHA256SUMS.txt` in the acceptance report.
 
+The packages include starter scripts. Edit the host values first, then use:
+
+- Windows source: `make-source-cert.cmd`, then `start-source.cmd`.
+- Windows target: copy `certs\source.crt`, then run `start-target.cmd`.
+- Linux source: `./make-source-cert.sh`, then `./start-source.sh`.
+- Linux target: copy `certs/source.crt`, then run `./start-target.sh`.
+- Linux Relay: `./make-relay-cert.sh`, then `./start-relay.sh`.
+
 Build the three programs:
 
 ```sh

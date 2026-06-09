@@ -1083,3 +1083,29 @@
 
 - 脚本当前只生成 Windows amd64 和 Linux amd64 验收包，不替代 Windows 安装器。
 - 打包依赖本机已有 `zip`、`tar` 和 SHA-256 工具。
+
+## 验收启动脚本模板审核
+
+审核分支：`feature/acceptance-start-scripts`
+
+审核结论：通过。
+
+审核说明：
+
+- 新增 Windows `.cmd` 模板，用于生成源端证书、启动源端客户端和启动目标端客户端。
+- 新增 Linux `.sh` 模板，用于生成源端证书、启动源端客户端、启动目标端客户端、生成 Relay 证书和启动 Relay。
+- 验收包打包脚本会把对应平台脚本复制进 Windows zip 和 Linux tar.gz。
+- Linux 脚本随包设置为可执行文件，便于解压后直接运行。
+- Quickstart 和验收报告模板已补充启动脚本使用说明和记录项。
+
+验证结果：
+
+- `for script in packaging/acceptance-scripts/linux/*.sh; do sh -n "$script" || exit 1; done` 通过。
+- `GO_BIN=/Users/apple/Library/Go/sdk/go1.26.3/bin/go packaging/package-acceptance.sh /private/tmp/onesync-acceptance-artifacts-4 /private/tmp/onesync-acceptance-packages-4` 通过。
+- `go test ./...` 通过。
+- `go vet ./...` 通过。
+
+剩余风险：
+
+- 启动脚本是可编辑模板，不会自动发现真实源端 IP、Relay 地址或防火墙状态。
+- Windows 脚本当前只覆盖客户端源端/目标端场景；Relay 验收仍使用 Linux 包。
