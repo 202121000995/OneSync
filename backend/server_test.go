@@ -452,6 +452,10 @@ func TestConfigAPIReportsSyncPort(t *testing.T) {
 	}
 	server, err := NewServerWithOptions(manager, auth.NewLinkService(), credentials, Options{
 		SyncPort:            9443,
+		ManagementBind:      "0.0.0.0",
+		ManagementPort:      8766,
+		DataDir:             "/tmp/onesync-test",
+		SyncInterval:        15 * time.Second,
 		DirectTLSConfigured: true,
 		DirectTLSHosts:      []string{"192.168.1.10", "source.local"},
 	})
@@ -463,6 +467,10 @@ func TestConfigAPIReportsSyncPort(t *testing.T) {
 	server.Handler().ServeHTTP(response, request)
 	if response.Code != http.StatusOK ||
 		!bytes.Contains(response.Body.Bytes(), []byte(`"sync_port":9443`)) ||
+		!bytes.Contains(response.Body.Bytes(), []byte(`"management_bind":"0.0.0.0"`)) ||
+		!bytes.Contains(response.Body.Bytes(), []byte(`"management_port":8766`)) ||
+		!bytes.Contains(response.Body.Bytes(), []byte(`"data_dir":"/tmp/onesync-test"`)) ||
+		!bytes.Contains(response.Body.Bytes(), []byte(`"sync_interval":"15s"`)) ||
 		!bytes.Contains(response.Body.Bytes(), []byte(`"direct_tls_configured":true`)) ||
 		!bytes.Contains(response.Body.Bytes(), []byte(`"direct_tls_hosts":["192.168.1.10","source.local"]`)) ||
 		!bytes.Contains(response.Body.Bytes(), []byte(`"direct_tls_endpoints":["192.168.1.10:9443","source.local:9443"]`)) {

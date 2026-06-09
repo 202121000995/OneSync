@@ -2,9 +2,11 @@ package client
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -163,7 +165,8 @@ func (r *runner) runCycle(ctx context.Context, taskID string, reporter task.Stat
 		if credential.Used {
 			expectedPeerID = credential.PeerID
 		}
-		addLog(ctx, reporter, "info", fmt.Sprintf("源端开始等待连接：直连地址=%s，Relay=%s，已绑定对端=%t", credential.Endpoint, emptyDash(credential.RelayEndpoint), expectedPeerID != ""))
+		session := sessionDigest(credential.SessionID)
+		addLog(ctx, reporter, "info", fmt.Sprintf("源端开始等待连接：会话=%s，直连地址=%s，Relay=%s，已绑定对端=%t", session, credential.Endpoint, emptyDash(credential.RelayEndpoint), expectedPeerID != ""))
 		clientTLS, err := clientTLSForCredential(r.factory.clientTLS, credential)
 		if err != nil {
 			return err
@@ -182,8 +185,8 @@ func (r *runner) runCycle(ctx context.Context, taskID string, reporter task.Stat
 			addLog(ctx, reporter, "warning", fmt.Sprintf("源端连接失败：%v", err))
 			return err
 		}
-		session := meteredSession{base: connection.session, reporter: trafficReporter(reporter)}
-		defer session.Close()
+		transferSession := meteredSession{base: connection.session, reporter: trafficReporter(reporter)}
+		defer transferSession.Close()
 		setDevice(ctx, reporter, task.DeviceStats{
 			Connected:     1,
 			Total:         1,
@@ -194,14 +197,14 @@ func (r *runner) runCycle(ctx context.Context, taskID string, reporter task.Stat
 			TLS:           "TLS 1.3",
 			ClientVersion: "OneSync",
 		})
-		addLog(ctx, reporter, "info", fmt.Sprintf("连接成功：方式=%s，对端=%s", connectionLabel(connection.relayed), safePeerID(connection.peerID)))
+		addLog(ctx, reporter, "info", fmt.Sprintf("连接成功：会话=%s，方式=%s，对端=%s", session, connectionLabel(connection.relayed), safePeerID(connection.peerID)))
 		if err := reportState(ctx, reporter, task.StateSyncing); err != nil {
 			return err
 		}
 		if _, err := r.factory.credentials.Claim(r.task.ID, credential.Token, connection.peerID); err != nil {
 			return fmt.Errorf("claim target identity: %w", err)
 		}
-		engine, err := sync.DefaultSourceEngineWithOptions(r.task.SourcePath, session, scanner.Options{
+		engine, err := sync.DefaultSourceEngineWithOptions(r.task.SourcePath, transferSession, scanner.Options{
 			IgnoreRules: r.task.IgnoreRules,
 		}, progressReporter(reporter))
 		if err != nil {
@@ -214,7 +217,8 @@ func (r *runner) runCycle(ctx context.Context, taskID string, reporter task.Stat
 	if err != nil {
 		return err
 	}
-	addLog(ctx, reporter, "info", fmt.Sprintf("目标端开始连接源端：直连地址=%s，Relay=%s，对端身份=%s", credential.Endpoint, emptyDash(credential.RelayEndpoint), safePeerID(credential.PeerID)))
+	session := sessionDigest(credential.SessionID)
+	addLog(ctx, reporter, "info", fmt.Sprintf("目标端开始连接源端：会话=%s，直连地址=%s，Relay=%s，对端身份=%s", session, credential.Endpoint, emptyDash(credential.RelayEndpoint), safePeerID(credential.PeerID)))
 	connection, err := connectTarget(
 		ctx,
 		credential,
@@ -228,8 +232,8 @@ func (r *runner) runCycle(ctx context.Context, taskID string, reporter task.Stat
 		addLog(ctx, reporter, "warning", fmt.Sprintf("目标端连接失败：%v", err))
 		return err
 	}
-	session := meteredSession{base: connection.session, reporter: trafficReporter(reporter)}
-	defer session.Close()
+	transferSession := meteredSession{base: connection.session, reporter: trafficReporter(reporter)}
+	defer transferSession.Close()
 	setDevice(ctx, reporter, task.DeviceStats{
 		Connected:     1,
 		Total:         1,
@@ -240,11 +244,11 @@ func (r *runner) runCycle(ctx context.Context, taskID string, reporter task.Stat
 		TLS:           "TLS 1.3",
 		ClientVersion: "OneSync",
 	})
-	addLog(ctx, reporter, "info", fmt.Sprintf("连接成功：方式=%s，源端=%s", connectionLabel(connection.relayed), credential.Endpoint))
+	addLog(ctx, reporter, "info", fmt.Sprintf("连接成功：会话=%s，方式=%s，源端=%s", session, connectionLabel(connection.relayed), credential.Endpoint))
 	if err := reportState(ctx, reporter, task.StateSyncing); err != nil {
 		return err
 	}
-	engine, err := sync.DefaultTargetEngineWithOptions(r.task.TargetPath, session, scanner.Options{
+	engine, err := sync.DefaultTargetEngineWithOptions(r.task.TargetPath, transferSession, scanner.Options{
 		IgnoreRules: r.task.IgnoreRules,
 	}, progressReporter(reporter))
 	if err != nil {
@@ -326,6 +330,11 @@ func safePeerID(peerID string) string {
 		return emptyDash(peerID)
 	}
 	return peerID[:6] + "..." + peerID[len(peerID)-6:]
+}
+
+func sessionDigest(sessionID string) string {
+	digest := sha256.Sum256([]byte(sessionID))
+	return hex.EncodeToString(digest[:6])
 }
 
 func trafficReporter(reporter task.StateReporter) task.TrafficReporter {

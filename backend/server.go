@@ -120,6 +120,10 @@ type Options struct {
 	CertificateFetcher   certificateFetcher
 	WebAuth              *webauth.Store
 	SyncPort             int
+	ManagementBind       string
+	ManagementPort       int
+	DataDir              string
+	SyncInterval         time.Duration
 	DirectTLSConfigured  bool
 	DirectTLSHosts       []string
 	DirectTLSCertificate string
@@ -138,6 +142,10 @@ type Server struct {
 	sessionMu            sync.Mutex
 	sessions             map[string]time.Time
 	syncPort             int
+	managementBind       string
+	managementPort       int
+	dataDir              string
+	syncInterval         time.Duration
 	directTLSConfigured  bool
 	directTLSHosts       []string
 	directTLSCertificate string
@@ -165,6 +173,10 @@ func NewServerWithOptions(manager taskManager, links *syncauth.LinkService, cred
 		webAuth:              options.WebAuth,
 		sessions:             make(map[string]time.Time),
 		syncPort:             options.SyncPort,
+		managementBind:       strings.TrimSpace(options.ManagementBind),
+		managementPort:       options.ManagementPort,
+		dataDir:              options.DataDir,
+		syncInterval:         options.SyncInterval,
 		directTLSConfigured:  options.DirectTLSConfigured,
 		directTLSHosts:       append([]string(nil), options.DirectTLSHosts...),
 		directTLSCertificate: options.DirectTLSCertificate,
@@ -176,8 +188,20 @@ func NewServerWithOptions(manager taskManager, links *syncauth.LinkService, cred
 	if server.syncPort == 0 {
 		server.syncPort = DefaultSyncPort
 	}
+	if server.managementBind == "" {
+		server.managementBind = "127.0.0.1"
+	}
+	if server.managementPort == 0 {
+		server.managementPort = 8765
+	}
+	if server.syncInterval == 0 {
+		server.syncInterval = 30 * time.Second
+	}
 	if server.syncPort < 1 || server.syncPort > 65535 {
 		return nil, errors.New("sync port is invalid")
+	}
+	if server.managementPort < 1 || server.managementPort > 65535 {
+		return nil, errors.New("management port is invalid")
 	}
 	if server.endpointSuggester == nil {
 		server.endpointSuggester = localEndpointSuggester{}
@@ -340,6 +364,10 @@ func (s *Server) config(writer http.ResponseWriter, _ *http.Request) {
 	}
 	writeJSON(writer, http.StatusOK, map[string]any{
 		"sync_port":             s.syncPort,
+		"management_bind":       s.managementBind,
+		"management_port":       s.managementPort,
+		"data_dir":              s.dataDir,
+		"sync_interval":         s.syncInterval.String(),
 		"direct_tls_configured": s.directTLSConfigured,
 		"direct_tls_hosts":      directTLSHosts,
 		"direct_tls_endpoints":  certificateEndpoints(directTLSHosts, s.syncPort),
@@ -882,7 +910,10 @@ func (s *Server) diagnosticText(tasks []task.Task) string {
 	fmt.Fprintf(&builder, "OneSync 诊断日志\n")
 	fmt.Fprintf(&builder, "生成时间: %s\n", time.Now().UTC().Format(time.RFC3339))
 	fmt.Fprintf(&builder, "版本: %s\n", s.version)
+	fmt.Fprintf(&builder, "管理页监听: %s:%d\n", s.managementBind, s.managementPort)
+	fmt.Fprintf(&builder, "数据目录: %s\n", emptyText(s.dataDir))
 	fmt.Fprintf(&builder, "同步端口: %d\n", s.syncPort)
+	fmt.Fprintf(&builder, "同步间隔: %s\n", s.syncInterval)
 	fmt.Fprintf(&builder, "源端直连 TLS: %s\n", yesNo(s.directTLSConfigured))
 	fmt.Fprintf(&builder, "任务数量: %d\n\n", len(tasks))
 	for _, item := range tasks {

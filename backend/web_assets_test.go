@@ -68,10 +68,15 @@ func TestWebScriptKeepsReadinessRegressionsCovered(t *testing.T) {
 		"诊断日志已复制",
 		"openDeviceManager",
 		"openConnectionManager",
+		"openAppSettings",
+		"taskTotals",
+		"taskStatsSummary",
 		"/device/kick",
 		"设备已禁用",
 		"设备已踢出",
 		"错误分类",
+		"管理页地址",
+		"同步间隔",
 	}
 	for _, text := range required {
 		if !strings.Contains(script, text) {
@@ -86,6 +91,7 @@ func TestWebPageKeepsTaskTableAsMainSurface(t *testing.T) {
 		"同步任务",
 		"设备管理",
 		"连接管理",
+		"任务统计正在加载",
 		"管理页登录",
 		"创建同步",
 		"加入同步",
@@ -102,6 +108,7 @@ func TestWebPageKeepsTaskTableAsMainSurface(t *testing.T) {
 		"复制诊断",
 		"下载诊断",
 		"踢出设备",
+		"复制全部诊断",
 		"关于 OneSync",
 		"版本号",
 		"类型",

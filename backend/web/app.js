@@ -10,6 +10,7 @@ const logsDialog = document.querySelector("#logs-dialog");
 const devicesDialog = document.querySelector("#devices-dialog");
 const deviceManagerDialog = document.querySelector("#device-manager-dialog");
 const connectionManagerDialog = document.querySelector("#connection-manager-dialog");
+const appSettingsDialog = document.querySelector("#app-settings-dialog");
 const aboutDialog = document.querySelector("#about-dialog");
 const settingsForm = document.querySelector("#settings-form");
 const authForm = document.querySelector("#auth-form");
@@ -31,6 +32,8 @@ const settingsSummary = document.querySelector("#settings-summary");
 const logsList = document.querySelector("#logs-list");
 const deviceManagerList = document.querySelector("#device-manager-list");
 const connectionManagerList = document.querySelector("#connection-manager-list");
+const appSettingsBody = document.querySelector("#app-settings-body");
+const taskStatsSummary = document.querySelector("#task-stats-summary");
 const ignoreTemplate = document.querySelector("#ignore-template");
 const ignoreSamplePath = document.querySelector("#ignore-sample-path");
 const ignorePreviewResult = document.querySelector("#ignore-preview-result");
@@ -38,7 +41,17 @@ const ignoredList = document.querySelector("#ignored-list");
 const devicesTitle = document.querySelector("#devices-title");
 const devicesBody = document.querySelector("#devices-body");
 const aboutVersion = document.querySelector("#about-version");
-const defaultConfig = { sync_port: 7443, direct_tls_configured: false, direct_tls_hosts: [], direct_tls_endpoints: [], version: "dev" };
+const defaultConfig = {
+  sync_port: 7443,
+  management_bind: "127.0.0.1",
+  management_port: 8765,
+  data_dir: "",
+  sync_interval: "30s",
+  direct_tls_configured: false,
+  direct_tls_hosts: [],
+  direct_tls_endpoints: [],
+  version: "dev",
+};
 const sourceLinksStorageKey = "onesync.sourceLinks.v1";
 let appConfig = { ...defaultConfig };
 let tasksCache = [];
@@ -78,7 +91,8 @@ async function loadTasks() {
     tasksCache = tasks || [];
     if (selectedTaskId && !tasksCache.some((task) => task.id === selectedTaskId)) selectedTaskId = "";
     list.replaceChildren(...(tasksCache.length ? tasksCache.map((task) => renderTaskRow(task, rates[task.id] || {})) : [emptyTaskRow()]));
-    statusText.textContent = `${tasks.length} 个任务`;
+    renderTaskStatsSummary(tasksCache, rates);
+    statusText.textContent = taskStatusSummary(tasksCache);
     updateToolbar();
   } catch (error) {
     statusText.textContent = "加载失败";
@@ -167,6 +181,47 @@ function emptyTaskRow() {
   cell.textContent = "还没有同步任务。点击右上角“创建同步”或“加入同步”开始。";
   row.append(cell);
   return row;
+}
+
+function taskStatusSummary(tasks) {
+  const total = tasks.length;
+  const running = tasks.filter(isRunningTask).length;
+  const failed = tasks.filter((task) => task.state === "failed").length;
+  if (!total) return "0 个任务";
+  if (failed) return `${total} 个任务 · ${running} 运行 · ${failed} 失败`;
+  return `${total} 个任务 · ${running} 运行`;
+}
+
+function renderTaskStatsSummary(tasks, rates = {}) {
+  if (!taskStatsSummary) return;
+  if (!tasks.length) {
+    taskStatsSummary.textContent = "暂无任务统计。";
+    return;
+  }
+  const totals = taskTotals(tasks, rates);
+  taskStatsSummary.textContent = [
+    `本地 ${formatBytes(totals.localBytes)}`,
+    `标准 ${formatBytes(totals.standardBytes)}`,
+    `累计接收 ${formatBytes(totals.receivedBytes)}`,
+    `累计发送 ${formatBytes(totals.sentBytes)}`,
+    `当前接收 ${formatRate(totals.receivedRate)}`,
+    `当前发送 ${formatRate(totals.sentRate)}`,
+  ].join(" · ");
+}
+
+function taskTotals(tasks, rates = {}) {
+  return tasks.reduce((total, task) => {
+    const size = task.size || {};
+    const traffic = task.traffic || {};
+    const rate = rates[task.id] || {};
+    total.localBytes += Number(size.local_bytes || 0);
+    total.standardBytes += Number(size.standard_bytes || 0);
+    total.receivedBytes += Number(traffic.received_bytes || 0);
+    total.sentBytes += Number(traffic.sent_bytes || 0);
+    total.receivedRate += Number(rate.received || 0);
+    total.sentRate += Number(rate.sent || 0);
+    return total;
+  }, { localBytes: 0, standardBytes: 0, receivedBytes: 0, sentBytes: 0, receivedRate: 0, sentRate: 0 });
 }
 
 function appendCell(row, content, className = "") {
@@ -700,6 +755,8 @@ function renderConnectionCard(task) {
   const direct = devices.endpoint || task.peer_address || "-";
   const relay = devices.relay_endpoint || task.relay_url || "-";
   detail.textContent = `直连：${direct} · Relay：${relay} · 最近连接：${devices.last_seen ? new Date(devices.last_seen).toLocaleString() : "-"} · 错误分类：${errorCategory(task.last_error)}`;
+  const stats = document.createElement("p");
+  stats.textContent = `本地 ${localSizeLabel(task)} · 标准 ${standardSizeLabel(task)} · 累计接收 ${formatBytes((task.traffic || {}).received_bytes || 0)} · 累计发送 ${formatBytes((task.traffic || {}).sent_bytes || 0)}`;
   const error = document.createElement("p");
   error.className = task.last_error ? "error" : "muted";
   error.textContent = task.last_error || "暂无错误";
@@ -710,10 +767,38 @@ function renderConnectionCard(task) {
     await copyDiagnostics();
   }, { secondary: true, compact: true }));
   actions.append(actionButton("重新连接", async () => {
-    await taskAction(task.id, "start");
+    try {
+      await restartTask(task.id);
+      notify("正在重新连接");
+      setTimeout(loadTasks, 300);
+    } catch (error) { notify(error.message); }
   }, { secondary: true, compact: true }));
-  card.append(title, detail, error, actions);
+  card.append(title, detail, stats, error, actions);
   return card;
+}
+
+function openAppSettings() {
+  const rows = [
+    ["版本号", appConfig.version || "dev"],
+    ["管理页地址", `${appConfig.management_bind || "127.0.0.1"}:${appConfig.management_port || 8765}`],
+    ["同步 TLS 端口", appConfig.sync_port || 7443],
+    ["同步间隔", appConfig.sync_interval || "30s"],
+    ["数据目录", appConfig.data_dir || "-"],
+    ["源端直连 TLS", appConfig.direct_tls_configured ? "已自动加载" : "未加载"],
+    ["证书覆盖地址", (appConfig.direct_tls_hosts || []).length ? (appConfig.direct_tls_hosts || []).join("，") : "-"],
+    ["推荐直连地址", (appConfig.direct_tls_endpoints || []).length ? (appConfig.direct_tls_endpoints || []).join("，") : "-"],
+    ["管理页登录", authState.enabled ? (authState.configured ? "已启用" : "待初始化") : "仅本机访问时未启用"],
+  ];
+  const table = document.createElement("table");
+  table.className = "detail-table";
+  for (const [label, value] of rows) {
+    const row = document.createElement("tr");
+    appendCell(row, label, "muted");
+    appendCell(row, String(value || "-"));
+    table.append(row);
+  }
+  appSettingsBody.replaceChildren(table);
+  if (!appSettingsDialog.open) appSettingsDialog.showModal();
 }
 
 function errorCategory(message) {
@@ -1068,12 +1153,17 @@ document.querySelector("#close-settings-dialog").addEventListener("click", () =>
 document.querySelector("#open-logs").addEventListener("click", openLogsDialog);
 document.querySelector("#open-device-manager").addEventListener("click", openDeviceManager);
 document.querySelector("#open-connection-manager").addEventListener("click", openConnectionManager);
+document.querySelector("#open-app-settings").addEventListener("click", openAppSettings);
 document.querySelector("#open-about").addEventListener("click", () => aboutDialog.showModal());
 document.querySelector("#apply-ignore-template").addEventListener("click", applyIgnoreTemplate);
 document.querySelector("#preview-ignore").addEventListener("click", previewIgnoreRules);
 document.querySelector("#copy-diagnostics").addEventListener("click", copyDiagnostics);
 document.querySelector("#download-diagnostics").addEventListener("click", downloadDiagnostics);
 document.querySelector("#copy-all-diagnostics").addEventListener("click", async () => {
+  selectedTaskId = "";
+  await copyDiagnostics();
+});
+document.querySelector("#copy-settings-diagnostics").addEventListener("click", async () => {
   selectedTaskId = "";
   await copyDiagnostics();
 });
