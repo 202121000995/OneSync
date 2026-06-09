@@ -76,6 +76,12 @@ For a Linux Relay server, use the one-command Relay TLS deployment script. `RELA
 curl -fsSL https://raw.githubusercontent.com/202121000995/OneSync/main/packaging/acceptance-scripts/linux/deploy-relaytls.sh | sudo env RELAY_HOSTS=203.0.113.10 RELAY_PORT=443 sh
 ```
 
+If the server cannot reach GitHub directly, use a GitHub proxy. The proxy is used both to download the deployment script and to download the latest Linux package inside the script:
+
+```sh
+curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/202121000995/OneSync/main/packaging/acceptance-scripts/linux/deploy-relaytls.sh | sudo env RELAY_HOSTS=203.0.113.10 RELAY_PORT=443 GH_PROXY=https://gh-proxy.org/ sh
+```
+
 After deployment, enter this Relay TLS address when generating a synchronization link:
 
 ```text

@@ -1500,3 +1500,24 @@
 
 - 一键部署依赖 GitHub、`curl`、`tar` 和 systemd；离线或非 systemd Linux 仍需手动安装。
 - `RELAY_HOSTS` 必须填写客户端实际访问的公网 IP 或域名，且对应端口需要防火墙放行。
+
+## Relay TLS GitHub 代理下载审核
+
+审核分支：`feature/relaytls-github-proxy`
+
+审核结论：通过。
+
+审核说明：
+
+- `deploy-relaytls.sh` 新增 `GH_PROXY` 环境变量。
+- 脚本内部访问 GitHub API 和下载 Linux Release 包时都会套用 `GH_PROXY`。
+- 缺少 `RELAY_HOSTS` 时的提示同时给出直连命令和代理命令。
+- Quickstart 已补充直连 GitHub 和 `https://gh-proxy.org/` 两套一键部署命令。
+
+验证结果：
+
+- `sh -n packaging/acceptance-scripts/linux/deploy-relaytls.sh` 通过。
+
+剩余风险：
+
+- `gh-proxy.org` 是第三方代理，稳定性和安全性不由 OneSync 控制；生产环境更建议自建下载镜像或提供国内下载源。

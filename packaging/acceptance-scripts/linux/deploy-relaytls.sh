@@ -4,6 +4,7 @@ set -eu
 REPO=${ONESYNC_REPO:-202121000995/OneSync}
 RELAY_PORT=${RELAY_PORT:-443}
 ACTION=${1:-install}
+GH_PROXY=${GH_PROXY:-}
 
 need_root() {
 	if [ "$(id -u)" -ne 0 ]; then
@@ -21,15 +22,32 @@ need_command() {
 
 latest_linux_package_url() {
 	api="https://api.github.com/repos/$REPO/releases/latest"
-	curl -fsSL "$api" |
+	curl -fsSL "$(proxy_url "$api")" |
 		sed -n 's/.*"browser_download_url": "\(.*onesync-acceptance-linux-amd64.*\.tar\.gz\)".*/\1/p' |
 		head -n 1
+}
+
+proxy_url() {
+	url=$1
+	if [ -z "$GH_PROXY" ]; then
+		printf '%s' "$url"
+		return
+	fi
+	case "$GH_PROXY" in
+		*/)
+			printf '%s%s' "$GH_PROXY" "$url"
+			;;
+		*)
+			printf '%s/%s' "$GH_PROXY" "$url"
+			;;
+	esac
 }
 
 install_relay() {
 	if [ -z "${RELAY_HOSTS:-}" ]; then
 		printf 'RELAY_HOSTS is required. Example:\n' >&2
 		printf '  curl -fsSL https://raw.githubusercontent.com/%s/main/packaging/acceptance-scripts/linux/deploy-relaytls.sh | sudo env RELAY_HOSTS=1.2.3.4 RELAY_PORT=443 sh\n' "$REPO" >&2
+		printf '  curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/%s/main/packaging/acceptance-scripts/linux/deploy-relaytls.sh | sudo env RELAY_HOSTS=1.2.3.4 RELAY_PORT=443 GH_PROXY=https://gh-proxy.org/ sh\n' "$REPO" >&2
 		exit 1
 	fi
 
@@ -47,8 +65,9 @@ install_relay() {
 		exit 1
 	fi
 
-	printf 'Downloading OneSync Linux package:\n%s\n' "$url"
-	curl -fL "$url" -o "$tmp/onesync-linux.tar.gz"
+	download_url=$(proxy_url "$url")
+	printf 'Downloading OneSync Linux package:\n%s\n' "$download_url"
+	curl -fL "$download_url" -o "$tmp/onesync-linux.tar.gz"
 	tar -xzf "$tmp/onesync-linux.tar.gz" -C "$tmp"
 	stage=$(find "$tmp" -maxdepth 1 -type d -name 'onesync-acceptance-linux-amd64-*' | head -n 1)
 	if [ -z "$stage" ]; then
