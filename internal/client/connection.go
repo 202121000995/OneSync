@@ -22,6 +22,12 @@ type connectionResult struct {
 type authenticatedConnection struct {
 	session network.Session
 	peerID  string
+	relayed bool
+}
+
+type targetConnection struct {
+	session network.Session
+	relayed bool
 }
 
 func connectSource(
@@ -72,7 +78,7 @@ func connectSource(
 				_ = session.Close()
 				return authenticatedConnection{}, err
 			}
-			return authenticatedConnection{session: session, peerID: peerID}, nil
+			return authenticatedConnection{session: session, peerID: peerID, relayed: true}, nil
 		}
 	}
 	return firstConnection(ctx, direct, relayed)
@@ -85,40 +91,40 @@ func connectTarget(
 	peerID string,
 	clientTLS *tls.Config,
 	maxPayload uint32,
-) (network.Session, error) {
+) (targetConnection, error) {
 	transport, err := network.NewTLSTransport(clientTLS, maxPayload)
 	if err != nil {
-		return nil, err
+		return targetConnection{}, err
 	}
 	session, directErr := transport.Connect(ctx, credential.Endpoint)
 	directConnected := directErr == nil
 	if directErr == nil {
 		directErr = network.AuthenticatePeerClient(ctx, session, 1, authenticationToken, peerID)
 		if directErr == nil {
-			return session, nil
+			return targetConnection{session: session}, nil
 		}
 		_ = session.Close()
 	}
 	if credential.RelayEndpoint == "" {
 		if directConnected {
-			return nil, directErr
+			return targetConnection{}, directErr
 		}
-		return nil, fmt.Errorf("%w: %v", errConnectionUnavailable, directErr)
+		return targetConnection{}, fmt.Errorf("%w: %v", errConnectionUnavailable, directErr)
 	}
 	session, relayErr := connectRelay(
 		ctx, credential.RelayEndpoint, credential.SessionID, relay.RoleTarget, relayToken, clientTLS, maxPayload,
 	)
 	if relayErr != nil {
 		if directConnected {
-			return nil, fmt.Errorf("direct authentication failed: %v; Relay connection failed: %w", directErr, relayErr)
+			return targetConnection{}, fmt.Errorf("direct authentication failed: %v; Relay connection failed: %w", directErr, relayErr)
 		}
-		return nil, fmt.Errorf("%w: direct connection failed: %v; Relay connection failed: %v", errConnectionUnavailable, directErr, relayErr)
+		return targetConnection{}, fmt.Errorf("%w: direct connection failed: %v; Relay connection failed: %v", errConnectionUnavailable, directErr, relayErr)
 	}
 	if err := network.AuthenticatePeerClient(ctx, session, 1, authenticationToken, peerID); err != nil {
 		_ = session.Close()
-		return nil, fmt.Errorf("authenticate through Relay: %w", err)
+		return targetConnection{}, fmt.Errorf("authenticate through Relay: %w", err)
 	}
-	return session, nil
+	return targetConnection{session: session, relayed: true}, nil
 }
 
 func connectRelay(

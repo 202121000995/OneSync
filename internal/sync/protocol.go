@@ -3,7 +3,6 @@ package sync
 import (
 	"bytes"
 	"context"
-	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,6 +11,12 @@ import (
 	"github.com/202121000995/OneSync/internal/network"
 	"github.com/202121000995/OneSync/internal/scanner"
 )
+
+type planPayload struct {
+	OperationCount int    `json:"operation_count"`
+	StandardFiles  uint64 `json:"standard_files"`
+	StandardBytes  uint64 `json:"standard_bytes"`
+}
 
 func encodeSnapshot(snapshot scanner.Snapshot) ([]byte, error) {
 	return json.Marshal(snapshot)
@@ -49,26 +54,33 @@ func ensureJSONEnd(decoder *json.Decoder) error {
 	return errors.New("snapshot payload contains multiple JSON values")
 }
 
-func sendPlan(ctx context.Context, session network.Session, requestID uint64, count int) error {
-	if count < 0 || count > MaxOperations {
+func sendPlan(ctx context.Context, session network.Session, requestID uint64, plan planPayload) error {
+	if plan.OperationCount < 0 || plan.OperationCount > MaxOperations {
 		return errors.New("sync plan operation count is invalid")
 	}
-	payload := make([]byte, 4)
-	binary.BigEndian.PutUint32(payload, uint32(count))
+	payload, err := json.Marshal(plan)
+	if err != nil {
+		return fmt.Errorf("encode sync plan: %w", err)
+	}
 	return session.Send(ctx, network.Message{
 		Type: network.MessageSyncPlan, RequestID: requestID, Payload: payload,
 	})
 }
 
-func decodePlan(payload []byte) (int, error) {
-	if len(payload) != 4 {
-		return 0, errors.New("sync plan payload must contain 4 bytes")
+func decodePlan(payload []byte) (planPayload, error) {
+	var plan planPayload
+	decoder := json.NewDecoder(bytes.NewReader(payload))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&plan); err != nil {
+		return planPayload{}, fmt.Errorf("decode sync plan: %w", err)
 	}
-	count := binary.BigEndian.Uint32(payload)
-	if count > MaxOperations {
-		return 0, fmt.Errorf("sync plan contains %d operations, limit is %d", count, MaxOperations)
+	if err := ensureJSONEnd(decoder); err != nil {
+		return planPayload{}, err
 	}
-	return int(count), nil
+	if plan.OperationCount < 0 || plan.OperationCount > MaxOperations {
+		return planPayload{}, fmt.Errorf("sync plan contains %d operations, limit is %d", plan.OperationCount, MaxOperations)
+	}
+	return plan, nil
 }
 
 func expectAck(ctx context.Context, session network.Session, requestID uint64) error {

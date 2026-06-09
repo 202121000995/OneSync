@@ -104,6 +104,59 @@ func TestEngineReportsFileProgress(t *testing.T) {
 	}
 }
 
+func TestEngineReportsFolderSizes(t *testing.T) {
+	sourceRoot := t.TempDir()
+	targetRoot := t.TempDir()
+	writeEngineFile(t, filepath.Join(sourceRoot, "a.txt"), []byte("aaaa"))
+	writeEngineFile(t, filepath.Join(sourceRoot, "nested", "b.txt"), []byte("bbbbbb"))
+	writeEngineFile(t, filepath.Join(targetRoot, "old.txt"), []byte("old"))
+
+	sourceConnection, targetConnection := net.Pipe()
+	sourceSession, err := network.NewSession(sourceConnection, network.DefaultMaxPayload)
+	if err != nil {
+		t.Fatalf("NewSession(source) error = %v", err)
+	}
+	targetSession, err := network.NewSession(targetConnection, network.DefaultMaxPayload)
+	if err != nil {
+		t.Fatalf("NewSession(target) error = %v", err)
+	}
+	defer sourceSession.Close()
+	defer targetSession.Close()
+
+	sourceRecorder := &progressRecorder{}
+	targetRecorder := &progressRecorder{}
+	sourceEngine, err := DefaultSourceEngine(sourceRoot, sourceSession, sourceRecorder)
+	if err != nil {
+		t.Fatalf("DefaultSourceEngine() error = %v", err)
+	}
+	targetEngine, err := DefaultTargetEngine(targetRoot, targetSession, targetRecorder)
+	if err != nil {
+		t.Fatalf("DefaultTargetEngine() error = %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	targetErrors := make(chan error, 1)
+	go func() {
+		targetErrors <- targetEngine.Run(ctx, "task-size")
+	}()
+	if err := sourceEngine.Run(ctx, "task-size"); err != nil {
+		t.Fatalf("source Run() error = %v", err)
+	}
+	if err := <-targetErrors; err != nil {
+		t.Fatalf("target Run() error = %v", err)
+	}
+
+	sourceSize := sourceRecorder.latestSize()
+	if sourceSize.localBytes != 10 || sourceSize.standardBytes != 10 || sourceSize.localFiles != 2 || sourceSize.standardFiles != 2 {
+		t.Fatalf("source size = %+v", sourceSize)
+	}
+	targetSize := targetRecorder.latestSize()
+	if targetSize.localBytes != 13 || targetSize.standardBytes != 10 || targetSize.localFiles != 3 || targetSize.standardFiles != 2 {
+		t.Fatalf("target size = %+v", targetSize)
+	}
+}
+
 func TestCycleGroupMergesConcurrentTaskRuns(t *testing.T) {
 	var group cycleGroup
 	var calls atomic.Int32
@@ -272,6 +325,7 @@ func assertEngineFile(t *testing.T, filePath string, want []byte) {
 
 type progressRecorder struct {
 	values []progress.Snapshot
+	sizes  []sizeRecord
 }
 
 func (r *progressRecorder) SetProgress(_ context.Context, snapshot progress.Snapshot) error {
@@ -283,4 +337,28 @@ func (r *progressRecorder) snapshots() []progress.Snapshot {
 	values := make([]progress.Snapshot, len(r.values))
 	copy(values, r.values)
 	return values
+}
+
+func (r *progressRecorder) SetSizes(_ context.Context, localBytes, standardBytes, localFiles, standardFiles uint64) error {
+	r.sizes = append(r.sizes, sizeRecord{
+		localBytes:    localBytes,
+		standardBytes: standardBytes,
+		localFiles:    localFiles,
+		standardFiles: standardFiles,
+	})
+	return nil
+}
+
+func (r *progressRecorder) latestSize() sizeRecord {
+	if len(r.sizes) == 0 {
+		return sizeRecord{}
+	}
+	return r.sizes[len(r.sizes)-1]
+}
+
+type sizeRecord struct {
+	localBytes    uint64
+	standardBytes uint64
+	localFiles    uint64
+	standardFiles uint64
 }

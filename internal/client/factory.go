@@ -170,6 +170,16 @@ func (r *runner) runCycle(ctx context.Context, taskID string, reporter task.Stat
 		}
 		session := meteredSession{base: connection.session, reporter: trafficReporter(reporter)}
 		defer session.Close()
+		setDevice(ctx, reporter, task.DeviceStats{
+			Connected:     1,
+			Total:         1,
+			PeerID:        connection.peerID,
+			Endpoint:      credential.Endpoint,
+			RelayEndpoint: credential.RelayEndpoint,
+			Connection:    connectionLabel(connection.relayed),
+			TLS:           "TLS 1.3",
+			ClientVersion: "OneSync",
+		})
 		addLog(ctx, reporter, "info", "连接成功")
 		if err := reportState(ctx, reporter, task.StateSyncing); err != nil {
 			return err
@@ -190,7 +200,7 @@ func (r *runner) runCycle(ctx context.Context, taskID string, reporter task.Stat
 	if err != nil {
 		return err
 	}
-	session, err := connectTarget(
+	connection, err := connectTarget(
 		ctx,
 		credential,
 		token,
@@ -202,8 +212,18 @@ func (r *runner) runCycle(ctx context.Context, taskID string, reporter task.Stat
 	if err != nil {
 		return err
 	}
-	session = meteredSession{base: session, reporter: trafficReporter(reporter)}
+	session := meteredSession{base: connection.session, reporter: trafficReporter(reporter)}
 	defer session.Close()
+	setDevice(ctx, reporter, task.DeviceStats{
+		Connected:     1,
+		Total:         1,
+		PeerID:        credential.PeerID,
+		Endpoint:      credential.Endpoint,
+		RelayEndpoint: credential.RelayEndpoint,
+		Connection:    connectionLabel(connection.relayed),
+		TLS:           "TLS 1.3",
+		ClientVersion: "OneSync",
+	})
 	addLog(ctx, reporter, "info", "连接成功")
 	if err := reportState(ctx, reporter, task.StateSyncing); err != nil {
 		return err
@@ -261,6 +281,21 @@ func reportState(ctx context.Context, reporter task.StateReporter, state string)
 func progressReporter(reporter task.StateReporter) sync.ProgressReporter {
 	progressReporter, _ := reporter.(sync.ProgressReporter)
 	return progressReporter
+}
+
+func setDevice(ctx context.Context, reporter task.StateReporter, details task.DeviceStats) {
+	deviceReporter, ok := reporter.(task.DeviceReporter)
+	if !ok {
+		return
+	}
+	_ = deviceReporter.SetDevice(ctx, details)
+}
+
+func connectionLabel(relayed bool) string {
+	if relayed {
+		return "Relay"
+	}
+	return "直连"
 }
 
 func trafficReporter(reporter task.StateReporter) task.TrafficReporter {

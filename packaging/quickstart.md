@@ -53,6 +53,8 @@ The Windows package includes `OneSync.exe` for normal use. Double-click it on so
 - Linux target: run `./start-target.sh`, then paste the generated link.
 - Linux Relay: `./make-relay-cert.sh`, then `./start-relay.sh`.
 
+On Windows, `OneSync.exe` runs as a tray application. Closing or minimizing the browser page does not stop synchronization. Use the tray icon to open OneSync again or exit the service.
+
 Build the three programs:
 
 ```sh

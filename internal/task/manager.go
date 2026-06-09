@@ -33,6 +33,16 @@ type TrafficReporter interface {
 	AddTraffic(ctx context.Context, receivedBytes, sentBytes uint64) error
 }
 
+// SizeReporter lets long-running runners publish folder size counters.
+type SizeReporter interface {
+	SetSizes(ctx context.Context, localBytes, standardBytes, localFiles, standardFiles uint64) error
+}
+
+// DeviceReporter lets long-running runners publish peer and connection details.
+type DeviceReporter interface {
+	SetDevice(ctx context.Context, details DeviceStats) error
+}
+
 // LogReporter lets long-running runners publish task events.
 type LogReporter interface {
 	AddLog(ctx context.Context, level, message string) error
@@ -344,6 +354,20 @@ func (r taskStateReporter) AddTraffic(ctx context.Context, receivedBytes, sentBy
 	return r.manager.addTraffic(r.taskID, receivedBytes, sentBytes)
 }
 
+func (r taskStateReporter) SetSizes(ctx context.Context, localBytes, standardBytes, localFiles, standardFiles uint64) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return r.manager.setSizes(r.taskID, localBytes, standardBytes, localFiles, standardFiles)
+}
+
+func (r taskStateReporter) SetDevice(ctx context.Context, details DeviceStats) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return r.manager.setDevice(r.taskID, details)
+}
+
 func (r taskStateReporter) AddLog(ctx context.Context, level, message string) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -393,6 +417,60 @@ func (m *Manager) setProgress(taskID string, snapshot progress.Snapshot) error {
 	task := m.tasks[taskID]
 	previous := task
 	task.Progress = &snapshot
+	task.UpdatedAt = m.now().UTC()
+	m.tasks[taskID] = task
+	if err := m.store.save(m.tasks); err != nil {
+		m.tasks[taskID] = previous
+		return err
+	}
+	return nil
+}
+
+func (m *Manager) setSizes(taskID string, localBytes, standardBytes, localFiles, standardFiles uint64) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	task, exists := m.tasks[taskID]
+	if !exists {
+		return ErrTaskNotFound
+	}
+	previous := task
+	task.Size = SizeStats{
+		LocalBytes:    localBytes,
+		StandardBytes: standardBytes,
+		LocalFiles:    localFiles,
+		StandardFiles: standardFiles,
+	}
+	task.UpdatedAt = m.now().UTC()
+	m.tasks[taskID] = task
+	if err := m.store.save(m.tasks); err != nil {
+		m.tasks[taskID] = previous
+		return err
+	}
+	return nil
+}
+
+func (m *Manager) setDevice(taskID string, details DeviceStats) error {
+	if details.Total == 0 {
+		details.Total = 1
+	}
+	if details.Connected > details.Total {
+		details.Total = details.Connected
+	}
+	if details.TLS == "" {
+		details.TLS = "TLS 1.3"
+	}
+	if err := validateDeviceStats(details); err != nil {
+		return err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	task, exists := m.tasks[taskID]
+	if !exists {
+		return ErrTaskNotFound
+	}
+	previous := task
+	details.LastSeen = m.now().UTC()
+	task.Devices = details
 	task.UpdatedAt = m.now().UTC()
 	m.tasks[taskID] = task
 	if err := m.store.save(m.tasks); err != nil {

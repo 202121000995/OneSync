@@ -53,6 +53,9 @@ func TestWebScriptKeepsReadinessRegressionsCovered(t *testing.T) {
 		"已重新扫描并启动同步",
 		"参数已保存",
 		"formatRate",
+		"formatBytes",
+		"deviceCountLabel",
+		"设备详情",
 		"删除",
 		"不会删除你的同步目录文件",
 	}
@@ -82,6 +85,7 @@ func TestWebPageKeepsTaskTableAsMainSurface(t *testing.T) {
 		"名称",
 		"状态",
 		"同步设备",
+		"设备详情",
 		"本地大小",
 		"标准大小",
 		"接收流量",

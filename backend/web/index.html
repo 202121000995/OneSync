@@ -52,6 +52,7 @@
               <th>名称</th>
               <th>状态</th>
               <th>同步设备</th>
+              <th>设备详情</th>
               <th>本地大小</th>
               <th>标准大小</th>
               <th>接收流量</th>
@@ -131,6 +132,16 @@
       <form method="dialog">
         <h2>任务日志</h2>
         <div id="logs-list" class="logs-list">暂无日志。</div>
+        <div class="dialog-actions">
+          <button class="secondary" type="submit">关闭</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="devices-dialog">
+      <form method="dialog">
+        <h2 id="devices-title">设备详情</h2>
+        <div id="devices-body" class="devices-body">暂无设备信息。</div>
         <div class="dialog-actions">
           <button class="secondary" type="submit">关闭</button>
         </div>

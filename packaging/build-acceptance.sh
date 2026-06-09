@@ -32,7 +32,7 @@ build() {
 
 cd "$ROOT"
 
-build windows amd64 onesync-windows-amd64.exe ./cmd/onesync "-X main.version=$commit"
+build windows amd64 onesync-windows-amd64.exe ./cmd/onesync "-H windowsgui -X main.version=$commit"
 build windows amd64 onesync-cert-windows-amd64.exe ./cmd/onesync-cert
 build linux amd64 onesync-linux-amd64 ./cmd/onesync "-X main.version=$commit"
 build linux amd64 onesync-cert-linux-amd64 ./cmd/onesync-cert

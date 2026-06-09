@@ -98,6 +98,9 @@ func main() {
 	defer stop()
 	managementURL := fmt.Sprintf("http://127.0.0.1:%d", *port)
 	log.Printf("OneSync management page: %s", managementURL)
+	if err := platform.StartTray(ctx, managementURL, stop); err != nil {
+		log.Printf("Start tray icon: %v", err)
+	}
 	go func() {
 		time.Sleep(200 * time.Millisecond)
 		if err := platform.OpenBrowser(managementURL); err != nil {

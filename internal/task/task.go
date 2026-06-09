@@ -37,6 +37,8 @@ type Task struct {
 	Progress    *progress.Snapshot `json:"progress,omitempty"`
 	IgnoreRules []string           `json:"ignore_rules,omitempty"`
 	Traffic     TrafficStats       `json:"traffic,omitempty"`
+	Size        SizeStats          `json:"size,omitempty"`
+	Devices     DeviceStats        `json:"devices,omitempty"`
 	Logs        []LogEntry         `json:"logs,omitempty"`
 	CreatedAt   time.Time          `json:"created_at"`
 	UpdatedAt   time.Time          `json:"updated_at"`
@@ -46,6 +48,27 @@ type Task struct {
 type TrafficStats struct {
 	ReceivedBytes uint64 `json:"received_bytes,omitempty"`
 	SentBytes     uint64 `json:"sent_bytes,omitempty"`
+}
+
+// SizeStats stores the latest folder size view for one task.
+type SizeStats struct {
+	LocalBytes    uint64 `json:"local_bytes,omitempty"`
+	StandardBytes uint64 `json:"standard_bytes,omitempty"`
+	LocalFiles    uint64 `json:"local_files,omitempty"`
+	StandardFiles uint64 `json:"standard_files,omitempty"`
+}
+
+// DeviceStats stores the latest known peer and connection view for one task.
+type DeviceStats struct {
+	Connected     uint64    `json:"connected,omitempty"`
+	Total         uint64    `json:"total,omitempty"`
+	PeerID        string    `json:"peer_id,omitempty"`
+	Endpoint      string    `json:"endpoint,omitempty"`
+	RelayEndpoint string    `json:"relay_endpoint,omitempty"`
+	Connection    string    `json:"connection,omitempty"`
+	TLS           string    `json:"tls,omitempty"`
+	ClientVersion string    `json:"client_version,omitempty"`
+	LastSeen      time.Time `json:"last_seen,omitempty"`
 }
 
 // LogEntry records a task lifecycle event for the management page.
@@ -101,6 +124,9 @@ func validateTask(task Task) error {
 	if err := validateLogs(task.Logs); err != nil {
 		return err
 	}
+	if err := validateDeviceStats(task.Devices); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -145,6 +171,18 @@ func validateLogs(logs []LogEntry) error {
 		}
 		if strings.ContainsRune(entry.Message, '\x00') {
 			return errors.New("task log message contains null byte")
+		}
+	}
+	return nil
+}
+
+func validateDeviceStats(devices DeviceStats) error {
+	for _, value := range []string{devices.PeerID, devices.Endpoint, devices.RelayEndpoint, devices.Connection, devices.TLS, devices.ClientVersion} {
+		if len(value) > 2048 {
+			return errors.New("device detail exceeds 2048 characters")
+		}
+		if strings.ContainsRune(value, '\x00') {
+			return errors.New("device detail contains null byte")
 		}
 	}
 	return nil

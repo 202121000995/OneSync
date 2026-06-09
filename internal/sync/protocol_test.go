@@ -1,7 +1,6 @@
 package sync
 
 import (
-	"encoding/binary"
 	"testing"
 
 	"github.com/202121000995/OneSync/internal/scanner"
@@ -42,8 +41,7 @@ func TestDecodeSnapshotRejectsUnknownFields(t *testing.T) {
 }
 
 func TestDecodePlanRejectsTooManyOperations(t *testing.T) {
-	payload := make([]byte, 4)
-	binary.BigEndian.PutUint32(payload, MaxOperations+1)
+	payload := []byte(`{"operation_count":1000001}`)
 	if _, err := decodePlan(payload); err == nil {
 		t.Fatal("decodePlan() accepted too many operations")
 	}

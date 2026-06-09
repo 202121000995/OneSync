@@ -33,6 +33,11 @@ type ProgressReporter interface {
 	SetProgress(ctx context.Context, snapshot progress.Snapshot) error
 }
 
+// SizeReporter receives task folder size snapshots.
+type SizeReporter interface {
+	SetSizes(ctx context.Context, localBytes, standardBytes, localFiles, standardFiles uint64) error
+}
+
 // Engine runs one source or target synchronization cycle.
 type Engine struct {
 	role             string
@@ -134,6 +139,10 @@ func (e *Engine) runSource(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("scan source: %w", err)
 	}
+	sourceFiles, sourceBytes := snapshotSize(sourceSnapshot)
+	if err := e.reportSizes(ctx, sourceBytes, sourceBytes, sourceFiles, sourceFiles); err != nil {
+		return err
+	}
 	operations, err := e.differ.Compare(sourceSnapshot, targetSnapshot)
 	if err != nil {
 		return fmt.Errorf("compare snapshots: %w", err)
@@ -146,7 +155,11 @@ func (e *Engine) runSource(ctx context.Context) error {
 	}
 
 	const planRequestID uint64 = 2
-	if err := sendPlan(ctx, e.session, planRequestID, len(operations)); err != nil {
+	if err := sendPlan(ctx, e.session, planRequestID, planPayload{
+		OperationCount: len(operations),
+		StandardFiles:  sourceFiles,
+		StandardBytes:  sourceBytes,
+	}); err != nil {
 		return err
 	}
 	if err := expectAck(ctx, e.session, planRequestID); err != nil {
@@ -201,6 +214,10 @@ func (e *Engine) runTarget(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("scan target: %w", err)
 	}
+	targetFiles, targetBytes := snapshotSize(targetSnapshot)
+	if err := e.reportSizes(ctx, targetBytes, 0, targetFiles, 0); err != nil {
+		return err
+	}
 	payload, err := encodeSnapshot(targetSnapshot)
 	if err != nil {
 		return fmt.Errorf("encode target snapshot: %w", err)
@@ -218,11 +235,14 @@ func (e *Engine) runTarget(ctx context.Context) error {
 	if planMessage.Type != network.MessageSyncPlan {
 		return errors.New("expected sync plan")
 	}
-	operationCount, err := decodePlan(planMessage.Payload)
+	plan, err := decodePlan(planMessage.Payload)
 	if err != nil {
-		return fmt.Errorf("decode sync plan: %w", err)
+		return err
 	}
-	if err := e.reportProgress(ctx, progress.Snapshot{TotalFiles: operationCount}); err != nil {
+	if err := e.reportSizes(ctx, targetBytes, plan.StandardBytes, targetFiles, plan.StandardFiles); err != nil {
+		return err
+	}
+	if err := e.reportProgress(ctx, progress.Snapshot{TotalFiles: plan.OperationCount}); err != nil {
 		return err
 	}
 	if err := e.session.Send(ctx, network.Message{
@@ -231,12 +251,12 @@ func (e *Engine) runTarget(ctx context.Context) error {
 		return fmt.Errorf("acknowledge sync plan: %w", err)
 	}
 
-	for index := range operationCount {
+	for index := range plan.OperationCount {
 		if err := e.receiver.ReceiveFile(ctx, e.session); err != nil {
 			return fmt.Errorf("receive file: %w", err)
 		}
 		if err := e.reportProgress(ctx, progress.Snapshot{
-			TotalFiles:     operationCount,
+			TotalFiles:     plan.OperationCount,
 			CompletedFiles: index + 1,
 		}); err != nil {
 			return err
@@ -250,6 +270,14 @@ func (e *Engine) runTarget(ctx context.Context) error {
 	if complete.Type != network.MessageSyncComplete {
 		return errors.New("expected sync completion")
 	}
+	finalSnapshot, err := e.scanner.Scan(ctx, e.root)
+	if err != nil {
+		return fmt.Errorf("scan target after sync: %w", err)
+	}
+	finalFiles, finalBytes := snapshotSize(finalSnapshot)
+	if err := e.reportSizes(ctx, finalBytes, plan.StandardBytes, finalFiles, plan.StandardFiles); err != nil {
+		return err
+	}
 	return e.session.Send(ctx, network.Message{
 		Type: network.MessageAck, RequestID: complete.RequestID,
 	})
@@ -260,6 +288,26 @@ func (e *Engine) reportProgress(ctx context.Context, snapshot progress.Snapshot)
 		return nil
 	}
 	return e.progressReporter.SetProgress(ctx, snapshot)
+}
+
+func (e *Engine) reportSizes(ctx context.Context, localBytes, standardBytes, localFiles, standardFiles uint64) error {
+	reporter, ok := e.progressReporter.(SizeReporter)
+	if !ok {
+		return nil
+	}
+	return reporter.SetSizes(ctx, localBytes, standardBytes, localFiles, standardFiles)
+}
+
+func snapshotSize(snapshot scanner.Snapshot) (uint64, uint64) {
+	var files uint64
+	var bytes uint64
+	for _, entry := range snapshot.Files {
+		files++
+		if entry.Size > 0 {
+			bytes += uint64(entry.Size)
+		}
+	}
+	return files, bytes
 }
 
 type cycleCall struct {

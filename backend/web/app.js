@@ -6,6 +6,7 @@ const createDialog = document.querySelector("#create-dialog");
 const joinDialog = document.querySelector("#join-dialog");
 const settingsDialog = document.querySelector("#settings-dialog");
 const logsDialog = document.querySelector("#logs-dialog");
+const devicesDialog = document.querySelector("#devices-dialog");
 const aboutDialog = document.querySelector("#about-dialog");
 const settingsForm = document.querySelector("#settings-form");
 const linkForm = document.querySelector("#link-form");
@@ -20,6 +21,8 @@ const settingsButton = document.querySelector("#toolbar-settings");
 const deleteButton = document.querySelector("#toolbar-delete");
 const settingsSummary = document.querySelector("#settings-summary");
 const logsList = document.querySelector("#logs-list");
+const devicesTitle = document.querySelector("#devices-title");
+const devicesBody = document.querySelector("#devices-body");
 const aboutVersion = document.querySelector("#about-version");
 const defaultConfig = { sync_port: 7443, direct_tls_configured: false, direct_tls_hosts: [], direct_tls_endpoints: [], version: "dev" };
 const sourceLinksStorageKey = "onesync.sourceLinks.v1";
@@ -79,6 +82,7 @@ function renderTaskRow(task, rate = {}) {
   appendCell(row, taskNameCell(task));
   appendCell(row, statusCell(task));
   appendCell(row, syncDeviceCell(task));
+  appendCell(row, deviceDetailCell(task));
   appendCell(row, localSizeLabel(task));
   appendCell(row, standardSizeLabel(task));
   appendCell(row, formatRate(rate.received || 0), "muted");
@@ -89,7 +93,7 @@ function renderTaskRow(task, rate = {}) {
 function emptyTaskRow() {
   const row = document.createElement("tr");
   const cell = document.createElement("td");
-  cell.colSpan = 9;
+  cell.colSpan = 10;
   cell.className = "empty-row";
   cell.textContent = "还没有同步任务。点击右上角“创建同步”或“加入同步”开始。";
   row.append(cell);
@@ -141,8 +145,26 @@ function statusCell(task) {
 }
 
 function syncDeviceCell(task) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "link-button";
+  button.textContent = deviceCountLabel(task);
+  button.title = "查看设备详情";
+  button.addEventListener("click", (event) => {
+    event.stopPropagation();
+    openDevicesDialog(task);
+  });
+  return button;
+}
+
+function deviceDetailCell(task) {
   const box = document.createElement("div");
   box.className = "device-cell";
+  const details = actionButton("详情", (event) => {
+    event.stopPropagation();
+    openDevicesDialog(task);
+  }, { compact: true, secondary: true });
+  box.append(details);
   if (task.role === "source") {
     const savedLink = savedSourceLink(task.id);
     const button = actionButton(savedLink ? "复制链接" : "生成链接", async (event) => {
@@ -163,19 +185,24 @@ function syncDeviceCell(task) {
       box.append(show);
     }
   } else {
-    box.textContent = task.peer_address || task.relay_url || "已加入";
+    const address = document.createElement("span");
+    address.className = "muted mini-detail";
+    address.textContent = task.peer_address || task.relay_url || "已加入";
+    box.append(address);
   }
   return box;
 }
 
 function localSizeLabel(task) {
-  if (!task.progress || task.progress.total_files === 0) return "-";
-  return `${task.progress.completed_files}/${task.progress.total_files} 个文件`;
+  const size = task.size || {};
+  if (!size.local_bytes && !size.local_files) return "-";
+  return `${formatBytes(size.local_bytes || 0)}${size.local_files ? ` · ${size.local_files} 个文件` : ""}`;
 }
 
 function standardSizeLabel(task) {
-  if (!task.progress || task.progress.total_files === 0) return "-";
-  return `${task.progress.total_files} 个文件`;
+  const size = task.size || {};
+  if (!size.standard_bytes && !size.standard_files) return "-";
+  return `${formatBytes(size.standard_bytes || 0)}${size.standard_files ? ` · ${size.standard_files} 个文件` : ""}`;
 }
 
 function selectTask(taskId) {
@@ -347,6 +374,62 @@ function openLogsDialog() {
   logsDialog.showModal();
 }
 
+function openDevicesDialog(task) {
+  devicesTitle.textContent = `设备详情 - ${task.id}`;
+  const devices = task.devices || {};
+  const rows = [
+    ["状态", stateLabel(task.state)],
+    ["同步设备", deviceCountLabel(task)],
+    ["连接", devices.connection || "等待连接"],
+    ["源端地址", devices.endpoint || task.peer_address || "-"],
+    ["Relay 地址", devices.relay_endpoint || task.relay_url || "-"],
+    ["加密", devices.tls || "TLS 1.3"],
+    ["客户端", devices.client_version || `OneSync ${appConfig.version || "dev"}`],
+    ["最近连接", devices.last_seen ? new Date(devices.last_seen).toLocaleString() : "-"],
+    ["累计接收", formatBytes((task.traffic || {}).received_bytes || 0)],
+    ["累计发送", formatBytes((task.traffic || {}).sent_bytes || 0)],
+  ];
+  const table = document.createElement("table");
+  table.className = "detail-table";
+  for (const [label, value] of rows) {
+    const row = document.createElement("tr");
+    appendCell(row, label, "muted");
+    appendCell(row, value || "-");
+    table.append(row);
+  }
+  const children = [table];
+  if (task.role === "source") {
+    const savedLink = savedSourceLink(task.id);
+    const actions = document.createElement("div");
+    actions.className = "inline-actions device-actions";
+    actions.append(actionButton(savedLink ? "复制源端链接" : "生成源端链接", async () => {
+      if (savedLink) {
+        await navigator.clipboard.writeText(savedLink.link);
+        notify("源端链接已复制");
+      } else {
+        devicesDialog.close();
+        issueLink(task.id);
+      }
+    }, { secondary: true }));
+    if (savedLink) {
+      actions.append(actionButton("显示源端链接", () => {
+        devicesDialog.close();
+        showSavedLink(task.id, savedLink);
+      }, { secondary: true }));
+    }
+    children.push(actions);
+  }
+  devicesBody.replaceChildren(...children);
+  devicesDialog.showModal();
+}
+
+function deviceCountLabel(task) {
+  const devices = task.devices || {};
+  const total = Math.max(Number(devices.total || 0), 1);
+  const connected = Math.min(Number(devices.connected || 0), total);
+  return `${connected} / ${total}`;
+}
+
 function renderLogEntry(entry) {
   const row = document.createElement("p");
   row.className = `log-entry ${entry.level || "info"}`;
@@ -391,6 +474,18 @@ function formatRate(bytesPerSecond) {
     unit++;
   }
   return `${value < 10 && unit > 0 ? value.toFixed(2) : Math.round(value)} ${units[unit]}`;
+}
+
+function formatBytes(bytes) {
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let value = Number(bytes || 0);
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit++;
+  }
+  if (unit === 0) return `${Math.round(value)} ${units[unit]}`;
+  return `${value < 10 ? value.toFixed(2) : value.toFixed(1)} ${units[unit]}`;
 }
 
 async function runTaskAction(id, action) {
