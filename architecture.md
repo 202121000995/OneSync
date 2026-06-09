@@ -548,6 +548,8 @@ V1 不引入数据库。配置与任务状态使用本地文件持久化：
     - 增加 `-sync-port`，统一管理生成链接候选端口。
 18. `feature/source-readiness`
     - 在管理页提示源端直连 TLS 证书是否已加载。
+19. `feature/quickstart-readiness-guide`
+    - 补充两机验收 quickstart 的证书、端口、Relay 和排障说明。
 
 ## 16. 待确认项
 
