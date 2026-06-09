@@ -7,6 +7,7 @@ const generatedLink = document.querySelector("#generated-link");
 const endpointSuggestions = document.querySelector("#endpoint-suggestions");
 const connectionResult = document.querySelector("#connection-result");
 const testLinkButton = document.querySelector("#test-link");
+let appConfig = { sync_port: 7443 };
 
 async function api(path, options = {}) {
   const response = await fetch(path, {
@@ -98,6 +99,7 @@ async function taskAction(id, action) {
 function issueLink(taskId) {
   linkForm.reset();
   linkForm.elements.task_id.value = taskId;
+  linkForm.elements.endpoint.placeholder = `例如：192.168.1.10:${appConfig.sync_port}`;
   generatedLink.value = "";
   renderEndpointSuggestions([]);
   dialog.showModal();
@@ -126,7 +128,7 @@ linkForm.addEventListener("submit", async (event) => {
 async function loadEndpointSuggestions() {
   endpointSuggestions.textContent = "正在查找本机地址";
   try {
-    const { suggestions } = await api("/api/endpoint-suggestions?port=7443", { headers: {} });
+    const { suggestions } = await api(`/api/endpoint-suggestions?port=${encodeURIComponent(appConfig.sync_port)}`, { headers: {} });
     renderEndpointSuggestions(suggestions || []);
   } catch (error) {
     endpointSuggestions.textContent = "无法读取本机地址，请手动填写";
@@ -241,5 +243,13 @@ document.querySelector("#copy-link").addEventListener("click", async () => {
 });
 document.querySelector("#close-link-dialog").addEventListener("click", () => dialog.close());
 
-loadTasks();
+async function loadConfig() {
+  try {
+    appConfig = await api("/api/config", { headers: {} });
+  } catch (error) {
+    notify(error.message);
+  }
+}
+
+loadConfig().finally(loadTasks);
 setInterval(loadTasks, 3000);

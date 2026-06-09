@@ -21,7 +21,10 @@ import (
 	"github.com/202121000995/OneSync/internal/task"
 )
 
-const maxRequestBody = 1 << 20
+const (
+	maxRequestBody  = 1 << 20
+	DefaultSyncPort = 7443
+)
 
 //go:embed web/*
 var webFiles embed.FS
@@ -52,6 +55,7 @@ func (localEndpointSuggester) Suggestions(port int) ([]string, error) {
 type Options struct {
 	ConnectionTester  connectionTester
 	EndpointSuggester endpointSuggester
+	SyncPort          int
 }
 
 // Server provides the local management API and web page.
@@ -61,6 +65,7 @@ type Server struct {
 	credentials       *auth.CredentialStore
 	connectionTester  connectionTester
 	endpointSuggester endpointSuggester
+	syncPort          int
 	handler           http.Handler
 }
 
@@ -80,12 +85,20 @@ func NewServerWithOptions(manager taskManager, links *auth.LinkService, credenti
 		credentials:       credentials,
 		connectionTester:  options.ConnectionTester,
 		endpointSuggester: options.EndpointSuggester,
+		syncPort:          options.SyncPort,
+	}
+	if server.syncPort == 0 {
+		server.syncPort = DefaultSyncPort
+	}
+	if server.syncPort < 1 || server.syncPort > 65535 {
+		return nil, errors.New("sync port is invalid")
 	}
 	if server.endpointSuggester == nil {
 		server.endpointSuggester = localEndpointSuggester{}
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/tasks", server.listTasks)
+	mux.HandleFunc("GET /api/config", server.config)
 	mux.HandleFunc("GET /api/endpoint-suggestions", server.endpointSuggestions)
 	mux.HandleFunc("POST /api/tasks", server.createTask)
 	mux.HandleFunc("POST /api/tasks/{id}/start", server.startTask)
@@ -144,8 +157,12 @@ func (s *Server) listTasks(writer http.ResponseWriter, request *http.Request) {
 	writeJSON(writer, http.StatusOK, map[string]any{"tasks": tasks})
 }
 
+func (s *Server) config(writer http.ResponseWriter, _ *http.Request) {
+	writeJSON(writer, http.StatusOK, map[string]any{"sync_port": s.syncPort})
+}
+
 func (s *Server) endpointSuggestions(writer http.ResponseWriter, request *http.Request) {
-	port := 7443
+	port := s.syncPort
 	if rawPort := strings.TrimSpace(request.URL.Query().Get("port")); rawPort != "" {
 		parsedPort, err := strconv.Atoi(rawPort)
 		if err != nil {

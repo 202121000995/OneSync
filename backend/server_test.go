@@ -190,6 +190,62 @@ func TestEndpointSuggestionsAPI(t *testing.T) {
 	}
 }
 
+func TestEndpointSuggestionsAPIDefaultsToConfiguredPort(t *testing.T) {
+	manager := &fakeManager{tasks: make(map[string]task.Task)}
+	credentials, err := auth.NewCredentialStore(filepath.Join(t.TempDir(), "credentials"))
+	if err != nil {
+		t.Fatalf("NewCredentialStore() error = %v", err)
+	}
+	suggester := &fakeEndpointSuggester{}
+	server, err := NewServerWithOptions(manager, auth.NewLinkService(), credentials, Options{
+		EndpointSuggester: suggester,
+		SyncPort:          9443,
+	})
+	if err != nil {
+		t.Fatalf("NewServerWithOptions() error = %v", err)
+	}
+	request := httptest.NewRequest(http.MethodGet, "http://127.0.0.1/api/endpoint-suggestions", nil)
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+	if suggester.port != 9443 {
+		t.Fatalf("suggestion port = %d, want 9443", suggester.port)
+	}
+}
+
+func TestConfigAPIReportsSyncPort(t *testing.T) {
+	manager := &fakeManager{tasks: make(map[string]task.Task)}
+	credentials, err := auth.NewCredentialStore(filepath.Join(t.TempDir(), "credentials"))
+	if err != nil {
+		t.Fatalf("NewCredentialStore() error = %v", err)
+	}
+	server, err := NewServerWithOptions(manager, auth.NewLinkService(), credentials, Options{
+		SyncPort: 9443,
+	})
+	if err != nil {
+		t.Fatalf("NewServerWithOptions() error = %v", err)
+	}
+	request := httptest.NewRequest(http.MethodGet, "http://127.0.0.1/api/config", nil)
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !bytes.Contains(response.Body.Bytes(), []byte(`"sync_port":9443`)) {
+		t.Fatalf("config response status = %d, body = %s", response.Code, response.Body.String())
+	}
+}
+
+func TestServerRejectsInvalidSyncPort(t *testing.T) {
+	manager := &fakeManager{tasks: make(map[string]task.Task)}
+	credentials, err := auth.NewCredentialStore(filepath.Join(t.TempDir(), "credentials"))
+	if err != nil {
+		t.Fatalf("NewCredentialStore() error = %v", err)
+	}
+	if _, err := NewServerWithOptions(manager, auth.NewLinkService(), credentials, Options{SyncPort: 70000}); err == nil {
+		t.Fatal("NewServerWithOptions() accepted invalid sync port")
+	}
+}
+
 func TestEndpointSuggestionsAPIRejectsInvalidPort(t *testing.T) {
 	server := newTestServer(t)
 	request := httptest.NewRequest(http.MethodGet, "http://127.0.0.1/api/endpoint-suggestions?port=bad", nil)

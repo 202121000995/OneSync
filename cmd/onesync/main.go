@@ -26,6 +26,7 @@ func main() {
 		log.Fatal(err)
 	}
 	port := flag.Int("port", 8765, "local management port")
+	syncPort := flag.Int("sync-port", backend.DefaultSyncPort, "default TLS synchronization port suggested by the management page")
 	dataDir := flag.String("data-dir", defaultDataDir, "OneSync data directory")
 	certificatePath := flag.String("cert", "", "TLS certificate file for source tasks")
 	privateKeyPath := flag.String("key", "", "TLS private key file for source tasks")
@@ -75,6 +76,7 @@ func main() {
 	}
 	server, err := backend.NewServerWithOptions(manager, auth.NewLinkService(), credentials, backend.Options{
 		ConnectionTester: connectionTester,
+		SyncPort:         *syncPort,
 	})
 	if err != nil {
 		log.Fatal(err)

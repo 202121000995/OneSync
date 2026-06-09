@@ -57,6 +57,8 @@ Create a source task and choose the folder to send. Click "生成链接". In the
 192.168.1.10:7443
 ```
 
+Suggested endpoints use port `7443` by default. Start `onesync` with `-sync-port 9443` if you want the management page to suggest a different synchronization port.
+
 Leave the Relay address empty for direct mode. Copy the generated link.
 
 On the target computer:
