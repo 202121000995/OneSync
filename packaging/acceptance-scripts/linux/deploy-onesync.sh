@@ -121,7 +121,7 @@ case "$ACTION" in
 		;;
 	upgrade)
 		need_command onesyncctl
-		GH_PROXY=$GH_PROXY onesyncctl upgrade
+		GH_PROXY=$GH_PROXY RELEASE_TAG=$RELEASE_TAG PACKAGE_URL=$PACKAGE_URL onesyncctl upgrade
 		;;
 	uninstall)
 		need_command onesyncctl

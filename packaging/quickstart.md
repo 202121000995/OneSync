@@ -54,9 +54,11 @@ The Windows package includes `OneSync.exe` for normal use. Double-click it on so
 - Linux Relay: `./make-relay-cert.sh`, then `./start-relay.sh`.
 
 On Windows, `OneSync.exe` runs as a tray application. Closing or minimizing the browser page does not stop synchronization. Use the tray icon to open OneSync again or exit the service.
+The Windows package also includes helper scripts: `Open-OneSync.cmd` opens the management page, `Open-Logs-Folder.cmd` opens the default service log folder, and `Collect-Diagnostics.cmd` downloads a diagnostics zip from the running OneSync service.
 
 In the task table, select one task and click "参数" to edit ignore rules. The parameters dialog can append default templates, test one sample path, and preview ignored files. Select one task and open "日志" to copy or download a diagnostic report. If no task is selected, the diagnostic report includes all tasks.
-Use "设备管理" to rename, disable, enable, or kick the device bound to a task. Use "连接管理" to inspect direct and Relay addresses, recent errors, task statistics, and copy diagnostics. Use the left "设置" page to confirm the current version, management address, sync port, sync interval, data directory, and direct TLS status.
+Use "设备管理" to rename, disable, enable, or kick the device bound to a task. Use "连接管理" to inspect direct and Relay addresses, recent errors, task statistics, and copy diagnostics. Use the left "设置" page to confirm the current version, management address, sync port, sync interval, data directory, service log path, and direct TLS status.
+The "日志", "连接管理", and "设置" dialogs can download a diagnostics zip. The zip includes `diagnostics.txt` and the service log tail, but not task credentials or synchronization tokens.
 
 For Linux service-style testing, use the included control commands from the extracted Linux package:
 
@@ -69,6 +71,13 @@ sudo onesyncctl stop
 sudo onesyncctl restart
 sudo onesyncctl upgrade
 sudo onesyncctl uninstall
+```
+
+To upgrade a Linux client without relying on GitHub API auto-discovery, pass a fixed release tag or a direct Linux package URL:
+
+```sh
+sudo env RELEASE_TAG=acceptance-22ae3cf GH_PROXY=https://gh-proxy.org onesyncctl upgrade
+sudo env PACKAGE_URL=https://gh-proxy.org/https://github.com/202121000995/OneSync/releases/download/acceptance-22ae3cf/onesync-acceptance-linux-amd64-22ae3cf.tar.gz onesyncctl upgrade
 ```
 
 The Linux service listens on `0.0.0.0:8765` by default and requires a management account. Open `http://server-ip:8765`, then set the account and password on first access. To keep it local-only instead, install with `sudo ONESYNC_WEB_BIND=127.0.0.1 ./onesyncctl install`.
@@ -137,6 +146,13 @@ sudo onesync-relayctl stop
 sudo onesync-relayctl restart
 sudo onesync-relayctl upgrade
 sudo onesync-relayctl uninstall
+```
+
+To upgrade Relay without relying on GitHub API auto-discovery, pass a fixed release tag or a direct Linux package URL:
+
+```sh
+sudo env RELEASE_TAG=acceptance-22ae3cf GH_PROXY=https://gh-proxy.org onesync-relayctl upgrade
+sudo env PACKAGE_URL=https://gh-proxy.org/https://github.com/202121000995/OneSync/releases/download/acceptance-22ae3cf/onesync-acceptance-linux-amd64-22ae3cf.tar.gz onesync-relayctl upgrade
 ```
 
 `RELAY_HOSTS` is written into the Relay TLS certificate. It should contain the Relay domain or public IP, without the port. `RELAY_PORT` controls the listening port. `RELAY_TOKEN` controls who can use the Relay server. When creating a synchronization link, enter the Relay TLS address as `host:port`, for example `203.0.113.10:443`, and enter the Relay token shown by `sudo onesync-relayctl token`.

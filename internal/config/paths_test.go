@@ -23,6 +23,9 @@ func TestNewPathsBuildsStandardLocations(t *testing.T) {
 	if paths.WebAuthStore != filepath.Join(root, "web-auth.json") {
 		t.Fatalf("WebAuthStore = %q", paths.WebAuthStore)
 	}
+	if paths.LogFile != filepath.Join(root, "logs", "onesync.log") {
+		t.Fatalf("LogFile = %q", paths.LogFile)
+	}
 	if paths.AutomaticCertPath != filepath.Join(root, "certs", "source.crt") {
 		t.Fatalf("AutomaticCertPath = %q", paths.AutomaticCertPath)
 	}

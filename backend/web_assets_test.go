@@ -71,6 +71,7 @@ func TestWebScriptKeepsReadinessRegressionsCovered(t *testing.T) {
 		"诊断日志已复制",
 		"copyVisibleLogs",
 		"downloadVisibleLogs",
+		"downloadDiagnosticsPackage",
 		"globalDeviceSummaries",
 		"setDeviceTrusted",
 		"openDeviceManager",
@@ -85,6 +86,7 @@ func TestWebScriptKeepsReadinessRegressionsCovered(t *testing.T) {
 		"错误分类",
 		"管理页地址",
 		"同步间隔",
+		"服务日志",
 	}
 	for _, text := range required {
 		if !strings.Contains(script, text) {
@@ -119,6 +121,7 @@ func TestWebPageKeepsTaskTableAsMainSurface(t *testing.T) {
 		"目标端仍只需要粘贴这一段同步链接",
 		"复制诊断",
 		"下载诊断",
+		"下载诊断包",
 		"踢出设备",
 		"全局设备",
 		"复制全部诊断",

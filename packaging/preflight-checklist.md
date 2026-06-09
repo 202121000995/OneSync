@@ -66,11 +66,15 @@ Prepare a small source folder before the first sync:
 - [ ] One nested folder with a file inside.
 - [ ] One empty file.
 - [ ] One larger file if the network is stable enough for the run.
+- [ ] At least 100 small files if testing multi-file stability.
 
 Prepare target-only and conflict checks:
 
 - [ ] Create one file that exists only on the target. It should remain after sync.
 - [ ] Create one file with the same relative path on source and target but different content. The source version should win.
+- [ ] After the first successful sync, change one source file and confirm the target updates.
+- [ ] After the first successful sync, delete one source file and confirm the target copy is not automatically deleted.
+- [ ] If using Relay, restart Relay during a later cycle and confirm source/target logs show reconnect attempts or recovery.
 
 ## 6. Evidence to keep
 
@@ -78,6 +82,7 @@ Keep these with the acceptance report:
 
 - [ ] `PACKAGE-SHA256SUMS.txt`.
 - [ ] `BUILD.txt`.
+- [ ] Diagnostics zip downloaded from "日志", "连接管理", "设置", or `Collect-Diagnostics.cmd`.
 - [ ] Source log.
 - [ ] Target log.
 - [ ] Relay log, if used.

@@ -1777,3 +1777,36 @@
 剩余风险：
 
 - 如果服务器策略禁止写入 `/usr/bin`，安装仍会失败；这种环境需要通过 `ONESYNC_COMMAND_LINK_DIR` 指定允许写入的命令目录。
+
+## 升级兜底、Windows 诊断和稳定性验收审核
+
+审核分支：`feature/upgrade-windows-diagnostics-stability`
+
+审核结论：通过。
+
+审核说明：
+
+- Linux 客户端 `onesyncctl upgrade` 支持 `RELEASE_TAG` / `ONESYNC_RELEASE_TAG` 和 `PACKAGE_URL` / `ONESYNC_LINUX_PACKAGE_URL`。
+- Linux Relay `onesync-relayctl upgrade` 支持同样的固定版本和直接包地址升级方式。
+- `deploy-onesync.sh upgrade` 与 `deploy-relaytls.sh upgrade` 会把 `GH_PROXY`、`RELEASE_TAG` 和 `PACKAGE_URL` 透传给对应控制命令。
+- OneSync 主程序在未显式传入 `-log-file` 时，默认写入数据目录下的 `logs/onesync.log`，Windows 直接双击 exe 也能留下服务日志。
+- 管理页新增 `/api/diagnostics.zip`，包含 `diagnostics.txt` 和 `service-log.txt` 日志尾部，不打包凭据文件或同步令牌。
+- “日志”“连接管理”“设置”窗口新增下载诊断包按钮，设置页显示服务日志路径。
+- Windows 验收包新增 `Open-OneSync.cmd`、`Open-Logs-Folder.cmd`、`Collect-Diagnostics.cmd` 和 `Collect-Diagnostics.ps1`。
+- 同步引擎新增回归测试，确认同路径冲突由源端覆盖，同时源端删除不会自动删除目标端已有文件。
+- 预检清单和验收报告补充多文件、大文件、Relay 重启恢复、源端删除保留目标端和诊断包证据项。
+
+验证结果：
+
+- `sh -n packaging/acceptance-scripts/linux/onesyncctl` 通过。
+- `sh -n packaging/acceptance-scripts/linux/onesync-relayctl` 通过。
+- `sh -n packaging/acceptance-scripts/linux/deploy-onesync.sh` 通过。
+- `sh -n packaging/acceptance-scripts/linux/deploy-relaytls.sh` 通过。
+- `go test ./backend ./cmd/onesync ./internal/config ./internal/sync` 通过。
+- `go test ./...` 通过。
+- `git diff --check` 通过。
+
+剩余风险：
+
+- 诊断包目前只包含客户端服务日志尾部；Relay 服务器日志仍需在 Relay 机器通过 `onesync-relayctl logs` 或服务器日志文件单独收集。
+- Windows 辅助脚本依赖本机管理页运行在默认 `127.0.0.1:8765`；如果用户改了管理端口，需要从页面内下载诊断包。

@@ -11,6 +11,8 @@ SYNC_PORT=${ONESYNC_SYNC_PORT:-7443}
 WEB_BIND=${ONESYNC_WEB_BIND:-0.0.0.0}
 REPO=${ONESYNC_REPO:-202121000995/OneSync}
 GH_PROXY=${GH_PROXY:-}
+RELEASE_TAG=${ONESYNC_RELEASE_TAG:-${RELEASE_TAG:-}}
+PACKAGE_URL=${ONESYNC_LINUX_PACKAGE_URL:-${PACKAGE_URL:-}}
 
 need_root() {
 	if [ "$(id -u)" -ne 0 ]; then
@@ -48,6 +50,12 @@ proxy_url() {
 		printf '%s' "$url"
 		return
 	fi
+	case "$url" in
+		"$GH_PROXY"*)
+			printf '%s' "$url"
+			return
+			;;
+	esac
 	case "$GH_PROXY" in
 		*/)
 			printf '%s%s' "$GH_PROXY" "$url"
@@ -56,6 +64,22 @@ proxy_url() {
 			printf '%s/%s' "$GH_PROXY" "$url"
 			;;
 	esac
+}
+
+latest_linux_package_url() {
+	if [ -n "$PACKAGE_URL" ]; then
+		printf '%s\n' "$PACKAGE_URL"
+		return
+	fi
+	if [ -n "$RELEASE_TAG" ]; then
+		release_commit=${RELEASE_TAG#acceptance-}
+		printf 'https://github.com/%s/releases/download/%s/onesync-acceptance-linux-amd64-%s.tar.gz\n' "$REPO" "$RELEASE_TAG" "$release_commit"
+		return
+	fi
+	api="https://api.github.com/repos/$REPO/releases/latest"
+	curl -fsSL "$(proxy_url "$api")" |
+		sed -n 's/.*"browser_download_url": "\(.*onesync-acceptance-linux-amd64.*\.tar\.gz\)".*/\1/p' |
+		head -n 1
 }
 
 install_service() {
@@ -106,10 +130,10 @@ upgrade_service() {
 	tmp=${TMPDIR:-/tmp}/onesync-upgrade-$$
 	mkdir -p "$tmp"
 	trap 'rm -rf "$tmp"' EXIT
-	api="https://api.github.com/repos/$REPO/releases/latest"
-	url=$(curl -fsSL "$(proxy_url "$api")" | sed -n 's/.*"browser_download_url": "\(.*onesync-acceptance-linux-amd64.*\.tar\.gz\)".*/\1/p' | head -n 1)
+	url=$(latest_linux_package_url)
 	if [ -z "$url" ]; then
-		printf 'Cannot find latest Linux package from %s.\n' "$api" >&2
+		printf 'Cannot find latest Linux package from GitHub repo %s.\n' "$REPO" >&2
+		printf 'Retry with RELEASE_TAG=acceptance-xxxxxxx or PACKAGE_URL=https://...tar.gz.\n' >&2
 		exit 1
 	fi
 	curl -fL "$(proxy_url "$url")" -o "$tmp/onesync-linux.tar.gz"

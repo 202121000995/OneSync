@@ -1,15 +1,18 @@
 package backend
 
 import (
+	"archive/zip"
 	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -461,6 +464,7 @@ func TestConfigAPIReportsSyncPort(t *testing.T) {
 		ManagementBind:      "0.0.0.0",
 		ManagementPort:      8766,
 		DataDir:             "/tmp/onesync-test",
+		LogFile:             "/tmp/onesync-test/logs/onesync.log",
 		SyncInterval:        15 * time.Second,
 		DirectTLSConfigured: true,
 		DirectTLSHosts:      []string{"192.168.1.10", "source.local"},
@@ -476,11 +480,61 @@ func TestConfigAPIReportsSyncPort(t *testing.T) {
 		!bytes.Contains(response.Body.Bytes(), []byte(`"management_bind":"0.0.0.0"`)) ||
 		!bytes.Contains(response.Body.Bytes(), []byte(`"management_port":8766`)) ||
 		!bytes.Contains(response.Body.Bytes(), []byte(`"data_dir":"/tmp/onesync-test"`)) ||
+		!bytes.Contains(response.Body.Bytes(), []byte(`"log_file":"/tmp/onesync-test/logs/onesync.log"`)) ||
 		!bytes.Contains(response.Body.Bytes(), []byte(`"sync_interval":"15s"`)) ||
 		!bytes.Contains(response.Body.Bytes(), []byte(`"direct_tls_configured":true`)) ||
 		!bytes.Contains(response.Body.Bytes(), []byte(`"direct_tls_hosts":["192.168.1.10","source.local"]`)) ||
 		!bytes.Contains(response.Body.Bytes(), []byte(`"direct_tls_endpoints":["192.168.1.10:9443","source.local:9443"]`)) {
 		t.Fatalf("config response status = %d, body = %s", response.Code, response.Body.String())
+	}
+}
+
+func TestDiagnosticsPackageIncludesTextAndLogTail(t *testing.T) {
+	manager := &fakeManager{tasks: map[string]task.Task{
+		"source": {ID: "source", Role: task.RoleSource, SourcePath: "/private/source"},
+	}}
+	credentials, err := auth.NewCredentialStore(filepath.Join(t.TempDir(), "credentials"))
+	if err != nil {
+		t.Fatalf("NewCredentialStore() error = %v", err)
+	}
+	logPath := filepath.Join(t.TempDir(), "onesync.log")
+	if err := os.WriteFile(logPath, []byte("service started\nsync completed\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	server, err := NewServerWithOptions(manager, auth.NewLinkService(), credentials, Options{
+		LogFile: logPath,
+	})
+	if err != nil {
+		t.Fatalf("NewServerWithOptions() error = %v", err)
+	}
+	request := httptest.NewRequest(http.MethodGet, "http://127.0.0.1/api/diagnostics.zip", nil)
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+	reader, err := zip.NewReader(bytes.NewReader(response.Body.Bytes()), int64(response.Body.Len()))
+	if err != nil {
+		t.Fatalf("zip.NewReader() error = %v", err)
+	}
+	entries := make(map[string]string)
+	for _, file := range reader.File {
+		opened, err := file.Open()
+		if err != nil {
+			t.Fatalf("Open(%s) error = %v", file.Name, err)
+		}
+		data, err := io.ReadAll(opened)
+		_ = opened.Close()
+		if err != nil {
+			t.Fatalf("ReadAll(%s) error = %v", file.Name, err)
+		}
+		entries[file.Name] = string(data)
+	}
+	if !strings.Contains(entries["diagnostics.txt"], "任务: source") {
+		t.Fatalf("diagnostics.txt = %q", entries["diagnostics.txt"])
+	}
+	if !strings.Contains(entries["service-log.txt"], "sync completed") {
+		t.Fatalf("service-log.txt = %q", entries["service-log.txt"])
 	}
 }
 

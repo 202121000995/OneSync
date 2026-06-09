@@ -78,6 +78,10 @@ Relay command:
 | First sync completes | Target receives source files |  |  |
 | Modified source file updates target | Source version wins |  |  |
 | Target-only file remains | File is not deleted |  |  |
+| Deleted source file does not delete target copy | Target copy remains |  |  |
+| Multi-file sync completes | 100+ small files complete without missing files |  |  |
+| Large file sync completes | Large file hash or size matches |  |  |
+| Diagnostics package downloads | Zip contains diagnostics and service log tail |  |  |
 
 ## Relay checklist
 
@@ -90,6 +94,7 @@ Relay command:
 | Direct path unavailable or disabled | Direct may fail when expected |  |  |
 | Relay fallback succeeds | Target sync completes through Relay |  |  |
 | Relay-only source works without `-cert/-key` | Link generation requires Relay field |  |  |
+| Relay restart during later cycle | Client logs show retry/recovery or a clear failure reason |  |  |
 
 ## Negative checks
 
@@ -117,6 +122,7 @@ Record the source files used for the run.
 - Source logs:
 - Target logs:
 - Relay logs:
+- Diagnostics zip:
 - Screenshots:
 - Generated link time:
 - Test connection output:

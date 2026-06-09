@@ -34,6 +34,36 @@ func TestEngineSynchronizesCreateAndUpdateAndPreservesTargetOnly(t *testing.T) {
 	}
 }
 
+func TestEngineUsesSourceAsAuthorityButDoesNotDeleteTargetOnlyFiles(t *testing.T) {
+	sourceRoot := t.TempDir()
+	targetRoot := t.TempDir()
+	sourceShared := filepath.Join(sourceRoot, "shared.txt")
+	sourceRemoved := filepath.Join(sourceRoot, "removed-on-source.txt")
+	targetShared := filepath.Join(targetRoot, "shared.txt")
+	targetRemoved := filepath.Join(targetRoot, "removed-on-source.txt")
+	targetOnly := filepath.Join(targetRoot, "target-only.txt")
+
+	writeEngineFile(t, sourceShared, []byte("source-v1"))
+	writeEngineFile(t, sourceRemoved, []byte("source-will-remove"))
+	writeEngineFile(t, targetShared, []byte("target-v1"))
+	writeEngineFile(t, targetOnly, []byte("keep-target-only"))
+	runEnginePair(t, sourceRoot, targetRoot, "task-authority")
+
+	assertEngineFile(t, targetShared, []byte("source-v1"))
+	assertEngineFile(t, targetRemoved, []byte("source-will-remove"))
+	assertEngineFile(t, targetOnly, []byte("keep-target-only"))
+
+	writeEngineFile(t, sourceShared, []byte("source-v2"))
+	if err := os.Remove(sourceRemoved); err != nil {
+		t.Fatalf("Remove() error = %v", err)
+	}
+	runEnginePair(t, sourceRoot, targetRoot, "task-authority")
+
+	assertEngineFile(t, targetShared, []byte("source-v2"))
+	assertEngineFile(t, targetRemoved, []byte("source-will-remove"))
+	assertEngineFile(t, targetOnly, []byte("keep-target-only"))
+}
+
 func TestEngineHandlesNoChanges(t *testing.T) {
 	sourceRoot := t.TempDir()
 	targetRoot := t.TempDir()

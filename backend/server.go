@@ -1,6 +1,7 @@
 package backend
 
 import (
+	"archive/zip"
 	"context"
 	"crypto/rand"
 	"crypto/tls"
@@ -15,6 +16,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -124,6 +126,7 @@ type Options struct {
 	ManagementBind       string
 	ManagementPort       int
 	DataDir              string
+	LogFile              string
 	SyncInterval         time.Duration
 	DirectTLSConfigured  bool
 	DirectTLSHosts       []string
@@ -146,6 +149,7 @@ type Server struct {
 	managementBind       string
 	managementPort       int
 	dataDir              string
+	logFile              string
 	syncInterval         time.Duration
 	directTLSConfigured  bool
 	directTLSHosts       []string
@@ -177,6 +181,7 @@ func NewServerWithOptions(manager taskManager, links *syncauth.LinkService, cred
 		managementBind:       strings.TrimSpace(options.ManagementBind),
 		managementPort:       options.ManagementPort,
 		dataDir:              options.DataDir,
+		logFile:              options.LogFile,
 		syncInterval:         options.SyncInterval,
 		directTLSConfigured:  options.DirectTLSConfigured,
 		directTLSHosts:       append([]string(nil), options.DirectTLSHosts...),
@@ -218,6 +223,7 @@ func NewServerWithOptions(manager taskManager, links *syncauth.LinkService, cred
 	mux.HandleFunc("GET /api/tasks", server.listTasks)
 	mux.HandleFunc("GET /api/config", server.config)
 	mux.HandleFunc("GET /api/diagnostics", server.allDiagnostics)
+	mux.HandleFunc("GET /api/diagnostics.zip", server.diagnosticsPackage)
 	mux.HandleFunc("GET /api/ignore/templates", server.ignoreTemplates)
 	mux.HandleFunc("GET /api/endpoint-suggestions", server.endpointSuggestions)
 	mux.HandleFunc("POST /api/tasks", server.createTask)
@@ -368,6 +374,7 @@ func (s *Server) config(writer http.ResponseWriter, _ *http.Request) {
 		"management_bind":       s.managementBind,
 		"management_port":       s.managementPort,
 		"data_dir":              s.dataDir,
+		"log_file":              s.logFile,
 		"sync_interval":         s.syncInterval.String(),
 		"direct_tls_configured": s.directTLSConfigured,
 		"direct_tls_hosts":      directTLSHosts,
@@ -637,6 +644,71 @@ func (s *Server) allDiagnostics(writer http.ResponseWriter, request *http.Reques
 		return
 	}
 	writeText(writer, http.StatusOK, s.diagnosticText(tasks))
+}
+
+func (s *Server) diagnosticsPackage(writer http.ResponseWriter, request *http.Request) {
+	tasks, err := s.manager.List(request.Context())
+	if err != nil {
+		writeAPIError(writer, http.StatusInternalServerError, err)
+		return
+	}
+	writer.Header().Set("Content-Type", "application/zip")
+	writer.Header().Set("Content-Disposition", fmt.Sprintf(
+		`attachment; filename="onesync-diagnostics-%s.zip"`,
+		time.Now().UTC().Format("20060102-150405"),
+	))
+	archive := zip.NewWriter(writer)
+	defer archive.Close()
+	if err := addZipText(archive, "diagnostics.txt", s.diagnosticText(tasks)); err != nil {
+		return
+	}
+	if s.logFile == "" {
+		_ = addZipText(archive, "service-log.txt", "未配置服务日志文件。\n")
+		return
+	}
+	logTail, err := readTail(s.logFile, 256*1024)
+	if err != nil {
+		_ = addZipText(archive, "service-log.txt", fmt.Sprintf("读取服务日志失败: %v\n日志路径: %s\n", err, s.logFile))
+		return
+	}
+	_ = addZipText(archive, "service-log.txt", logTail)
+}
+
+func addZipText(archive *zip.Writer, name, content string) error {
+	file, err := archive.Create(name)
+	if err != nil {
+		return err
+	}
+	_, err = file.Write([]byte(content))
+	return err
+}
+
+func readTail(path string, limit int64) (string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return "", err
+	}
+	offset := int64(0)
+	if info.Size() > limit {
+		offset = info.Size() - limit
+	}
+	if _, err := file.Seek(offset, io.SeekStart); err != nil {
+		return "", err
+	}
+	data, err := io.ReadAll(file)
+	if err != nil {
+		return "", err
+	}
+	prefix := fmt.Sprintf("日志路径: %s\n日志截取: 最近 %d 字节\n\n", path, len(data))
+	if offset > 0 {
+		prefix = fmt.Sprintf("日志路径: %s\n日志截取: 最后 %d 字节，前面内容已省略\n\n", path, len(data))
+	}
+	return prefix + string(data), nil
 }
 
 func (s *Server) issueLink(writer http.ResponseWriter, request *http.Request) {
@@ -921,6 +993,7 @@ func (s *Server) diagnosticText(tasks []task.Task) string {
 	fmt.Fprintf(&builder, "版本: %s\n", s.version)
 	fmt.Fprintf(&builder, "管理页监听: %s:%d\n", s.managementBind, s.managementPort)
 	fmt.Fprintf(&builder, "数据目录: %s\n", emptyText(s.dataDir))
+	fmt.Fprintf(&builder, "服务日志: %s\n", emptyText(s.logFile))
 	fmt.Fprintf(&builder, "同步端口: %d\n", s.syncPort)
 	fmt.Fprintf(&builder, "同步间隔: %s\n", s.syncInterval)
 	fmt.Fprintf(&builder, "源端直连 TLS: %s\n", yesNo(s.directTLSConfigured))

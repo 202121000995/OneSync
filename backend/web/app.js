@@ -648,6 +648,28 @@ async function downloadDiagnostics() {
   } catch (error) { notify(error.message); }
 }
 
+async function downloadDiagnosticsPackage() {
+  try {
+    const response = await fetch("/api/diagnostics.zip");
+    if (!response.ok) {
+      let message = "诊断包下载失败";
+      try {
+        const body = await response.json();
+        message = body.error || message;
+      } catch {}
+      throw new Error(message);
+    }
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `onesync-diagnostics-${new Date().toISOString().replace(/[:.]/g, "-")}.zip`;
+    link.click();
+    URL.revokeObjectURL(url);
+    notify("诊断包已下载");
+  } catch (error) { notify(error.message); }
+}
+
 async function copyVisibleLogs() {
   const text = visibleLogs.length ? visibleLogs.map(logLine).join("\n") : "暂无日志。";
   await navigator.clipboard.writeText(text);
@@ -907,6 +929,7 @@ function openAppSettings() {
     ["同步 TLS 端口", appConfig.sync_port || 7443],
     ["同步间隔", appConfig.sync_interval || "30s"],
     ["数据目录", appConfig.data_dir || "-"],
+    ["服务日志", appConfig.log_file || "-"],
     ["源端直连 TLS", appConfig.direct_tls_configured ? "已自动加载" : "未加载"],
     ["证书覆盖地址", (appConfig.direct_tls_hosts || []).length ? (appConfig.direct_tls_hosts || []).join("，") : "-"],
     ["推荐直连地址", (appConfig.direct_tls_endpoints || []).length ? (appConfig.direct_tls_endpoints || []).join("，") : "-"],
@@ -1294,6 +1317,7 @@ document.querySelector("#apply-ignore-template").addEventListener("click", apply
 document.querySelector("#preview-ignore").addEventListener("click", previewIgnoreRules);
 document.querySelector("#copy-diagnostics").addEventListener("click", copyDiagnostics);
 document.querySelector("#download-diagnostics").addEventListener("click", downloadDiagnostics);
+document.querySelector("#download-diagnostics-package").addEventListener("click", downloadDiagnosticsPackage);
 document.querySelector("#copy-visible-logs").addEventListener("click", copyVisibleLogs);
 document.querySelector("#download-visible-logs").addEventListener("click", downloadVisibleLogs);
 logLevelFilter.addEventListener("change", renderLogs);
@@ -1302,10 +1326,12 @@ document.querySelector("#copy-all-diagnostics").addEventListener("click", async 
   selectedTaskId = "";
   await copyDiagnostics();
 });
+document.querySelector("#download-all-diagnostics-package").addEventListener("click", downloadDiagnosticsPackage);
 document.querySelector("#copy-settings-diagnostics").addEventListener("click", async () => {
   selectedTaskId = "";
   await copyDiagnostics();
 });
+document.querySelector("#download-settings-diagnostics-package").addEventListener("click", downloadDiagnosticsPackage);
 settingsForm.addEventListener("submit", saveSettings);
 startStopButton.addEventListener("click", toggleSelectedTask);
 rescanButton.addEventListener("click", rescanSelectedTask);

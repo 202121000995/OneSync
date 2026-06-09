@@ -47,16 +47,20 @@ func main() {
 	syncInterval := flag.Duration("sync-interval", client.DefaultSyncInterval, "time between completed synchronization cycles")
 	flag.Parse()
 
-	logFile, err := configureLogging(*logPath)
+	paths, err := config.NewPaths(*dataDir)
+	if err != nil {
+		log.Fatal(err)
+	}
+	effectiveLogPath := *logPath
+	if effectiveLogPath == "" {
+		effectiveLogPath = paths.LogFile
+	}
+	logFile, err := configureLogging(effectiveLogPath)
 	if err != nil {
 		log.Fatal(err)
 	}
 	if logFile != nil {
 		defer logFile.Close()
-	}
-	paths, err := config.NewPaths(*dataDir)
-	if err != nil {
-		log.Fatal(err)
 	}
 	serverTLS, err := loadOrCreateServerTLS(*certificatePath, *privateKeyPath, paths, *syncPort)
 	if err != nil {
@@ -101,6 +105,7 @@ func main() {
 		ManagementBind:       *webBind,
 		ManagementPort:       *port,
 		DataDir:              *dataDir,
+		LogFile:              effectiveLogPath,
 		SyncInterval:         *syncInterval,
 		DirectTLSConfigured:  serverTLS != nil,
 		DirectTLSHosts:       serverCertificateHosts(serverTLS),

@@ -127,7 +127,7 @@ case "$ACTION" in
 		;;
 	upgrade)
 		need_command onesync-relayctl
-		GH_PROXY=$GH_PROXY onesync-relayctl upgrade
+		GH_PROXY=$GH_PROXY RELEASE_TAG=$RELEASE_TAG PACKAGE_URL=$PACKAGE_URL onesync-relayctl upgrade
 		;;
 	uninstall)
 		need_command onesync-relayctl

@@ -13,6 +13,7 @@ type Paths struct {
 	TaskStore               string
 	CredentialDir           string
 	WebAuthStore            string
+	LogFile                 string
 	AutomaticCertPath       string
 	AutomaticPrivateKeyPath string
 }
@@ -43,6 +44,7 @@ func NewPaths(dataDir string) (Paths, error) {
 		TaskStore:               filepath.Join(absolute, "tasks.json"),
 		CredentialDir:           filepath.Join(absolute, "credentials"),
 		WebAuthStore:            filepath.Join(absolute, "web-auth.json"),
+		LogFile:                 filepath.Join(absolute, "logs", "onesync.log"),
 		AutomaticCertPath:       filepath.Join(absolute, "certs", "source.crt"),
 		AutomaticPrivateKeyPath: filepath.Join(absolute, "certs", "source.key"),
 	}, nil
