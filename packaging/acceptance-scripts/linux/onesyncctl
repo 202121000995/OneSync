@@ -7,6 +7,8 @@ DATA_DIR=${ONESYNC_DATA_DIR:-/var/lib/onesync}
 LOG_DIR=${ONESYNC_LOG_DIR:-/var/log/onesync}
 PORT=${ONESYNC_PORT:-8765}
 SYNC_PORT=${ONESYNC_SYNC_PORT:-7443}
+WEB_BIND=${ONESYNC_WEB_BIND:-0.0.0.0}
+REPO=${ONESYNC_REPO:-202121000995/OneSync}
 
 need_root() {
 	if [ "$(id -u)" -ne 0 ]; then
@@ -40,7 +42,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=$INSTALL_DIR/onesync -data-dir $DATA_DIR -port $PORT -sync-port $SYNC_PORT -log-file $LOG_DIR/onesync.log
+ExecStart=$INSTALL_DIR/onesync -data-dir $DATA_DIR -port $PORT -web-bind $WEB_BIND -web-auth -sync-port $SYNC_PORT -log-file $LOG_DIR/onesync.log
 Restart=on-failure
 RestartSec=5
 
@@ -49,7 +51,43 @@ WantedBy=multi-user.target
 EOF
 	systemctl daemon-reload
 	systemctl enable "$SERVICE"
-	printf 'OneSync installed. Use: onesyncctl start|stop|restart|status|logs|uninstall\n'
+	printf 'OneSync installed. Use: onesyncctl start|stop|restart|status|logs|upgrade|uninstall\n'
+}
+
+upgrade_service() {
+	need_root
+	if ! command -v curl >/dev/null 2>&1 || ! command -v tar >/dev/null 2>&1; then
+		printf 'curl and tar are required for upgrade.\n' >&2
+		exit 1
+	fi
+	tmp=${TMPDIR:-/tmp}/onesync-upgrade-$$
+	mkdir -p "$tmp"
+	trap 'rm -rf "$tmp"' EXIT
+	api="https://api.github.com/repos/$REPO/releases/latest"
+	url=$(curl -fsSL "$api" | sed -n 's/.*"browser_download_url": "\(.*onesync-acceptance-linux-amd64.*\.tar\.gz\)".*/\1/p' | head -n 1)
+	if [ -z "$url" ]; then
+		printf 'Cannot find latest Linux package from %s.\n' "$api" >&2
+		exit 1
+	fi
+	curl -fL "$url" -o "$tmp/onesync-linux.tar.gz"
+	tar -xzf "$tmp/onesync-linux.tar.gz" -C "$tmp"
+	stage=$(find "$tmp" -maxdepth 1 -type d -name 'onesync-acceptance-linux-amd64-*' | head -n 1)
+	if [ -z "$stage" ]; then
+		printf 'Downloaded package has no Linux stage directory.\n' >&2
+		exit 1
+	fi
+	was_active=0
+	if systemctl is-active --quiet "$SERVICE"; then
+		was_active=1
+		systemctl stop "$SERVICE"
+	fi
+	install -m 0755 "$stage/onesync" "$INSTALL_DIR/onesync"
+	install -m 0755 "$stage/onesync-cert" "$INSTALL_DIR/onesync-cert"
+	install -m 0755 "$stage/onesyncctl" "$INSTALL_DIR/onesyncctl"
+	if [ "$was_active" -eq 1 ]; then
+		systemctl start "$SERVICE"
+	fi
+	printf 'OneSync upgraded from %s.\n' "$url"
 }
 
 uninstall_service() {
@@ -84,11 +122,14 @@ case "${1:-status}" in
 	logs)
 		journalctl -u "$SERVICE" -n "${2:-120}" --no-pager
 		;;
+	upgrade)
+		upgrade_service
+		;;
 	uninstall)
 		uninstall_service
 		;;
 	*)
-		printf 'Usage: onesyncctl install|start|run|stop|restart|status|logs|uninstall\n' >&2
+		printf 'Usage: onesyncctl install|start|run|stop|restart|status|logs|upgrade|uninstall\n' >&2
 		exit 2
 		;;
 esac

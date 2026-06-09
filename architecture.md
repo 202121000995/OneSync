@@ -596,6 +596,8 @@ V1 不引入数据库。配置与任务状态使用本地文件持久化：
    - 任务表格展示本地/标准目录体积和可点击设备详情；Windows exe 使用 GUI 子系统、托盘常驻并嵌入图标资源。
 40. `feature/linux-relay-control-and-status-logs`
    - 调整源端/目标端状态文案，增强连接日志，并为 Linux 客户端和 Relay 增加安装及控制命令。
+41. `feature/remote-web-auth-and-upgrade`
+   - Linux service 支持远程管理页访问、首次设置管理账号密码，并为 Linux 客户端和 Relay 控制命令增加 GitHub 升级能力。
 
 ## 16. 待确认项
 

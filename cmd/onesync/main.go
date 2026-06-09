@@ -24,6 +24,7 @@ import (
 	"github.com/202121000995/OneSync/internal/netutil"
 	"github.com/202121000995/OneSync/internal/platform"
 	"github.com/202121000995/OneSync/internal/task"
+	"github.com/202121000995/OneSync/internal/webauth"
 )
 
 var version = "dev"
@@ -34,6 +35,8 @@ func main() {
 		log.Fatal(err)
 	}
 	port := flag.Int("port", 8765, "local management port")
+	webBind := flag.String("web-bind", "127.0.0.1", "management web bind address")
+	webAuthEnabled := flag.Bool("web-auth", false, "require a management account for the web UI")
 	syncPort := flag.Int("sync-port", backend.DefaultSyncPort, "default TLS synchronization port suggested by the management page")
 	dataDir := flag.String("data-dir", defaultDataDir, "OneSync data directory")
 	certificatePath := flag.String("cert", "", "optional custom TLS certificate file for source tasks")
@@ -82,8 +85,13 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	webAuthStore, err := webAuthStore(*dataDir, *webBind, *webAuthEnabled)
+	if err != nil {
+		log.Fatal(err)
+	}
 	server, err := backend.NewServerWithOptions(manager, auth.NewLinkService(), credentials, backend.Options{
 		ConnectionTester:     connectionTester,
+		WebAuth:              webAuthStore,
 		SyncPort:             *syncPort,
 		DirectTLSConfigured:  serverTLS != nil,
 		DirectTLSHosts:       serverCertificateHosts(serverTLS),
@@ -107,9 +115,16 @@ func main() {
 			log.Printf("Open management page manually: %v", err)
 		}
 	}()
-	if err := server.ListenAndServe(ctx, *port); err != nil {
+	if err := server.ListenAndServeOn(ctx, *webBind, *port); err != nil {
 		log.Fatal(err)
 	}
+}
+
+func webAuthStore(dataDir, webBind string, enabled bool) (*webauth.Store, error) {
+	if enabled || webBind != "127.0.0.1" {
+		return webauth.NewStore(filepath.Join(dataDir, "web-auth.json"))
+	}
+	return nil, nil
 }
 
 func configureLogging(logPath string) (*os.File, error) {

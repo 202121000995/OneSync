@@ -17,6 +17,7 @@ import (
 	"github.com/202121000995/OneSync/internal/certutil"
 	"github.com/202121000995/OneSync/internal/diagnostic"
 	"github.com/202121000995/OneSync/internal/task"
+	"github.com/202121000995/OneSync/internal/webauth"
 )
 
 func TestServerServesManagementPage(t *testing.T) {
@@ -80,6 +81,58 @@ func TestTaskAPI(t *testing.T) {
 	}
 	if got := manager.tasks["photos"].IgnoreRules; len(got) != 2 || got[0] != "*.tmp" || got[1] != "cache/" {
 		t.Fatalf("IgnoreRules = %+v", got)
+	}
+}
+
+func TestManagementAuthSetupAndLogin(t *testing.T) {
+	manager := &fakeManager{tasks: make(map[string]task.Task)}
+	credentials, err := auth.NewCredentialStore(filepath.Join(t.TempDir(), "credentials"))
+	if err != nil {
+		t.Fatalf("NewCredentialStore() error = %v", err)
+	}
+	authStore, err := webauth.NewStore(filepath.Join(t.TempDir(), "web-auth.json"))
+	if err != nil {
+		t.Fatalf("NewStore() error = %v", err)
+	}
+	server, err := NewServerWithOptions(manager, auth.NewLinkService(), credentials, Options{
+		WebAuth: authStore,
+	})
+	if err != nil {
+		t.Fatalf("NewServerWithOptions() error = %v", err)
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "http://127.0.0.1/api/tasks", nil)
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated status = %d", response.Code)
+	}
+
+	setup := jsonRequest(http.MethodPost, "http://127.0.0.1/api/auth/setup", map[string]any{
+		"username": "admin", "password": "password123",
+	})
+	response = httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, setup)
+	if response.Code != http.StatusCreated {
+		t.Fatalf("setup status = %d, body = %s", response.Code, response.Body.String())
+	}
+	cookie := response.Result().Cookies()[0]
+
+	request = httptest.NewRequest(http.MethodGet, "http://127.0.0.1/api/tasks", nil)
+	request.AddCookie(cookie)
+	response = httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("authenticated status = %d, body = %s", response.Code, response.Body.String())
+	}
+
+	login := jsonRequest(http.MethodPost, "http://127.0.0.1/api/auth/login", map[string]any{
+		"username": "admin", "password": "wrong-password",
+	})
+	response = httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, login)
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf("bad login status = %d", response.Code)
 	}
 }
 

@@ -64,8 +64,11 @@ sudo onesyncctl status
 sudo onesyncctl logs
 sudo onesyncctl stop
 sudo onesyncctl restart
+sudo onesyncctl upgrade
 sudo onesyncctl uninstall
 ```
+
+The Linux service listens on `0.0.0.0:8765` by default and requires a management account. Open `http://server-ip:8765`, then set the account and password on first access. To keep it local-only instead, install with `sudo ONESYNC_WEB_BIND=127.0.0.1 ./onesyncctl install`.
 
 For a Linux Relay server, set the Relay certificate hosts to the exact domain or IP that source and target computers will use:
 
@@ -76,6 +79,7 @@ sudo onesync-relayctl status
 sudo onesync-relayctl logs
 sudo onesync-relayctl stop
 sudo onesync-relayctl restart
+sudo onesync-relayctl upgrade
 sudo onesync-relayctl uninstall
 ```
 

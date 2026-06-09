@@ -82,6 +82,19 @@
       </form>
     </dialog>
 
+    <dialog id="auth-dialog">
+      <form id="auth-form">
+        <h2 id="auth-title">管理页登录</h2>
+        <p id="auth-hint" class="hint">请输入 OneSync 管理账号。</p>
+        <label>账号<input name="username" required maxlength="64" autocomplete="username" value="admin"></label>
+        <label>密码<input name="password" required minlength="8" maxlength="256" type="password" autocomplete="current-password"></label>
+        <label id="auth-confirm-row">确认密码<input name="confirm_password" minlength="8" maxlength="256" type="password" autocomplete="new-password"></label>
+        <div class="dialog-actions">
+          <button id="auth-submit" type="submit">登录</button>
+        </div>
+      </form>
+    </dialog>
+
     <dialog id="join-dialog">
       <form id="join-form">
         <h2>加入同步</h2>

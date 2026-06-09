@@ -57,6 +57,9 @@ func TestWebScriptKeepsReadinessRegressionsCovered(t *testing.T) {
 		"deviceCountLabel",
 		"运行-连接中",
 		"运行-已连接源端",
+		"初始化管理账号",
+		"/api/auth/setup",
+		"/api/auth/login",
 		"设备详情",
 		"删除",
 		"不会删除你的同步目录文件",
@@ -72,6 +75,7 @@ func TestWebPageKeepsTaskTableAsMainSurface(t *testing.T) {
 	html := readWebAsset(t, "web/index.html")
 	required := []string{
 		"同步任务",
+		"管理页登录",
 		"创建同步",
 		"加入同步",
 		"暂停/开始",

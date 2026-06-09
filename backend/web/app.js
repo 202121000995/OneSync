@@ -3,12 +3,18 @@ const statusText = document.querySelector("#status");
 const toast = document.querySelector("#toast");
 const dialog = document.querySelector("#link-dialog");
 const createDialog = document.querySelector("#create-dialog");
+const authDialog = document.querySelector("#auth-dialog");
 const joinDialog = document.querySelector("#join-dialog");
 const settingsDialog = document.querySelector("#settings-dialog");
 const logsDialog = document.querySelector("#logs-dialog");
 const devicesDialog = document.querySelector("#devices-dialog");
 const aboutDialog = document.querySelector("#about-dialog");
 const settingsForm = document.querySelector("#settings-form");
+const authForm = document.querySelector("#auth-form");
+const authTitle = document.querySelector("#auth-title");
+const authHint = document.querySelector("#auth-hint");
+const authConfirmRow = document.querySelector("#auth-confirm-row");
+const authSubmit = document.querySelector("#auth-submit");
 const linkForm = document.querySelector("#link-form");
 const generatedLink = document.querySelector("#generated-link");
 const endpointSuggestions = document.querySelector("#endpoint-suggestions");
@@ -30,6 +36,7 @@ let appConfig = { ...defaultConfig };
 let tasksCache = [];
 let selectedTaskId = "";
 let trafficSnapshot = { time: Date.now(), tasks: {} };
+let authState = { enabled: false, configured: false, authenticated: true };
 
 async function api(path, options = {}) {
   const response = await fetch(path, {
@@ -37,7 +44,10 @@ async function api(path, options = {}) {
     headers: { "Content-Type": "application/json", ...(options.headers || {}) },
   });
   const body = await response.json();
-  if (!response.ok) throw new Error(body.error || "请求失败");
+  if (!response.ok) {
+    if (response.status === 401) await openAuthDialog();
+    throw new Error(body.error || "请求失败");
+  }
   return body;
 }
 
@@ -48,6 +58,10 @@ function notify(message) {
 }
 
 async function loadTasks() {
+  if (authState.enabled && !authState.authenticated) {
+    statusText.textContent = "等待登录";
+    return;
+  }
   statusText.textContent = "正在加载";
   try {
     const { tasks } = await api("/api/tasks", { headers: {} });
@@ -62,6 +76,52 @@ async function loadTasks() {
     notify(error.message);
   }
 }
+
+async function loadAuthStatus() {
+  authState = await api("/api/auth/status", { headers: {} });
+  if (authState.enabled && !authState.authenticated) await openAuthDialog();
+}
+
+async function openAuthDialog() {
+  try {
+    authState = await fetch("/api/auth/status").then((response) => response.json());
+  } catch {
+    authState = { enabled: true, configured: true, authenticated: false };
+  }
+  if (!authState.enabled || authState.authenticated) return;
+  const setup = !authState.configured;
+  authTitle.textContent = setup ? "初始化管理账号" : "管理页登录";
+  authHint.textContent = setup
+    ? "首次远程访问 OneSync，请先设置管理账号和密码。"
+    : "请输入 OneSync 管理账号密码。";
+  authConfirmRow.hidden = !setup;
+  authForm.elements.confirm_password.required = setup;
+  authSubmit.textContent = setup ? "设置并进入" : "登录";
+  if (!authDialog.open) authDialog.showModal();
+}
+
+authForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const data = new FormData(authForm);
+  const username = String(data.get("username") || "").trim();
+  const password = String(data.get("password") || "");
+  const confirmPassword = String(data.get("confirm_password") || "");
+  const setup = !authState.configured;
+  if (setup && password !== confirmPassword) {
+    notify("两次输入的密码不一致");
+    return;
+  }
+  try {
+    await api(setup ? "/api/auth/setup" : "/api/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ username, password }),
+    });
+    authState = await api("/api/auth/status", { headers: {} });
+    authDialog.close();
+    notify(setup ? "管理账号已设置" : "已登录");
+    loadConfig().finally(loadTasks);
+  } catch (error) { notify(error.message); }
+});
 
 function renderTaskRow(task, rate = {}) {
   const row = document.createElement("tr");
@@ -820,5 +880,5 @@ async function loadConfig() {
   }
 }
 
-loadConfig().finally(loadTasks);
+loadAuthStatus().then(() => loadConfig()).finally(loadTasks);
 setInterval(loadTasks, 3000);

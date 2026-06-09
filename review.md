@@ -1420,5 +1420,34 @@
 
 剩余风险：
 
-- Linux service 模式默认管理页仍绑定 `127.0.0.1`，远程服务器测试需要在服务器本机访问或使用 SSH 端口转发。
+- Linux service 模式远程访问和管理账号已在后续 `feature/remote-web-auth-and-upgrade` 中补齐。
 - Relay 证书自动生成依赖用户正确提供 `RELAY_HOSTS`，必须包含源端和目标端实际填写的 Relay 域名或 IP。
+
+## 远程管理账号与升级命令审核
+
+审核分支：`feature/remote-web-auth-and-upgrade`
+
+审核结论：通过。
+
+审核说明：
+
+- OneSync 主程序新增 `-web-bind`，管理页可从默认 `127.0.0.1` 改为 `0.0.0.0`。
+- OneSync 主程序新增 `-web-auth`，启用后管理 API 需要登录会话。
+- 远程管理首次访问时可在网页里初始化管理账号和密码，未初始化前只允许认证状态和初始化接口。
+- 本地 Windows 默认仍不启用管理账号，不改变当前双击测试体验。
+- Linux service 安装默认使用 `-web-bind 0.0.0.0 -web-auth`，可通过 `ONESYNC_WEB_BIND=127.0.0.1` 改回本机访问。
+- `onesyncctl upgrade` 和 `onesync-relayctl upgrade` 会从 GitHub 最新 Release 下载 Linux 包，替换程序和控制脚本，并按原服务状态重启。
+- Quickstart 已更新远程管理访问、首次设置账号和升级命令。
+
+验证结果：
+
+- `go test ./...` 通过。
+- `go vet ./...` 通过。
+- `git diff --check` 通过。
+- Windows amd64 GUI 主程序交叉编译通过。
+- Linux 控制脚本 `sh -n` 语法检查通过。
+
+剩余风险：
+
+- 当前远程管理页使用 HTTP 加账号登录，适合内网或自行加反向代理 HTTPS；公网正式发布建议配合 HTTPS 或后续内置管理页 TLS。
+- 升级命令依赖 GitHub Latest Release 和 `curl`/`tar`，离线环境仍需手动替换包。
