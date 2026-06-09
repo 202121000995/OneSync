@@ -1531,10 +1531,10 @@
 审核说明：
 
 - 新增 `onesync-menu`，用于安装后提供中文命令菜单。
-- Relay-only 服务器安装后，输入 `onesync` 会显示 Relay 状态、日志、启动、停止、重启、升级和卸载命令及中文含义。
-- 客户端安装后也会安装同一个 `onesync` 菜单。
+- 客户端安装后输入 `onesync` 会显示客户端状态、日志、启动、停止、重启、升级和卸载命令及中文含义。
+- Relay-only 服务器后续改为输入 `onesyncr` 显示 Relay 菜单，避免和客户端主命令冲突。
 - Linux 客户端实际二进制安装为 `onesyncd`，避免和菜单命令冲突。
-- 客户端和 Relay 卸载时会根据另一种服务是否存在决定是否保留菜单命令。
+- 客户端卸载时移除 `onesync` 菜单，Relay 卸载时移除 `onesyncr` 菜单。
 - Linux 验收包会给 `onesync-menu` 设置执行权限，安装后可作为 `/usr/local/bin/onesync` 直接运行。
 - Quickstart 已说明安装后可运行 `onesync` 查看中文命令菜单。
 
@@ -1548,3 +1548,35 @@
 剩余风险：
 
 - 当前菜单是说明型入口，不做交互选择；后续可扩展成数字菜单。
+
+## Linux 客户端一键部署与 Relay 菜单拆分审核
+
+审核分支：`feature/linux-client-deploy-and-relay-menu-split`
+
+审核结论：通过。
+
+审核说明：
+
+- 新增 `deploy-onesync.sh`，用于 Linux 客户端一键下载、安装、启动并输出管理页和常用命令。
+- Linux 客户端一键部署脚本支持 `GH_PROXY`，下载 raw 脚本、GitHub API 和 Release 包时可走代理。
+- Linux 客户端控制脚本 `onesyncctl upgrade` 支持 `GH_PROXY`。
+- Relay 控制脚本 `onesync-relayctl upgrade` 支持 `GH_PROXY`。
+- 客户端简约菜单命令固定为 `onesync`。
+- Relay 简约菜单命令改为 `onesyncr`，并新增 `onesyncr-menu`。
+- Relay 一键部署成功后会提示 `onesyncr`，客户端一键部署成功后会提示 `onesync`。
+- Linux 打包脚本会把 `deploy-onesync.sh` 和 `onesyncr-menu` 放进 Linux tar.gz，并设置执行权限。
+- Quickstart 已补充客户端一键安装直连命令、代理命令，以及 `onesync`/`onesyncr` 的区分。
+
+验证结果：
+
+- `sh -n packaging/acceptance-scripts/linux/deploy-onesync.sh` 通过。
+- `sh -n packaging/acceptance-scripts/linux/deploy-relaytls.sh` 通过。
+- `sh -n packaging/acceptance-scripts/linux/onesync-menu` 通过。
+- `sh -n packaging/acceptance-scripts/linux/onesyncr-menu` 通过。
+- `sh -n packaging/acceptance-scripts/linux/onesyncctl` 通过。
+- `sh -n packaging/acceptance-scripts/linux/onesync-relayctl` 通过。
+- `sh -n packaging/package-acceptance.sh` 通过。
+
+剩余风险：
+
+- Relay 目前仍没有独立的服务器访问密码；同步内容仍受同步链接令牌保护，但公开 Relay 可能被未知客户端尝试占用等待连接资源。

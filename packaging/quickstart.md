@@ -70,7 +70,20 @@ sudo onesyncctl uninstall
 
 The Linux service listens on `0.0.0.0:8765` by default and requires a management account. Open `http://server-ip:8765`, then set the account and password on first access. To keep it local-only instead, install with `sudo ONESYNC_WEB_BIND=127.0.0.1 ./onesyncctl install`.
 
-After installing the Linux client or Relay, run `onesync` to show a Chinese command menu with common status, log, restart, upgrade, and uninstall commands.
+For a Linux client server, use the one-command client deployment script:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/202121000995/OneSync/main/packaging/acceptance-scripts/linux/deploy-onesync.sh | sudo sh
+```
+
+If the server cannot reach GitHub directly, use a GitHub proxy. The proxy is used both to download the deployment script and to download the latest Linux package inside the script:
+
+```sh
+curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/202121000995/OneSync/main/packaging/acceptance-scripts/linux/deploy-onesync.sh | sudo env GH_PROXY=https://gh-proxy.org/ sh
+```
+
+After installing the Linux client, run `onesync` to show the Chinese client command menu with common status, log, restart, upgrade, and uninstall commands.
+After installing the Linux Relay, run `onesyncr` to show the Chinese Relay command menu.
 
 For a Linux Relay server, use the one-command Relay TLS deployment script. `RELAY_HOSTS` is the Relay server domain or public IP without the port, and `RELAY_PORT` is the port clients will use:
 
@@ -83,6 +96,8 @@ If the server cannot reach GitHub directly, use a GitHub proxy. The proxy is use
 ```sh
 curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/202121000995/OneSync/main/packaging/acceptance-scripts/linux/deploy-relaytls.sh | sudo env RELAY_HOSTS=203.0.113.10 RELAY_PORT=443 GH_PROXY=https://gh-proxy.org/ sh
 ```
+
+After Relay deployment, use `onesyncr` to view the Chinese Relay command menu.
 
 After deployment, enter this Relay TLS address when generating a synchronization link:
 

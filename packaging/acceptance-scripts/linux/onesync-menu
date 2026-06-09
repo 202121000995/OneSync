@@ -2,13 +2,9 @@
 set -eu
 
 client_installed=false
-relay_installed=false
 
 if command -v onesyncctl >/dev/null 2>&1; then
 	client_installed=true
-fi
-if command -v onesync-relayctl >/dev/null 2>&1; then
-	relay_installed=true
 fi
 
 cat <<'EOF'
@@ -31,37 +27,19 @@ else
 	cat <<'EOF'
   未安装同步客户端。解压 Linux 包后可执行：
   sudo ./onesyncctl install
-EOF
-fi
 
-cat <<'EOF'
-
-Relay TLS 中转服务：
-EOF
-
-if [ "$relay_installed" = true ]; then
-	cat <<'EOF'
-  sudo onesync-relayctl status    查看 Relay 运行状态
-  sudo onesync-relayctl logs      查看 Relay 最近日志
-  sudo onesync-relayctl start     启动 Relay 服务
-  sudo onesync-relayctl stop      停止 Relay 服务
-  sudo onesync-relayctl restart   重启 Relay 服务
-  sudo onesync-relayctl upgrade   更新 Relay 到 GitHub 最新版本
-  sudo onesync-relayctl uninstall 卸载 Relay 服务，保留证书和日志
-EOF
-else
-	cat <<'EOF'
-  未安装 Relay。推荐一键部署：
-  curl -fsSL https://raw.githubusercontent.com/202121000995/OneSync/main/packaging/acceptance-scripts/linux/deploy-relaytls.sh | sudo env RELAY_HOSTS=你的域名或IP RELAY_PORT=7443 sh
+  或使用一键安装：
+  curl -fsSL https://raw.githubusercontent.com/202121000995/OneSync/main/packaging/acceptance-scripts/linux/deploy-onesync.sh | sudo sh
 
   中国大陆服务器可用代理：
-  curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/202121000995/OneSync/main/packaging/acceptance-scripts/linux/deploy-relaytls.sh | sudo env RELAY_HOSTS=你的域名或IP RELAY_PORT=7443 GH_PROXY=https://gh-proxy.org/ sh
+  curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/202121000995/OneSync/main/packaging/acceptance-scripts/linux/deploy-onesync.sh | sudo env GH_PROXY=https://gh-proxy.org/ sh
 EOF
 fi
 
 cat <<'EOF'
 
 提示：
-  Relay TLS 地址格式是：域名或IP:端口
-  例如：zz.31pk.top:7443
+  管理页默认地址是：http://服务器IP:8765
+  第一次打开会要求设置管理账号和密码。
+  Relay TLS 服务器菜单命令是：onesyncr
 EOF

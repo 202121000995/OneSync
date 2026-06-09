@@ -10,6 +10,7 @@ LISTEN=${ONESYNC_RELAY_LISTEN:-:$RELAY_PORT}
 CERT=${ONESYNC_RELAY_CERT:-$CONFIG_DIR/relay.crt}
 KEY=${ONESYNC_RELAY_KEY:-$CONFIG_DIR/relay.key}
 REPO=${ONESYNC_REPO:-202121000995/OneSync}
+GH_PROXY=${GH_PROXY:-}
 
 need_root() {
 	if [ "$(id -u)" -ne 0 ]; then
@@ -20,6 +21,22 @@ need_root() {
 
 script_dir() {
 	cd -- "$(dirname -- "$0")" && pwd
+}
+
+proxy_url() {
+	url=$1
+	if [ -z "$GH_PROXY" ]; then
+		printf '%s' "$url"
+		return
+	fi
+	case "$GH_PROXY" in
+		*/)
+			printf '%s%s' "$GH_PROXY" "$url"
+			;;
+		*)
+			printf '%s/%s' "$GH_PROXY" "$url"
+			;;
+	esac
 }
 
 default_hosts() {
@@ -38,8 +55,8 @@ install_service() {
 	install -m 0755 "$dir/onesync-relay" "$INSTALL_DIR/onesync-relay"
 	install -m 0755 "$dir/onesync-cert" "$INSTALL_DIR/onesync-cert"
 	install -m 0755 "$0" "$INSTALL_DIR/onesync-relayctl"
-	if [ -x "$dir/onesync-menu" ]; then
-		install -m 0755 "$dir/onesync-menu" "$INSTALL_DIR/onesync"
+	if [ -x "$dir/onesyncr-menu" ]; then
+		install -m 0755 "$dir/onesyncr-menu" "$INSTALL_DIR/onesyncr"
 	fi
 	if [ ! -f "$CERT" ] || [ ! -f "$KEY" ]; then
 		hosts=${RELAY_HOSTS:-$(default_hosts)}
@@ -68,6 +85,7 @@ EOF
 	systemctl enable "$SERVICE"
 	printf 'OneSync Relay installed on %s.\n' "$LISTEN"
 	printf 'Use Relay TLS address: <Relay domain or IP>:%s\n' "${LISTEN##*:}"
+	printf 'Menu command: onesyncr\n'
 	printf 'Use: onesync-relayctl start|stop|restart|status|logs|upgrade|uninstall\n'
 }
 
@@ -81,12 +99,12 @@ upgrade_service() {
 	mkdir -p "$tmp"
 	trap 'rm -rf "$tmp"' EXIT
 	api="https://api.github.com/repos/$REPO/releases/latest"
-	url=$(curl -fsSL "$api" | sed -n 's/.*"browser_download_url": "\(.*onesync-acceptance-linux-amd64.*\.tar\.gz\)".*/\1/p' | head -n 1)
+	url=$(curl -fsSL "$(proxy_url "$api")" | sed -n 's/.*"browser_download_url": "\(.*onesync-acceptance-linux-amd64.*\.tar\.gz\)".*/\1/p' | head -n 1)
 	if [ -z "$url" ]; then
 		printf 'Cannot find latest Linux package from %s.\n' "$api" >&2
 		exit 1
 	fi
-	curl -fL "$url" -o "$tmp/onesync-linux.tar.gz"
+	curl -fL "$(proxy_url "$url")" -o "$tmp/onesync-linux.tar.gz"
 	tar -xzf "$tmp/onesync-linux.tar.gz" -C "$tmp"
 	stage=$(find "$tmp" -maxdepth 1 -type d -name 'onesync-acceptance-linux-amd64-*' | head -n 1)
 	if [ -z "$stage" ]; then
@@ -101,13 +119,14 @@ upgrade_service() {
 	install -m 0755 "$stage/onesync-relay" "$INSTALL_DIR/onesync-relay"
 	install -m 0755 "$stage/onesync-cert" "$INSTALL_DIR/onesync-cert"
 	install -m 0755 "$stage/onesync-relayctl" "$INSTALL_DIR/onesync-relayctl"
-	if [ -x "$stage/onesync-menu" ]; then
-		install -m 0755 "$stage/onesync-menu" "$INSTALL_DIR/onesync"
+	if [ -x "$stage/onesyncr-menu" ]; then
+		install -m 0755 "$stage/onesyncr-menu" "$INSTALL_DIR/onesyncr"
 	fi
 	if [ "$was_active" -eq 1 ]; then
 		systemctl start "$SERVICE"
 	fi
 	printf 'OneSync Relay upgraded from %s.\n' "$url"
+	printf 'Menu command: onesyncr\n'
 }
 
 uninstall_service() {
@@ -116,10 +135,7 @@ uninstall_service() {
 	systemctl disable "$SERVICE" 2>/dev/null || true
 	rm -f /etc/systemd/system/$SERVICE
 	systemctl daemon-reload
-	rm -f "$INSTALL_DIR/onesync-relay" "$INSTALL_DIR/onesync-relayctl"
-	if [ ! -x "$INSTALL_DIR/onesyncctl" ]; then
-		rm -f "$INSTALL_DIR/onesync"
-	fi
+	rm -f "$INSTALL_DIR/onesync-relay" "$INSTALL_DIR/onesync-relayctl" "$INSTALL_DIR/onesyncr"
 	printf 'OneSync Relay uninstalled. Certificate remains at %s and logs remain at %s.\n' "$CONFIG_DIR" "$LOG_DIR"
 }
 

@@ -87,6 +87,8 @@ install_relay() {
 
 	first_host=$(printf '%s' "$RELAY_HOSTS" | cut -d, -f1)
 	printf '\nRelay TLS address for OneSync link:\n%s:%s\n' "$first_host" "$RELAY_PORT"
+	printf '\nCommon menu command:\n'
+	printf '  onesyncr\n'
 	printf '\nCommon commands:\n'
 	printf '  sudo onesync-relayctl status\n'
 	printf '  sudo onesync-relayctl logs\n'
@@ -103,7 +105,7 @@ case "$ACTION" in
 		;;
 	upgrade)
 		need_command onesync-relayctl
-		onesync-relayctl upgrade
+		GH_PROXY=$GH_PROXY onesync-relayctl upgrade
 		;;
 	uninstall)
 		need_command onesync-relayctl

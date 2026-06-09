@@ -9,6 +9,7 @@ PORT=${ONESYNC_PORT:-8765}
 SYNC_PORT=${ONESYNC_SYNC_PORT:-7443}
 WEB_BIND=${ONESYNC_WEB_BIND:-0.0.0.0}
 REPO=${ONESYNC_REPO:-202121000995/OneSync}
+GH_PROXY=${GH_PROXY:-}
 
 need_root() {
 	if [ "$(id -u)" -ne 0 ]; then
@@ -19,6 +20,22 @@ need_root() {
 
 script_dir() {
 	cd -- "$(dirname -- "$0")" && pwd
+}
+
+proxy_url() {
+	url=$1
+	if [ -z "$GH_PROXY" ]; then
+		printf '%s' "$url"
+		return
+	fi
+	case "$GH_PROXY" in
+		*/)
+			printf '%s%s' "$GH_PROXY" "$url"
+			;;
+		*)
+			printf '%s/%s' "$GH_PROXY" "$url"
+			;;
+	esac
 }
 
 install_service() {
@@ -54,7 +71,9 @@ WantedBy=multi-user.target
 EOF
 	systemctl daemon-reload
 	systemctl enable "$SERVICE"
-	printf 'OneSync installed. Use: onesyncctl start|stop|restart|status|logs|upgrade|uninstall\n'
+	printf 'OneSync installed.\n'
+	printf 'Menu command: onesync\n'
+	printf 'Use: onesyncctl start|stop|restart|status|logs|upgrade|uninstall\n'
 }
 
 upgrade_service() {
@@ -67,12 +86,12 @@ upgrade_service() {
 	mkdir -p "$tmp"
 	trap 'rm -rf "$tmp"' EXIT
 	api="https://api.github.com/repos/$REPO/releases/latest"
-	url=$(curl -fsSL "$api" | sed -n 's/.*"browser_download_url": "\(.*onesync-acceptance-linux-amd64.*\.tar\.gz\)".*/\1/p' | head -n 1)
+	url=$(curl -fsSL "$(proxy_url "$api")" | sed -n 's/.*"browser_download_url": "\(.*onesync-acceptance-linux-amd64.*\.tar\.gz\)".*/\1/p' | head -n 1)
 	if [ -z "$url" ]; then
 		printf 'Cannot find latest Linux package from %s.\n' "$api" >&2
 		exit 1
 	fi
-	curl -fL "$url" -o "$tmp/onesync-linux.tar.gz"
+	curl -fL "$(proxy_url "$url")" -o "$tmp/onesync-linux.tar.gz"
 	tar -xzf "$tmp/onesync-linux.tar.gz" -C "$tmp"
 	stage=$(find "$tmp" -maxdepth 1 -type d -name 'onesync-acceptance-linux-amd64-*' | head -n 1)
 	if [ -z "$stage" ]; then
@@ -94,6 +113,7 @@ upgrade_service() {
 		systemctl start "$SERVICE"
 	fi
 	printf 'OneSync upgraded from %s.\n' "$url"
+	printf 'Menu command: onesync\n'
 }
 
 uninstall_service() {
@@ -102,10 +122,7 @@ uninstall_service() {
 	systemctl disable "$SERVICE" 2>/dev/null || true
 	rm -f /etc/systemd/system/$SERVICE
 	systemctl daemon-reload
-	rm -f "$INSTALL_DIR/onesyncd" "$INSTALL_DIR/onesyncctl"
-	if [ ! -x "$INSTALL_DIR/onesync-relayctl" ]; then
-		rm -f "$INSTALL_DIR/onesync"
-	fi
+	rm -f "$INSTALL_DIR/onesyncd" "$INSTALL_DIR/onesyncctl" "$INSTALL_DIR/onesync"
 	printf 'OneSync uninstalled. Data remains at %s and logs remain at %s.\n' "$DATA_DIR" "$LOG_DIR"
 }
 
