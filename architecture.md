@@ -28,7 +28,7 @@ V1 不支持：
 - QUIC
 - WebDAV、S3、对象存储
 - macOS 客户端
-- Windows 7 客户端；后续作为独立兼容客户端评估，技术栈不限定为 Go
+- Windows 7 客户端主线集成；Win7 兼容版作为 `clients/win7-qt` 独立客户端开发
 
 ## 2. 技术原则
 
@@ -53,6 +53,8 @@ V1 不支持：
 │   └── relay/
 ├── backend/
 │   └── web/
+├── clients/
+│   └── win7-qt/
 ├── packaging/
 │   └── systemd/
 ├── internal/
@@ -80,6 +82,7 @@ V1 不支持：
 - `cmd/onesync-cert`：本地 TLS 证书生成辅助工具，用于测试或小型私有部署。
 - `backend`：Web API 与静态资源服务，不包含同步算法。
 - `backend/web`：Web 管理后台静态资源。
+- `clients/win7-qt`：Windows 7 兼容客户端，使用 Qt 5 Widgets 独立开发，优先做目标端接收。
 - `packaging/systemd`：Linux systemd 服务模板和部署说明。
 - `internal/scanner`：目录遍历与文件快照生成。
 - `internal/filewatch`：后续增量事件监听；V1 初期可由周期扫描驱动。

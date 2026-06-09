@@ -20,6 +20,16 @@ OneSync 是一个源端到目标端的文件同步工具。当前版本用于验
 
 发布版本从 `v1.00` 开始递增，后续版本按 `v1.01`、`v1.02` 继续发布。
 
+## Windows 7 兼容版
+
+当前主 Windows 包面向 Windows 10 及以上系统。Windows 7 兼容版已开始独立开发，采用 Qt 5 Widgets，工程位于：
+
+```text
+clients/win7-qt
+```
+
+Win7 第一版目标是“目标端接收客户端”：用户粘贴同步链接、选择接收目录，然后通过 Relay TLS 接收源端文件。源端创建任务和生成链接先继续使用 Windows 10/Linux 主客户端。
+
 ## Windows 使用
 
 解压 Windows zip 后，双击：
