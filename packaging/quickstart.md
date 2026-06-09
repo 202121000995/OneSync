@@ -3,6 +3,7 @@
 This guide is for a small private acceptance test with two computers.
 
 For formal acceptance runs, copy `packaging/acceptance-report.md` and fill it in while testing.
+Before starting a run, go through `packaging/preflight-checklist.md`.
 
 OneSync has two different local addresses:
 
@@ -42,6 +43,7 @@ packaging/package-acceptance.sh dist/acceptance dist/acceptance-packages
 ```
 
 Copy the Windows zip to Windows source or target computers. Copy the Linux tar.gz to Linux source, target, or Relay computers. Record `dist/acceptance-packages/PACKAGE-SHA256SUMS.txt` in the acceptance report.
+Each package also includes `preflight-checklist.md`.
 
 The packages include starter scripts. Edit the host values first, then use:
 

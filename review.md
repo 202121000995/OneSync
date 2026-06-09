@@ -1109,3 +1109,28 @@
 
 - 启动脚本是可编辑模板，不会自动发现真实源端 IP、Relay 地址或防火墙状态。
 - Windows 脚本当前只覆盖客户端源端/目标端场景；Relay 验收仍使用 Linux 包。
+
+## 验收前检查清单审核
+
+审核分支：`feature/acceptance-preflight-checklist`
+
+审核结论：通过。
+
+审核说明：
+
+- 新增 `packaging/preflight-checklist.md`，用于真实多机器验收前逐项确认环境、证书、端口、防火墙、直连、Relay、文件场景和证据留存。
+- 验收包打包脚本会把 `preflight-checklist.md` 放入 Windows zip 和 Linux tar.gz。
+- Quickstart 在正式验收前提示先完成 preflight checklist。
+- 验收报告模板增加 preflight checklist 完成状态记录项。
+- 未修改程序行为、同步协议或管理页面。
+
+验证结果：
+
+- `GO_BIN=/Users/apple/Library/Go/sdk/go1.26.3/bin/go packaging/package-acceptance.sh /private/tmp/onesync-acceptance-artifacts-5 /private/tmp/onesync-acceptance-packages-5` 通过。
+- `go test ./...` 通过。
+- `go vet ./...` 通过。
+
+剩余风险：
+
+- 检查清单不能自动探测真实网络、防火墙或证书配置，仍需测试人员按现场环境填写。
+- 首轮真实多机器验收后，应根据实际失败点继续补充检查项。

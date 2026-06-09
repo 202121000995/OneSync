@@ -31,6 +31,7 @@ copy_common() {
 	cp "$ARTIFACT_DIR/SHA256SUMS.txt" "$destination/SHA256SUMS.txt"
 	cp "$ROOT/packaging/quickstart.md" "$destination/quickstart.md"
 	cp "$ROOT/packaging/acceptance-report.md" "$destination/acceptance-report.md"
+	cp "$ROOT/packaging/preflight-checklist.md" "$destination/preflight-checklist.md"
 }
 
 copy_common "$windows_stage"
