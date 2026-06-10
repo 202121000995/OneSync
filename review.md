@@ -2097,3 +2097,44 @@
 
 - 已安装的旧 Relay 需要先升级到 v1.02，才会拥有 `sudo onesync-relayctl cert` 命令。
 - 自签 Relay 证书必须包含创建同步时填写的 Relay 域名或 IP，否则 TLS 校验仍会失败。
+
+## v1.03 Relay 一次性连接文本审核
+
+审核分支：`feature/v1.03-relay-info`
+
+审核结论：通过。
+
+审核说明：
+
+- 根版本号从 `1.02` 提升到 `1.03`，主包、Win7 Qt 包、Linux 安装/升级示例统一使用 `v1.03`。
+- `onesync-relayctl` 新增 `info` / `link` / `link-info` 命令，一次性输出创建同步需要填写的 Relay 地址、Relay 令牌和 Relay 证书 PEM。
+- `onesync-relayctl install` 会在安装时保存 `RELAY_HOSTS` 对应的 Relay 地址到 `/etc/onesync/relay.address`，后续 `info` 可直接显示。
+- `onesync-relayctl` 新增 `regen-cert` / `regenerate-cert` 命令，用于 Relay 域名或 IP 改变后重新生成匹配新地址的证书，并自动输出新的连接文本。
+- Relay 一键部署完成后改为调用 `onesync-relayctl info`，减少用户判断要复制哪些内容。
+- Relay 中文菜单和 README 已补充 `info` 与 `regen-cert` 使用说明。
+
+验证结果：
+
+- `git diff --check` 通过。
+- `sh -n packaging/acceptance-scripts/linux/onesync-relayctl` 通过。
+- `sh -n packaging/acceptance-scripts/linux/deploy-relaytls.sh` 通过。
+- `sh -n packaging/acceptance-scripts/linux/onesyncr-menu` 通过。
+- `sh -n clients/win7-qt/build-win7.sh` 通过。
+- `sh -n packaging/package-acceptance.sh` 通过。
+- `sh clients/win7-qt/build-win7.sh` 成功，生成 `clients/win7-qt/dist/OneSyncWin7-win7-x86-v1.03.zip`。
+- `PATH=/Users/apple/Library/Go/sdk/go1.26.3/bin:$PATH sh packaging/package-acceptance.sh` 成功，生成主 Windows/Linux v1.03 包。
+- `unzip -t clients/win7-qt/dist/OneSyncWin7-win7-x86-v1.03.zip` 通过。
+- `strings clients/win7-qt/release-win7/OneSyncWin7.exe | rg "GetSystemTimePreciseAsFileTime"` 无匹配。
+- `unzip -t dist/acceptance-packages/onesync-windows-amd64-v1.03.zip` 通过。
+- `tar -tzf dist/acceptance-packages/onesync-linux-amd64-v1.03.tar.gz` 通过。
+
+本地包路径：
+
+- `/Users/apple/Documents/同步软件/clients/win7-qt/dist/OneSyncWin7-win7-x86-v1.03.zip`
+- `/Users/apple/Documents/同步软件/dist/acceptance-packages/onesync-windows-amd64-v1.03.zip`
+- `/Users/apple/Documents/同步软件/dist/acceptance-packages/onesync-linux-amd64-v1.03.tar.gz`
+
+剩余风险：
+
+- 已安装且证书域名错误的 Relay，需要先用 `sudo RELAY_HOSTS=<正确域名或IP> RELAY_PORT=<端口> onesync-relayctl regen-cert` 重新生成证书。
+- `info` 输出的地址来自安装时保存的 `relay.address`；非常旧的安装如果没有该文件，会显示占位地址，需要执行 `regen-cert` 或重新安装时传入 `RELAY_HOSTS`。

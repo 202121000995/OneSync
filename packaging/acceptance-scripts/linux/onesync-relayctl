@@ -11,6 +11,7 @@ LISTEN=${ONESYNC_RELAY_LISTEN:-:$RELAY_PORT}
 CERT=${ONESYNC_RELAY_CERT:-$CONFIG_DIR/relay.crt}
 KEY=${ONESYNC_RELAY_KEY:-$CONFIG_DIR/relay.key}
 TOKEN_FILE=${ONESYNC_RELAY_TOKEN_FILE:-$CONFIG_DIR/relay.token}
+ADDRESS_FILE=${ONESYNC_RELAY_ADDRESS_FILE:-$CONFIG_DIR/relay.address}
 REPO=${ONESYNC_REPO:-202121000995/OneSync}
 GH_PROXY=${GH_PROXY:-}
 RELEASE_TAG=${ONESYNC_RELEASE_TAG:-${RELEASE_TAG:-}}
@@ -96,6 +97,23 @@ default_hosts() {
 	printf '%s,127.0.0.1,localhost' "$host"
 }
 
+first_host() {
+	printf '%s' "$1" | cut -d, -f1
+}
+
+listen_port() {
+	printf '%s' "$LISTEN" | sed 's/.*://'
+}
+
+save_relay_address() {
+	hosts=${1:-}
+	if [ -z "$hosts" ]; then
+		return
+	fi
+	printf '%s:%s\n' "$(first_host "$hosts")" "$(listen_port)" > "$ADDRESS_FILE"
+	chmod 0644 "$ADDRESS_FILE"
+}
+
 generate_token() {
 	if command -v openssl >/dev/null 2>&1; then
 		openssl rand -base64 32 | tr -d '\n'
@@ -149,6 +167,63 @@ print_cert() {
 	printf '\n'
 }
 
+print_info() {
+	need_root
+	address='<Relay domain or IP>:'"$(listen_port)"
+	if [ -f "$ADDRESS_FILE" ]; then
+		address=$(sed -n '1p' "$ADDRESS_FILE")
+	fi
+	printf 'OneSync Relay 创建同步需要填写的文本\n\n'
+	printf 'Relay 地址:\n%s\n\n' "$address"
+	printf 'Relay 令牌:\n'
+	if [ ! -f "$TOKEN_FILE" ]; then
+		printf 'Relay token file does not exist: %s\n' "$TOKEN_FILE" >&2
+		exit 1
+	fi
+	cat "$TOKEN_FILE"
+	printf '\n\n'
+	printf 'Relay 证书（自建自签 Relay 时填写；公网可信证书通常不用填）:\n'
+	if [ ! -f "$CERT" ]; then
+		printf 'Relay certificate file does not exist: %s\n' "$CERT" >&2
+		exit 1
+	fi
+	cat "$CERT"
+	printf '\n'
+}
+
+regenerate_cert() {
+	need_root
+	if [ -z "${RELAY_HOSTS:-}" ]; then
+		printf 'RELAY_HOSTS is required. Example:\n' >&2
+		printf '  sudo RELAY_HOSTS=r.example.com RELAY_PORT=17443 onesync-relayctl regen-cert\n' >&2
+		exit 1
+	fi
+	if [ ! -x "$INSTALL_DIR/onesync-cert" ]; then
+		printf 'Cannot find %s/onesync-cert. Reinstall or upgrade OneSync Relay first.\n' "$INSTALL_DIR" >&2
+		exit 1
+	fi
+	was_active=0
+	if systemctl is-active --quiet "$SERVICE"; then
+		was_active=1
+		systemctl stop "$SERVICE"
+	fi
+	backup_suffix=$(date +%Y%m%d%H%M%S)
+	if [ -f "$CERT" ]; then
+		cp "$CERT" "$CERT.bak.$backup_suffix"
+	fi
+	if [ -f "$KEY" ]; then
+		cp "$KEY" "$KEY.bak.$backup_suffix"
+	fi
+	"$INSTALL_DIR/onesync-cert" -hosts "$RELAY_HOSTS" -cert "$CERT" -key "$KEY"
+	chmod 0600 "$KEY"
+	save_relay_address "$RELAY_HOSTS"
+	if [ "$was_active" -eq 1 ]; then
+		systemctl start "$SERVICE"
+	fi
+	printf 'Relay TLS certificate regenerated for: %s\n' "$RELAY_HOSTS"
+	print_info
+}
+
 install_service() {
 	need_root
 	dir=$(script_dir)
@@ -167,13 +242,17 @@ install_service() {
 	if [ ! -x "$INSTALL_DIR/onesyncctl" ]; then
 		rm -f "$INSTALL_DIR/onesync"
 	fi
+	hosts=${RELAY_HOSTS:-}
 	if [ ! -f "$CERT" ] || [ ! -f "$KEY" ]; then
-		hosts=${RELAY_HOSTS:-$(default_hosts)}
+		hosts=${hosts:-$(default_hosts)}
 		"$INSTALL_DIR/onesync-cert" -hosts "$hosts" -cert "$CERT" -key "$KEY"
 		chmod 0600 "$KEY"
 		printf 'Generated Relay TLS certificate for: %s\n' "$hosts"
 	else
 		printf 'Using existing Relay TLS certificate: %s and %s\n' "$CERT" "$KEY"
+	fi
+	if [ -n "$hosts" ]; then
+		save_relay_address "$hosts"
 	fi
 	install_token
 	cat > /etc/systemd/system/$SERVICE <<EOF
@@ -194,13 +273,9 @@ EOF
 	systemctl daemon-reload
 	systemctl enable "$SERVICE"
 	printf 'OneSync Relay installed on %s.\n' "$LISTEN"
-	printf 'Use Relay TLS address: <Relay domain or IP>:%s\n' "${LISTEN##*:}"
-	printf 'Use Relay token from: %s\n' "$TOKEN_FILE"
-	print_token
-	printf 'Use Relay certificate from: %s\n' "$CERT"
-	print_cert
+	print_info
 	printf 'Menu command: onesyncr\n'
-	printf 'Use: onesync-relayctl start|stop|restart|status|logs|token|cert|upgrade|uninstall\n'
+	printf 'Use: onesync-relayctl start|stop|restart|status|logs|info|token|cert|regen-cert|upgrade|uninstall\n'
 }
 
 upgrade_service() {
@@ -215,7 +290,7 @@ upgrade_service() {
 	url=$(latest_linux_package_url)
 	if [ -z "$url" ]; then
 		printf 'Cannot find latest Linux package from GitHub repo %s.\n' "$REPO" >&2
-		printf 'Retry with RELEASE_TAG=v1.02 or PACKAGE_URL=https://...tar.gz.\n' >&2
+		printf 'Retry with RELEASE_TAG=v1.03 or PACKAGE_URL=https://...tar.gz.\n' >&2
 		exit 1
 	fi
 	curl -fL "$(proxy_url "$url")" -o "$tmp/onesync-linux.tar.gz"
@@ -286,6 +361,12 @@ case "${1:-status}" in
 	cert|certificate)
 		print_cert
 		;;
+	info|link|link-info)
+		print_info
+		;;
+	regen-cert|regenerate-cert)
+		regenerate_cert
+		;;
 	upgrade)
 		upgrade_service
 		;;
@@ -293,7 +374,7 @@ case "${1:-status}" in
 		uninstall_service
 		;;
 	*)
-		printf 'Usage: onesync-relayctl install|start|run|stop|restart|status|logs|token|cert|upgrade|uninstall\n' >&2
+		printf 'Usage: onesync-relayctl install|start|run|stop|restart|status|logs|info|token|cert|regen-cert|upgrade|uninstall\n' >&2
 		printf 'Install options: RELAY_HOSTS=domain-or-ip RELAY_PORT=7443 RELAY_TOKEN=secret ONESYNC_RELAY_CERT=/path/cert ONESYNC_RELAY_KEY=/path/key\n' >&2
 		exit 2
 		;;
