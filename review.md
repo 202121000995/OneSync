@@ -1848,6 +1848,7 @@
 - 新增 `clients/win7-qt` 独立工程，Win7 兼容客户端不混入当前 Go 主客户端。
 - 同时提供 CMake 与 qmake 工程入口；没有 CMake 的环境可以先用 Qt 5 自带 qmake 验证。
 - 新增 Windows 专用 `package-win7.cmd`，在 Windows Qt 5 环境里生成 `OneSyncWin7.exe` 并调用 `windeployqt` 收集 Qt DLL。
+- `package-win7.cmd` 会生成 `OneSyncWin7-win7-qt-v0.1.0.zip`，并尽量复制 Qt/OpenSSL 运行库，便于直接发给 Win7 测试机。
 - Qt 客户端骨架包含主窗口、同步链接粘贴、目标目录选择、链接解析、链接摘要展示和诊断日志导出。
 - 同步链接解析已对齐当前 Go 主线的 Base64URL JSON 格式，校验版本、会话编号、源端地址、Relay 地址/令牌关系、32 字节同步令牌和过期时间。
 - Win7 Qt 客户端新增目标端稳定 `peer_id`、直连/Relay 地址解析、TLS 连接、Relay v2 target 登记和源端同步认证帧。

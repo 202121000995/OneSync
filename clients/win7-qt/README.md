@@ -61,9 +61,10 @@ package-win7.cmd
 
 ```text
 clients\win7-qt\dist\OneSyncWin7-win7-qt-v0.1.0\OneSyncWin7.exe
+clients\win7-qt\dist\OneSyncWin7-win7-qt-v0.1.0.zip
 ```
 
-这个目录会同时包含 Qt DLL，测试时直接把整个目录压缩成 zip 发给 Win7 机器即可。
+这个目录和 zip 会同时包含 Qt DLL。脚本会尽量自动复制 OpenSSL DLL；如果 Win7 上 TLS 连接失败，请检查 `libssl` / `libcrypto` DLL 是否在 exe 同目录。
 
 ### 使用 qmake
 
