@@ -290,7 +290,7 @@ upgrade_service() {
 	url=$(latest_linux_package_url)
 	if [ -z "$url" ]; then
 		printf 'Cannot find latest Linux package from GitHub repo %s.\n' "$REPO" >&2
-		printf 'Retry with RELEASE_TAG=v1.03 or PACKAGE_URL=https://...tar.gz.\n' >&2
+		printf 'Retry with RELEASE_TAG=v1.04 or PACKAGE_URL=https://...tar.gz.\n' >&2
 		exit 1
 	fi
 	curl -fL "$(proxy_url "$url")" -o "$tmp/onesync-linux.tar.gz"

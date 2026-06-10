@@ -162,7 +162,7 @@ void applyModernDialogStyle(QDialog* dialog)
 }
 } // namespace
 
-const QString kWin7Version = QStringLiteral("1.03");
+const QString kWin7Version = QStringLiteral("1.04");
 
 MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent)
@@ -1462,6 +1462,13 @@ QString MainWindow::buildSourceLink(const QString& relayEndpoint, const QString&
     if (!EndpointParser::parse(relayEndpoint, &endpoint, error)) {
         return {};
     }
+    QString trustedCertificatePem = caCertificatePem.trimmed();
+    if (trustedCertificatePem.isEmpty()) {
+        trustedCertificatePem = relayCertificateForLink(endpoint, error);
+        if (error != nullptr && !error->isEmpty()) {
+            return {};
+        }
+    }
     const QDateTime issuedAt = QDateTime::currentDateTimeUtc();
     const QDateTime expiresAt = issuedAt.addSecs(24 * 60 * 60);
     QJsonObject object;
@@ -1472,14 +1479,54 @@ QString MainWindow::buildSourceLink(const QString& relayEndpoint, const QString&
     if (!relayToken.trimmed().isEmpty()) {
         object.insert(QStringLiteral("relay_token"), relayToken.trimmed());
     }
-    if (!caCertificatePem.trimmed().isEmpty()) {
-        object.insert(QStringLiteral("ca_certificate_pem"), caCertificatePem.trimmed());
+    if (!trustedCertificatePem.isEmpty()) {
+        object.insert(QStringLiteral("ca_certificate_pem"), trustedCertificatePem);
     }
     object.insert(QStringLiteral("token"), base64Url(randomBytes(32)));
     object.insert(QStringLiteral("issued_at"), issuedAt.toString(Qt::ISODateWithMs));
     object.insert(QStringLiteral("expires_at"), expiresAt.toString(Qt::ISODateWithMs));
     const QByteArray json = QJsonDocument(object).toJson(QJsonDocument::Compact);
     return base64Url(json);
+}
+
+QString MainWindow::relayCertificateForLink(const Endpoint& endpoint, QString* error) const
+{
+    QSslSocket verifiedSocket;
+    verifiedSocket.setPeerVerifyMode(QSslSocket::VerifyPeer);
+    verifiedSocket.setPeerVerifyName(endpoint.host);
+    verifiedSocket.connectToHostEncrypted(endpoint.host, endpoint.port);
+    if (verifiedSocket.waitForEncrypted(5000)) {
+        verifiedSocket.disconnectFromHost();
+        if (error != nullptr) {
+            error->clear();
+        }
+        return {};
+    }
+    verifiedSocket.abort();
+
+    QSslSocket socket;
+    socket.setPeerVerifyMode(QSslSocket::QueryPeer);
+    socket.ignoreSslErrors();
+    socket.connectToHostEncrypted(endpoint.host, endpoint.port);
+    if (!socket.waitForEncrypted(8000)) {
+        if (error != nullptr) {
+            *error = QStringLiteral("Relay 证书为空，且自动读取 Relay 证书失败：%1。请运行 sudo onesync-relayctl info，把 Relay 证书粘贴到这里。")
+                .arg(socket.errorString());
+        }
+        return {};
+    }
+    const QSslCertificate certificate = socket.peerCertificate();
+    socket.disconnectFromHost();
+    if (certificate.isNull()) {
+        if (error != nullptr) {
+            *error = QStringLiteral("Relay 没有返回 TLS 证书。请确认 Relay 地址和端口正确。");
+        }
+        return {};
+    }
+    if (error != nullptr) {
+        error->clear();
+    }
+    return QString::fromUtf8(certificate.toPem()).trimmed();
 }
 
 bool MainWindow::testTaskConnection(const SyncTask& task, QString* detail) const

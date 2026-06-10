@@ -131,7 +131,12 @@ bool TargetConnector::connectTls(QSslSocket* socket, const Endpoint& endpoint, i
     if (!socket->waitForEncrypted(timeoutMs)) {
         const QString detail = socket->errorString();
         if (error != nullptr) {
-            *error = QStringLiteral("TLS 连接失败：%1").arg(detail);
+            if (link.hasRelay() && link.caCertificatePem.trimmed().isEmpty() &&
+                detail.contains(QStringLiteral("self-signed"), Qt::CaseInsensitive)) {
+                *error = QStringLiteral("TLS 连接失败：Relay 使用自签证书，但同步链接没有携带 Relay 证书。请在源端创建同步时填写 Relay 证书，或使用新版 Win7 源端自动写入证书。原始错误：%1").arg(detail);
+            } else {
+                *error = QStringLiteral("TLS 连接失败：%1").arg(detail);
+            }
         }
         return false;
     }

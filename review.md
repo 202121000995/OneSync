@@ -2138,3 +2138,39 @@
 
 - 已安装且证书域名错误的 Relay，需要先用 `sudo RELAY_HOSTS=<正确域名或IP> RELAY_PORT=<端口> onesync-relayctl regen-cert` 重新生成证书。
 - `info` 输出的地址来自安装时保存的 `relay.address`；非常旧的安装如果没有该文件，会显示占位地址，需要执行 `regen-cert` 或重新安装时传入 `RELAY_HOSTS`。
+
+## v1.04 Win7 Relay 证书自动携带审核
+
+审核分支：`feature/v1.04-win7-relay-cert-auto`
+
+审核结论：通过。
+
+审核说明：
+
+- 根版本号从 `1.03` 提升到 `1.04`，主包、Win7 Qt 包、Linux 安装/升级示例统一使用 `v1.04`。
+- Win7 Qt 源端创建同步时，如果 Relay 证书输入为空，会先尝试用系统可信证书链连接 Relay；如果 Relay 是自签证书导致系统不信，则自动读取 Relay 返回的证书 PEM 并写入同步链接。
+- Win7 Qt 目标端遇到自签证书且链接未携带证书时，错误提示改为明确指出“同步链接没有携带 Relay 证书”，并提示到源端填写证书或使用新版源端自动写入。
+- 这样源端使用自建 Relay TLS 时，正常情况下不再需要手动复制 Relay 证书到 Win7 源端创建同步窗口。
+
+验证结果：
+
+- `git diff --check` 通过。
+- `sh -n clients/win7-qt/build-win7.sh` 通过。
+- `sh -n packaging/package-acceptance.sh` 通过。
+- `sh clients/win7-qt/build-win7.sh` 成功，生成 `clients/win7-qt/dist/OneSyncWin7-win7-x86-v1.04.zip`。
+- `PATH=/Users/apple/Library/Go/sdk/go1.26.3/bin:$PATH sh packaging/package-acceptance.sh` 成功，生成主 Windows/Linux v1.04 包。
+- `unzip -t clients/win7-qt/dist/OneSyncWin7-win7-x86-v1.04.zip` 通过。
+- `strings clients/win7-qt/release-win7/OneSyncWin7.exe | rg "GetSystemTimePreciseAsFileTime"` 无匹配。
+- `unzip -t dist/acceptance-packages/onesync-windows-amd64-v1.04.zip` 通过。
+- `tar -tzf dist/acceptance-packages/onesync-linux-amd64-v1.04.tar.gz` 通过。
+
+本地包路径：
+
+- `/Users/apple/Documents/同步软件/clients/win7-qt/dist/OneSyncWin7-win7-x86-v1.04.zip`
+- `/Users/apple/Documents/同步软件/dist/acceptance-packages/onesync-windows-amd64-v1.04.zip`
+- `/Users/apple/Documents/同步软件/dist/acceptance-packages/onesync-linux-amd64-v1.04.tar.gz`
+
+剩余风险：
+
+- 如果 Relay 证书本身域名错误，例如证书只包含 `zz.31pk.top`，但链接填写 `r.31pk.top`，目标端仍会因为主机名不匹配失败；需要先在 Relay 服务器执行 `regen-cert` 生成匹配地址的证书。
+- 自动读取 Relay 证书需要源端能访问 Relay TLS 端口；如果源端网络无法连接 Relay，仍需要手动粘贴 `onesync-relayctl info` 输出的证书文本。
