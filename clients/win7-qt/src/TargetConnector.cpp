@@ -28,15 +28,26 @@ QString shortPeerID(const QString& peerID)
 }
 } // namespace
 
-TargetConnector::TargetConnector(const SyncLink& link, const QString& targetFolder)
+TargetConnector::TargetConnector(const SyncLink& link, const QString& targetFolder, const QStringList& ignoreRules)
     : link(link)
     , targetFolder(targetFolder)
+    , ignoreRules(ignoreRules)
 {
+}
+
+void TargetConnector::cancel()
+{
+    cancelled.storeRelease(1);
 }
 
 void TargetConnector::run()
 {
     emit statusChanged(QStringLiteral("运行-连接中"));
+    QString error;
+    if (isCancelled(&error)) {
+        emit finished(false, error);
+        return;
+    }
 
     const QFileInfo targetInfo(targetFolder);
     if (!targetInfo.exists() || !targetInfo.isDir()) {
@@ -54,7 +65,6 @@ void TargetConnector::run()
     emit logMessage(QStringLiteral("本机目标端身份：%1").arg(shortPeerID(peerID)));
 
     Endpoint endpoint;
-    QString error;
     const QString endpointText = link.hasRelay() ? link.relayEndpoint : link.endpoint;
     if (!EndpointParser::parse(endpointText, &endpoint, &error)) {
         emit finished(false, QStringLiteral("连接地址错误：%1").arg(error));
@@ -96,6 +106,17 @@ void TargetConnector::run()
     emit finished(true, QStringLiteral("本轮同步完成。"));
 }
 
+bool TargetConnector::isCancelled(QString* error) const
+{
+    if (cancelled.loadAcquire() != 0) {
+        if (error != nullptr) {
+            *error = QStringLiteral("同步已取消。");
+        }
+        return true;
+    }
+    return false;
+}
+
 bool TargetConnector::connectTls(QSslSocket* socket, const Endpoint& endpoint, int timeoutMs, QString* error)
 {
     const QList<QSslCertificate> certificates = QSslCertificate::fromData(link.caCertificatePem.toUtf8(), QSsl::Pem);
@@ -119,6 +140,9 @@ bool TargetConnector::connectTls(QSslSocket* socket, const Endpoint& endpoint, i
 
 bool TargetConnector::respondSnapshot(QSslSocket* socket, QString* error)
 {
+    if (isCancelled(error)) {
+        return false;
+    }
     emit logMessage(QStringLiteral("等待源端请求目标端快照。"));
     SyncProtocol::Frame request;
     if (!readFrame(socket, kSyncMessageTimeoutMs, &request, error)) {
@@ -135,11 +159,13 @@ bool TargetConnector::respondSnapshot(QSslSocket* socket, QString* error)
     QByteArray snapshotJson;
     quint64 fileCount = 0;
     quint64 byteCount = 0;
-    if (!SnapshotScanner::scanToJson(targetFolder, &snapshotJson, &fileCount, &byteCount, error)) {
+    quint64 ignoredCount = 0;
+    if (!SnapshotScanner::scanToJson(targetFolder, ignoreRules, &snapshotJson, &fileCount, &byteCount, &ignoredCount, error)) {
         return false;
     }
 
-    emit logMessage(QStringLiteral("目标端快照完成：%1 个文件，%2 字节。").arg(fileCount).arg(byteCount));
+    emit snapshotScanned(fileCount, byteCount, ignoredCount);
+    emit logMessage(QStringLiteral("目标端快照完成：%1 个文件，%2 字节，忽略 %3 项。").arg(fileCount).arg(byteCount).arg(ignoredCount));
     const QByteArray response = SyncProtocol::buildFrame(
         SyncProtocol::MessageSnapshotResponse,
         request.requestID,
@@ -154,6 +180,9 @@ bool TargetConnector::respondSnapshot(QSslSocket* socket, QString* error)
 
 bool TargetConnector::receivePlan(QSslSocket* socket, QString* error)
 {
+    if (isCancelled(error)) {
+        return false;
+    }
     SyncProtocol::Frame planFrame;
     if (!readFrame(socket, kSyncMessageTimeoutMs, &planFrame, error)) {
         return false;
@@ -176,7 +205,9 @@ bool TargetConnector::receivePlan(QSslSocket* socket, QString* error)
     const QJsonObject object = document.object();
     const int operationCount = object.value(QStringLiteral("operation_count")).toInt(-1);
     const double standardBytes = object.value(QStringLiteral("standard_bytes")).toDouble(0);
-    emit logMessage(QStringLiteral("收到同步计划：%1 个文件，标准大小约 %2 字节。").arg(operationCount).arg(qulonglong(standardBytes)));
+    const quint64 standardByteCount = standardBytes > 0 ? quint64(standardBytes) : 0;
+    emit planReceived(operationCount, standardByteCount);
+    emit logMessage(QStringLiteral("收到同步计划：%1 个文件，标准大小约 %2 字节。").arg(operationCount).arg(standardByteCount));
     if (operationCount < 0) {
         if (error != nullptr) {
             *error = QStringLiteral("同步计划文件数量不正确。");
@@ -191,16 +222,31 @@ bool TargetConnector::receivePlan(QSslSocket* socket, QString* error)
     emit logMessage(QStringLiteral("同步计划已确认。"));
 
     for (int index = 0; index < operationCount; ++index) {
+        if (isCancelled(error)) {
+            return false;
+        }
         SyncProtocol::Frame begin;
         if (!readFrame(socket, kSyncMessageTimeoutMs, &begin, error)) {
             return false;
         }
         QString transferredPath;
         emit logMessage(QStringLiteral("开始接收文件：%1 / %2").arg(index + 1).arg(operationCount));
-        if (!FileReceiver::receive(socket, targetFolder, begin, &transferredPath, error)) {
+        FileReceiver::Options options;
+        options.ignoreRules = ignoreRules;
+        options.cancelled = &cancelled;
+        options.receivedBytes = &receivedBytes;
+        options.sentBytes = &sentBytes;
+        options.onTrafficChanged = [this]() {
+            emitTrafficIfChanged();
+        };
+        if (!FileReceiver::receive(socket, targetFolder, begin, &options, &transferredPath, error)) {
+            emitTrafficIfChanged();
             return false;
         }
-        emit logMessage(QStringLiteral("文件接收完成：%1").arg(transferredPath));
+        emitTrafficIfChanged();
+        emit logMessage(options.skipped
+            ? QStringLiteral("文件已按忽略规则跳过：%1").arg(transferredPath)
+            : QStringLiteral("文件接收完成：%1").arg(transferredPath));
     }
 
     SyncProtocol::Frame complete;
@@ -283,7 +329,12 @@ bool TargetConnector::authenticate(QSslSocket* socket, const QByteArray& token, 
 bool TargetConnector::writeAll(QSslSocket* socket, const QByteArray& data, int timeoutMs, QString* error)
 {
     qint64 offset = 0;
+    QElapsedTimer timer;
+    timer.start();
     while (offset < data.size()) {
+        if (isCancelled(error)) {
+            return false;
+        }
         const qint64 written = socket->write(data.constData() + offset, data.size() - offset);
         if (written < 0) {
             if (error != nullptr) {
@@ -292,7 +343,18 @@ bool TargetConnector::writeAll(QSslSocket* socket, const QByteArray& data, int t
             return false;
         }
         offset += written;
-        if (!socket->waitForBytesWritten(timeoutMs)) {
+        if (written > 0) {
+            sentBytes += quint64(written);
+            emitTrafficIfChanged();
+        }
+        const int remaining = timeoutMs - int(timer.elapsed());
+        if (remaining <= 0) {
+            if (error != nullptr) {
+                *error = QStringLiteral("网络写入超时：%1").arg(socket->errorString());
+            }
+            return false;
+        }
+        if (!socket->waitForBytesWritten(qMin(remaining, 500)) && timer.elapsed() >= timeoutMs) {
             if (error != nullptr) {
                 *error = QStringLiteral("网络写入超时：%1").arg(socket->errorString());
             }
@@ -308,16 +370,30 @@ QByteArray TargetConnector::readExact(QSslSocket* socket, int size, int timeoutM
     QElapsedTimer timer;
     timer.start();
     while (data.size() < size) {
+        if (isCancelled(error)) {
+            return {};
+        }
         if (socket->bytesAvailable() <= 0) {
             const int remaining = timeoutMs - int(timer.elapsed());
-            if (remaining <= 0 || !socket->waitForReadyRead(remaining)) {
+            if (remaining <= 0) {
+                if (error != nullptr) {
+                    *error = QStringLiteral("网络读取超时或失败：%1").arg(socket->errorString());
+                }
+                return {};
+            }
+            if (!socket->waitForReadyRead(qMin(remaining, 500)) && timer.elapsed() >= timeoutMs) {
                 if (error != nullptr) {
                     *error = QStringLiteral("网络读取超时或失败：%1").arg(socket->errorString());
                 }
                 return {};
             }
         }
-        data.append(socket->read(size - data.size()));
+        const QByteArray chunk = socket->read(size - data.size());
+        if (!chunk.isEmpty()) {
+            receivedBytes += quint64(chunk.size());
+            emitTrafficIfChanged();
+        }
+        data.append(chunk);
     }
     return data;
 }
@@ -340,4 +416,14 @@ bool TargetConnector::readFrame(QSslSocket* socket, int timeoutMs, SyncProtocol:
         return false;
     }
     return SyncProtocol::parseFrame(header, payload, frame, error);
+}
+
+void TargetConnector::emitTrafficIfChanged()
+{
+    if (receivedBytes == lastReportedReceivedBytes && sentBytes == lastReportedSentBytes) {
+        return;
+    }
+    lastReportedReceivedBytes = receivedBytes;
+    lastReportedSentBytes = sentBytes;
+    emit trafficChanged(receivedBytes, sentBytes);
 }

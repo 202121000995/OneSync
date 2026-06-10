@@ -1,5 +1,7 @@
 #include "SnapshotScanner.h"
 
+#include "IgnoreMatcher.h"
+
 #include <QCryptographicHash>
 #include <QDateTime>
 #include <QDir>
@@ -82,7 +84,16 @@ QByteArray number(qint64 value)
     return QByteArray::number(value);
 }
 
-bool scanDirectory(const QDir& rootDir, const QString& absolutePath, QList<SnapshotEntry>* entries, quint64* fileCount, quint64* byteCount, QString* error)
+bool scanDirectory(
+    const QDir& rootDir,
+    const QString& absolutePath,
+    const IgnoreMatcher& ignoreMatcher,
+    QList<SnapshotEntry>* entries,
+    quint64* fileCount,
+    quint64* byteCount,
+    quint64* ignoredCount,
+    QString* error
+)
 {
     const QFileInfoList directoryEntries = QDir(absolutePath).entryInfoList(
         QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot,
@@ -92,25 +103,30 @@ bool scanDirectory(const QDir& rootDir, const QString& absolutePath, QList<Snaps
         if (info.isSymLink()) {
             continue;
         }
-        if (info.isDir()) {
-            if (info.fileName() == kReservedTransferDirectory) {
-                continue;
-            }
-            if (!scanDirectory(rootDir, info.absoluteFilePath(), entries, fileCount, byteCount, error)) {
-                return false;
-            }
-            continue;
-        }
-        if (!info.isFile()) {
-            continue;
-        }
-
         QString relativePath = toSlashPath(rootDir.relativeFilePath(info.absoluteFilePath()));
         if (relativePath.isEmpty() || relativePath == QStringLiteral(".") || relativePath.startsWith(QLatin1String("../"))) {
             if (error != nullptr) {
                 *error = QStringLiteral("扫描到不安全路径：%1").arg(relativePath);
             }
             return false;
+        }
+
+        if (ignoreMatcher.matches(relativePath, info.isDir())) {
+            ++(*ignoredCount);
+            continue;
+        }
+
+        if (info.isDir()) {
+            if (info.fileName() == kReservedTransferDirectory) {
+                continue;
+            }
+            if (!scanDirectory(rootDir, info.absoluteFilePath(), ignoreMatcher, entries, fileCount, byteCount, ignoredCount, error)) {
+                return false;
+            }
+            continue;
+        }
+        if (!info.isFile()) {
+            continue;
         }
 
         QString hash;
@@ -170,11 +186,21 @@ QByteArray snapshotJson(const QString& root, QList<SnapshotEntry> entries)
 
 bool SnapshotScanner::scanToJson(const QString& root, QByteArray* json, quint64* fileCount, quint64* byteCount, QString* error)
 {
+    quint64 ignoredCount = 0;
+    return scanToJson(root, QStringList(), json, fileCount, byteCount, &ignoredCount, error);
+}
+
+bool SnapshotScanner::scanToJson(const QString& root, const QStringList& ignoreRules, QByteArray* json, quint64* fileCount, quint64* byteCount, quint64* ignoredCount, QString* error)
+{
     if (json == nullptr || fileCount == nullptr || byteCount == nullptr) {
         if (error != nullptr) {
             *error = QStringLiteral("内部错误：快照输出为空。");
         }
         return false;
+    }
+    quint64 localIgnoredCount = 0;
+    if (ignoredCount == nullptr) {
+        ignoredCount = &localIgnoredCount;
     }
 
     const QFileInfo rootInfo(root);
@@ -187,9 +213,11 @@ bool SnapshotScanner::scanToJson(const QString& root, QByteArray* json, quint64*
 
     *fileCount = 0;
     *byteCount = 0;
+    *ignoredCount = 0;
     QDir rootDir(rootInfo.absoluteFilePath());
     QList<SnapshotEntry> entries;
-    if (!scanDirectory(rootDir, rootInfo.absoluteFilePath(), &entries, fileCount, byteCount, error)) {
+    const IgnoreMatcher ignoreMatcher(ignoreRules);
+    if (!scanDirectory(rootDir, rootInfo.absoluteFilePath(), ignoreMatcher, &entries, fileCount, byteCount, ignoredCount, error)) {
         return false;
     }
 

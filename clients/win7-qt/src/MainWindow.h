@@ -8,6 +8,7 @@
 
 class QAction;
 class QCloseEvent;
+class QComboBox;
 class QLabel;
 class QMenu;
 class QPushButton;
@@ -15,6 +16,7 @@ class QPlainTextEdit;
 class QSystemTrayIcon;
 class QTableWidget;
 class QThread;
+class TargetConnector;
 
 class MainWindow : public QMainWindow
 {
@@ -31,6 +33,7 @@ private slots:
     void editSelectedTask();
     void deleteSelectedTask();
     void exportDiagnostics();
+    void exportSelectedTaskDiagnostics();
     void showFromTray();
     void quitFromTray();
 
@@ -50,6 +53,8 @@ private:
         quint64 globalBytes = 0;
         quint64 receivedBytes = 0;
         quint64 sentBytes = 0;
+        quint64 ignoredCount = 0;
+        qint64 startedAtMs = 0;
         int localFiles = 0;
         int connectedDevices = 0;
         int totalDevices = 1;
@@ -62,20 +67,27 @@ private:
     void saveTasks() const;
     void refreshTaskTable();
     void refreshButtons();
+    void refreshLogFilter();
+    void rebuildLogView();
     int selectedTaskIndex() const;
     SyncTask* selectedTask();
     const SyncTask* selectedTask() const;
+    SyncTask* taskByID(const QString& taskID);
+    const SyncTask* taskByID(const QString& taskID) const;
     void setTaskStatus(const QString& taskID, const QString& status, const QString& detail = QString());
     bool parseTaskLink(SyncTask* task, QString* error);
     bool runTaskDialog(SyncTask* task, bool editing);
     void showTaskParameters(SyncTask* task);
     QString taskDiagnosticsText(const SyncTask& task) const;
     QString formatBytes(quint64 value) const;
+    QString formatAverageRate(quint64 bytes, qint64 startedAtMs) const;
     QString formatRate(quint64 value) const;
     void appendLog(const QString& message);
+    void appendTaskLog(const QString& taskID, const QString& message);
     QString diagnosticsText() const;
 
     QTableWidget* taskTable = nullptr;
+    QComboBox* logFilterCombo = nullptr;
     QPlainTextEdit* logEdit = nullptr;
     QPushButton* startButton = nullptr;
     QPushButton* pauseButton = nullptr;
@@ -85,6 +97,9 @@ private:
     QLabel* summaryLabel = nullptr;
     QList<SyncTask> tasks;
     QMap<QString, QThread*> connectionThreads;
+    QMap<QString, TargetConnector*> connectors;
+    QStringList globalLogs;
+    QMap<QString, QStringList> taskLogs;
     QSystemTrayIcon* trayIcon = nullptr;
     QMenu* trayMenu = nullptr;
     bool exiting = false;

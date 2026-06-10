@@ -16,6 +16,8 @@ add_executable(OneSyncWin7 WIN32
     src/Endpoint.h
     src/FileReceiver.cpp
     src/FileReceiver.h
+    src/IgnoreMatcher.cpp
+    src/IgnoreMatcher.h
     src/MainWindow.cpp
     src/MainWindow.h
     src/PeerIdentity.cpp

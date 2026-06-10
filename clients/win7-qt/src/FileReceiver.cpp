@@ -1,5 +1,7 @@
 #include "FileReceiver.h"
 
+#include "IgnoreMatcher.h"
+
 #include <QCryptographicHash>
 #include <QDir>
 #include <QElapsedTimer>
@@ -19,8 +21,11 @@ const int kFileIDSize = 32;
 const QString kPartDirectoryName = QStringLiteral(".onesync-part");
 } // namespace
 
-bool FileReceiver::receive(QSslSocket* socket, const QString& root, const SyncProtocol::Frame& beginFrame, QString* transferredPath, QString* error)
+bool FileReceiver::receive(QSslSocket* socket, const QString& root, const SyncProtocol::Frame& beginFrame, Options* options, QString* transferredPath, QString* error)
 {
+    if (isCancelled(options, error)) {
+        return false;
+    }
     QString relativePath;
     qint64 totalSize = 0;
     QByteArray expectedHash;
@@ -30,26 +35,40 @@ bool FileReceiver::receive(QSslSocket* socket, const QString& root, const SyncPr
         if (error != nullptr && error->isEmpty()) {
             *error = QStringLiteral("文件开始消息不正确。");
         }
-        (void)writeError(socket, beginFrame.requestID);
+        (void)writeError(socket, beginFrame.requestID, options);
         return false;
     }
     if (makeFileID(relativePath, expectedHash) != fileID) {
         if (error != nullptr) {
             *error = QStringLiteral("文件 ID 校验失败。");
         }
-        (void)writeError(socket, beginFrame.requestID);
+        (void)writeError(socket, beginFrame.requestID, options);
         return false;
+    }
+
+    IgnoreMatcher ignoreMatcher(options != nullptr ? options->ignoreRules : QStringList());
+    if (ignoreMatcher.matches(relativePath, false)) {
+        if (options != nullptr) {
+            options->skipped = true;
+        }
+        if (transferredPath != nullptr) {
+            *transferredPath = relativePath;
+        }
+        return discardFile(socket, beginFrame, totalSize, expectedHash, options, error);
+    }
+    if (options != nullptr) {
+        options->skipped = false;
     }
 
     const QString targetPath = safeTargetPath(root, relativePath, error);
     if (targetPath.isEmpty() || !prepareTargetParent(root, relativePath, error)) {
-        (void)writeError(socket, beginFrame.requestID);
+        (void)writeError(socket, beginFrame.requestID, options);
         return false;
     }
 
     QString partDir;
     if (!preparePartDir(root, &partDir, error)) {
-        (void)writeError(socket, beginFrame.requestID);
+        (void)writeError(socket, beginFrame.requestID, options);
         return false;
     }
     const QString partPath = QDir(partDir).filePath(QString::fromLatin1(fileID.toHex()) + QStringLiteral(".part"));
@@ -58,7 +77,7 @@ bool FileReceiver::receive(QSslSocket* socket, const QString& root, const SyncPr
         if (error != nullptr) {
             *error = QStringLiteral("打开临时文件失败：%1").arg(part.errorString());
         }
-        (void)writeError(socket, beginFrame.requestID);
+        (void)writeError(socket, beginFrame.requestID, options);
         return false;
     }
 
@@ -68,7 +87,7 @@ bool FileReceiver::receive(QSslSocket* socket, const QString& root, const SyncPr
             if (error != nullptr) {
                 *error = QStringLiteral("重置临时文件失败：%1").arg(part.errorString());
             }
-            (void)writeError(socket, beginFrame.requestID);
+            (void)writeError(socket, beginFrame.requestID, options);
             return false;
         }
         offset = 0;
@@ -77,24 +96,27 @@ bool FileReceiver::receive(QSslSocket* socket, const QString& root, const SyncPr
         if (error != nullptr) {
             *error = QStringLiteral("定位临时文件失败。");
         }
-        (void)writeError(socket, beginFrame.requestID);
+        (void)writeError(socket, beginFrame.requestID, options);
         return false;
     }
 
-    if (!writeAck(socket, beginFrame.requestID, encodeOffset(offset), error)) {
+    if (!writeAck(socket, beginFrame.requestID, encodeOffset(offset), options, error)) {
         return false;
     }
 
     for (;;) {
+        if (isCancelled(options, error)) {
+            return false;
+        }
         SyncProtocol::Frame frame;
-        if (!readFrame(socket, kSyncMessageTimeoutMs, &frame, error)) {
+        if (!readFrame(socket, kSyncMessageTimeoutMs, &frame, options, error)) {
             return false;
         }
         if (frame.requestID != beginFrame.requestID) {
             if (error != nullptr) {
                 *error = QStringLiteral("文件传输 request id 不一致。");
             }
-            (void)writeError(socket, frame.requestID);
+            (void)writeError(socket, frame.requestID, options);
             return false;
         }
 
@@ -105,25 +127,25 @@ bool FileReceiver::receive(QSslSocket* socket, const QString& root, const SyncPr
                 if (error != nullptr && error->isEmpty()) {
                     *error = QStringLiteral("文件分块偏移或长度不正确。");
                 }
-                (void)writeError(socket, frame.requestID);
+                (void)writeError(socket, frame.requestID, options);
                 return false;
             }
             if (part.write(chunk) != chunk.size()) {
                 if (error != nullptr) {
                     *error = QStringLiteral("写入临时文件失败：%1").arg(part.errorString());
                 }
-                (void)writeError(socket, frame.requestID);
+                (void)writeError(socket, frame.requestID, options);
                 return false;
             }
             if (!part.flush()) {
                 if (error != nullptr) {
                     *error = QStringLiteral("刷新临时文件失败：%1").arg(part.errorString());
                 }
-                (void)writeError(socket, frame.requestID);
+                (void)writeError(socket, frame.requestID, options);
                 return false;
             }
             offset += chunk.size();
-            if (!writeAck(socket, frame.requestID, encodeOffset(offset), error)) {
+            if (!writeAck(socket, frame.requestID, encodeOffset(offset), options, error)) {
                 return false;
             }
             continue;
@@ -136,7 +158,7 @@ bool FileReceiver::receive(QSslSocket* socket, const QString& root, const SyncPr
                 if (error != nullptr && error->isEmpty()) {
                     *error = QStringLiteral("文件结束元数据不匹配。");
                 }
-                (void)writeError(socket, frame.requestID);
+                (void)writeError(socket, frame.requestID, options);
                 return false;
             }
             part.close();
@@ -146,7 +168,7 @@ bool FileReceiver::receive(QSslSocket* socket, const QString& root, const SyncPr
                 if (error != nullptr && error->isEmpty()) {
                     *error = QStringLiteral("接收文件哈希校验失败。");
                 }
-                (void)writeError(socket, frame.requestID);
+                (void)writeError(socket, frame.requestID, options);
                 return false;
             }
             QFile::remove(targetPath);
@@ -154,19 +176,19 @@ bool FileReceiver::receive(QSslSocket* socket, const QString& root, const SyncPr
                 if (error != nullptr) {
                     *error = QStringLiteral("替换目标文件失败：%1").arg(relativePath);
                 }
-                (void)writeError(socket, frame.requestID);
+                (void)writeError(socket, frame.requestID, options);
                 return false;
             }
             if (transferredPath != nullptr) {
                 *transferredPath = relativePath;
             }
-            return writeAck(socket, frame.requestID, QByteArray(), error);
+            return writeAck(socket, frame.requestID, QByteArray(), options, error);
         }
 
         if (error != nullptr) {
             *error = QStringLiteral("文件传输中收到未知消息。");
         }
-        (void)writeError(socket, frame.requestID);
+        (void)writeError(socket, frame.requestID, options);
         return false;
     }
 }
@@ -370,21 +392,97 @@ QByteArray FileReceiver::hashFile(const QString& path, QString* error)
     return sha.result();
 }
 
-bool FileReceiver::writeAck(QSslSocket* socket, quint64 requestID, const QByteArray& payload, QString* error)
+bool FileReceiver::isCancelled(const Options* options, QString* error)
 {
-    return writeAll(socket, SyncProtocol::buildFrame(SyncProtocol::MessageAck, requestID, payload), kSyncMessageTimeoutMs, error);
+    if (options != nullptr && options->cancelled != nullptr && options->cancelled->loadAcquire() != 0) {
+        if (error != nullptr) {
+            *error = QStringLiteral("同步已取消。");
+        }
+        return true;
+    }
+    return false;
 }
 
-bool FileReceiver::writeError(QSslSocket* socket, quint64 requestID)
-{
-    QString ignored;
-    return writeAll(socket, SyncProtocol::buildFrame(SyncProtocol::MessageError, requestID, QByteArray()), kSyncMessageTimeoutMs, &ignored);
-}
-
-bool FileReceiver::writeAll(QSslSocket* socket, const QByteArray& data, int timeoutMs, QString* error)
+bool FileReceiver::discardFile(QSslSocket* socket, const SyncProtocol::Frame& beginFrame, qint64 totalSize, const QByteArray& expectedHash, Options* options, QString* error)
 {
     qint64 offset = 0;
+    QCryptographicHash sha(QCryptographicHash::Sha256);
+    if (!writeAck(socket, beginFrame.requestID, encodeOffset(offset), options, error)) {
+        return false;
+    }
+
+    for (;;) {
+        if (isCancelled(options, error)) {
+            return false;
+        }
+        SyncProtocol::Frame frame;
+        if (!readFrame(socket, kSyncMessageTimeoutMs, &frame, options, error)) {
+            return false;
+        }
+        if (frame.requestID != beginFrame.requestID) {
+            if (error != nullptr) {
+                *error = QStringLiteral("忽略文件传输 request id 不一致。");
+            }
+            (void)writeError(socket, frame.requestID, options);
+            return false;
+        }
+        if (frame.type == SyncProtocol::MessageFileChunk) {
+            qint64 chunkOffset = 0;
+            QByteArray chunk;
+            if (!decodeChunk(frame.payload, &chunkOffset, &chunk, error) || chunkOffset != offset || qint64(chunk.size()) > totalSize - offset) {
+                if (error != nullptr && error->isEmpty()) {
+                    *error = QStringLiteral("忽略文件分块偏移或长度不正确。");
+                }
+                (void)writeError(socket, frame.requestID, options);
+                return false;
+            }
+            sha.addData(chunk);
+            offset += chunk.size();
+            if (!writeAck(socket, frame.requestID, encodeOffset(offset), options, error)) {
+                return false;
+            }
+            continue;
+        }
+        if (frame.type == SyncProtocol::MessageFileEnd) {
+            qint64 endSize = 0;
+            QByteArray endHash;
+            if (!decodeEnd(frame.payload, &endSize, &endHash, error) || endSize != totalSize || offset != totalSize || endHash != expectedHash || sha.result() != expectedHash) {
+                if (error != nullptr && error->isEmpty()) {
+                    *error = QStringLiteral("忽略文件结束元数据不匹配。");
+                }
+                (void)writeError(socket, frame.requestID, options);
+                return false;
+            }
+            return writeAck(socket, frame.requestID, QByteArray(), options, error);
+        }
+        if (error != nullptr) {
+            *error = QStringLiteral("忽略文件传输中收到未知消息。");
+        }
+        (void)writeError(socket, frame.requestID, options);
+        return false;
+    }
+}
+
+bool FileReceiver::writeAck(QSslSocket* socket, quint64 requestID, const QByteArray& payload, Options* options, QString* error)
+{
+    return writeAll(socket, SyncProtocol::buildFrame(SyncProtocol::MessageAck, requestID, payload), kSyncMessageTimeoutMs, options, error);
+}
+
+bool FileReceiver::writeError(QSslSocket* socket, quint64 requestID, Options* options)
+{
+    QString ignored;
+    return writeAll(socket, SyncProtocol::buildFrame(SyncProtocol::MessageError, requestID, QByteArray()), kSyncMessageTimeoutMs, options, &ignored);
+}
+
+bool FileReceiver::writeAll(QSslSocket* socket, const QByteArray& data, int timeoutMs, Options* options, QString* error)
+{
+    qint64 offset = 0;
+    QElapsedTimer timer;
+    timer.start();
     while (offset < data.size()) {
+        if (isCancelled(options, error)) {
+            return false;
+        }
         const qint64 written = socket->write(data.constData() + offset, data.size() - offset);
         if (written < 0) {
             if (error != nullptr) {
@@ -393,7 +491,20 @@ bool FileReceiver::writeAll(QSslSocket* socket, const QByteArray& data, int time
             return false;
         }
         offset += written;
-        if (!socket->waitForBytesWritten(timeoutMs)) {
+        if (options != nullptr && options->sentBytes != nullptr && written > 0) {
+            *options->sentBytes += quint64(written);
+            if (options->onTrafficChanged) {
+                options->onTrafficChanged();
+            }
+        }
+        const int remaining = timeoutMs - int(timer.elapsed());
+        if (remaining <= 0) {
+            if (error != nullptr) {
+                *error = QStringLiteral("网络写入超时：%1").arg(socket->errorString());
+            }
+            return false;
+        }
+        if (!socket->waitForBytesWritten(qMin(remaining, 500)) && timer.elapsed() >= timeoutMs) {
             if (error != nullptr) {
                 *error = QStringLiteral("网络写入超时：%1").arg(socket->errorString());
             }
@@ -403,29 +514,45 @@ bool FileReceiver::writeAll(QSslSocket* socket, const QByteArray& data, int time
     return true;
 }
 
-QByteArray FileReceiver::readExact(QSslSocket* socket, int size, int timeoutMs, QString* error)
+QByteArray FileReceiver::readExact(QSslSocket* socket, int size, int timeoutMs, Options* options, QString* error)
 {
     QByteArray data;
     QElapsedTimer timer;
     timer.start();
     while (data.size() < size) {
+        if (isCancelled(options, error)) {
+            return {};
+        }
         if (socket->bytesAvailable() <= 0) {
             const int remaining = timeoutMs - int(timer.elapsed());
-            if (remaining <= 0 || !socket->waitForReadyRead(remaining)) {
+            if (remaining <= 0) {
+                if (error != nullptr) {
+                    *error = QStringLiteral("网络读取超时或失败：%1").arg(socket->errorString());
+                }
+                return {};
+            }
+            if (!socket->waitForReadyRead(qMin(remaining, 500)) && timer.elapsed() >= timeoutMs) {
                 if (error != nullptr) {
                     *error = QStringLiteral("网络读取超时或失败：%1").arg(socket->errorString());
                 }
                 return {};
             }
         }
-        data.append(socket->read(size - data.size()));
+        const QByteArray chunk = socket->read(size - data.size());
+        if (options != nullptr && options->receivedBytes != nullptr && !chunk.isEmpty()) {
+            *options->receivedBytes += quint64(chunk.size());
+            if (options->onTrafficChanged) {
+                options->onTrafficChanged();
+            }
+        }
+        data.append(chunk);
     }
     return data;
 }
 
-bool FileReceiver::readFrame(QSslSocket* socket, int timeoutMs, SyncProtocol::Frame* frame, QString* error)
+bool FileReceiver::readFrame(QSslSocket* socket, int timeoutMs, SyncProtocol::Frame* frame, Options* options, QString* error)
 {
-    const QByteArray header = readExact(socket, 14, timeoutMs, error);
+    const QByteArray header = readExact(socket, 14, timeoutMs, options, error);
     if (header.size() != 14) {
         return false;
     }
@@ -436,7 +563,7 @@ bool FileReceiver::readFrame(QSslSocket* socket, int timeoutMs, SyncProtocol::Fr
         }
         return false;
     }
-    const QByteArray payload = payloadLength == 0 ? QByteArray() : readExact(socket, int(payloadLength), timeoutMs, error);
+    const QByteArray payload = payloadLength == 0 ? QByteArray() : readExact(socket, int(payloadLength), timeoutMs, options, error);
     if (payload.size() != int(payloadLength)) {
         return false;
     }

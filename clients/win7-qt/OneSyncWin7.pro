@@ -15,6 +15,7 @@ SOURCES += \
     src/main.cpp \
     src/Endpoint.cpp \
     src/FileReceiver.cpp \
+    src/IgnoreMatcher.cpp \
     src/MainWindow.cpp \
     src/PeerIdentity.cpp \
     src/SnapshotScanner.cpp \
@@ -25,6 +26,7 @@ SOURCES += \
 HEADERS += \
     src/Endpoint.h \
     src/FileReceiver.h \
+    src/IgnoreMatcher.h \
     src/MainWindow.h \
     src/PeerIdentity.h \
     src/SnapshotScanner.h \
