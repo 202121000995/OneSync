@@ -78,7 +78,7 @@ install_client() {
 	url=$(latest_linux_package_url)
 	if [ -z "$url" ]; then
 		printf 'Cannot find latest OneSync Linux package from GitHub repo %s.\n' "$REPO" >&2
-		printf 'If GitHub API is blocked by the proxy, retry with RELEASE_TAG=v1.00 or PACKAGE_URL=https://...tar.gz.\n' >&2
+		printf 'If GitHub API is blocked by the proxy, retry with RELEASE_TAG=v1.01 or PACKAGE_URL=https://...tar.gz.\n' >&2
 		exit 1
 	fi
 

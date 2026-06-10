@@ -2018,3 +2018,43 @@
 - 左侧设备管理目前是基于任务连接状态的汇总视图，还没有做重命名、禁用、踢出设备等操作。
 - 连接管理目前是状态汇总视图，TLS 实时探测和网络诊断按钮后续再接。
 - Win7 原生窗口标题栏仍由系统绘制；本次主要统一弹窗内容区和控件风格。
+
+## v1.01 设备管理、连接诊断与打包审核
+
+审核分支：`feature/v1.01-device-diagnostics`
+
+审核结论：通过。
+
+审核说明：
+
+- 根版本号从 `1.00` 提升到 `1.01`，Windows/Linux 主包、Linux 一键安装脚本、Relay 部署脚本和文档示例统一使用 `v1.01`。
+- Win7 Qt 关于页显示版本 `1.01`。
+- Win7 Qt 设备管理页新增“重命名设备”和“禁用/启用设备”，并把设备别名、禁用状态写入本地任务配置和诊断文本。
+- Win7 Qt 启动任务时会阻止已禁用设备启动，任务表格和设备管理页会显示“已禁用/禁用”。
+- Win7 Qt 连接管理页新增“测试选中连接”，会对直连或 Relay TLS 地址做握手测试，并把成功或失败原因写入任务日志。
+- 根 README 和 Win7 Qt README 已更新当前功能、版本号和打包路径说明。
+
+验证结果：
+
+- `git diff --check` 通过。
+- `sh -n clients/win7-qt/build-win7.sh` 通过。
+- `sh -n packaging/package-acceptance.sh` 通过。
+- `sh clients/win7-qt/build-win7.sh` 成功，生成 `clients/win7-qt/dist/OneSyncWin7-win7-x86-v1.01.zip`。
+- `unzip -t clients/win7-qt/dist/OneSyncWin7-win7-x86-v1.01.zip` 通过。
+- `file clients/win7-qt/release-win7/OneSyncWin7.exe` 显示 `PE32 executable (GUI) Intel 80386, for MS Windows`。
+- `strings clients/win7-qt/release-win7/OneSyncWin7.exe | rg "GetSystemTimePreciseAsFileTime"` 无匹配。
+- `PATH=/Users/apple/Library/Go/sdk/go1.26.3/bin:$PATH sh packaging/package-acceptance.sh` 成功，生成主 Windows/Linux v1.01 包。
+- `unzip -t dist/acceptance-packages/onesync-windows-amd64-v1.01.zip` 通过。
+- `tar -tzf dist/acceptance-packages/onesync-linux-amd64-v1.01.tar.gz` 通过。
+
+本地包路径：
+
+- `/Users/apple/Documents/同步软件/clients/win7-qt/dist/OneSyncWin7-win7-x86-v1.01.zip`
+- `/Users/apple/Documents/同步软件/dist/acceptance-packages/onesync-windows-amd64-v1.01.zip`
+- `/Users/apple/Documents/同步软件/dist/acceptance-packages/onesync-linux-amd64-v1.01.tar.gz`
+
+剩余风险：
+
+- Win7 Qt 的 TLS 连通性测试只是握手级诊断，不等同于完整同步验收。
+- 设备管理当前是按任务维度保存别名和禁用状态，还不是跨任务统一设备库。
+- 本次在 macOS 交叉编译和压缩包完整性层面验证，仍需要真实 Win7/Win10/Linux 多机联调确认体验。

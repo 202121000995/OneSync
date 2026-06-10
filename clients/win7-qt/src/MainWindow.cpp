@@ -1,5 +1,6 @@
 #include "MainWindow.h"
 
+#include "Endpoint.h"
 #include "SnapshotScanner.h"
 #include "SourceConnector.h"
 #include "TargetConnector.h"
@@ -24,6 +25,7 @@
 #include <QGroupBox>
 #include <QHeaderView>
 #include <QIODevice>
+#include <QInputDialog>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QLabel>
@@ -35,6 +37,8 @@
 #include <QRandomGenerator>
 #include <QRegExp>
 #include <QSettings>
+#include <QSslCertificate>
+#include <QSslSocket>
 #include <QStandardPaths>
 #include <QStackedWidget>
 #include <QStyle>
@@ -157,6 +161,8 @@ void applyModernDialogStyle(QDialog* dialog)
     )"));
 }
 } // namespace
+
+const QString kWin7Version = QStringLiteral("1.01");
 
 MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent)
@@ -345,10 +351,18 @@ void MainWindow::buildUi()
     devicePage->setObjectName(QStringLiteral("card"));
     auto* deviceLayout = new QVBoxLayout(devicePage);
     deviceLayout->setContentsMargins(18, 16, 18, 18);
-    auto* deviceHint = new QLabel(QStringLiteral("这里汇总每个同步任务已知的设备状态。Win7 Qt 当前从任务连接状态中统计设备，后续会扩展为重命名、禁用和踢出。"));
+    auto* deviceToolbar = new QHBoxLayout();
+    auto* deviceHint = new QLabel(QStringLiteral("这里汇总每个同步任务已知的设备状态。当前可重命名设备、禁用/启用设备。"));
     deviceHint->setWordWrap(true);
-    deviceLayout->addWidget(deviceHint);
-    deviceTable = new QTableWidget(0, 6, this);
+    auto* renameDeviceButton = toolbarButton(QStringLiteral("重命名设备"));
+    auto* disableDeviceButton = toolbarButton(QStringLiteral("禁用/启用设备"));
+    connect(renameDeviceButton, &QPushButton::clicked, this, &MainWindow::renameSelectedDevice);
+    connect(disableDeviceButton, &QPushButton::clicked, this, &MainWindow::toggleSelectedDeviceDisabled);
+    deviceToolbar->addWidget(deviceHint, 1);
+    deviceToolbar->addWidget(renameDeviceButton);
+    deviceToolbar->addWidget(disableDeviceButton);
+    deviceLayout->addLayout(deviceToolbar);
+    deviceTable = new QTableWidget(0, 7, this);
     deviceTable->setObjectName(QStringLiteral("taskTable"));
     deviceTable->setSelectionBehavior(QAbstractItemView::SelectRows);
     deviceTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
@@ -358,11 +372,17 @@ void MainWindow::buildUi()
     deviceTable->setHorizontalHeaderLabels(QStringList()
         << QStringLiteral("任务")
         << QStringLiteral("类型")
+        << QStringLiteral("别名")
         << QStringLiteral("设备")
         << QStringLiteral("状态")
         << QStringLiteral("本地目录")
         << QStringLiteral("详情"));
     deviceTable->horizontalHeader()->setStretchLastSection(true);
+    connect(deviceTable, &QTableWidget::cellClicked, this, [this](int row, int) {
+        if (taskTable != nullptr && row >= 0 && row < tasks.size()) {
+            taskTable->selectRow(row);
+        }
+    });
     deviceLayout->addWidget(deviceTable, 1);
     pages->addWidget(devicePage);
 
@@ -370,9 +390,14 @@ void MainWindow::buildUi()
     connectionPage->setObjectName(QStringLiteral("card"));
     auto* connectionLayout = new QVBoxLayout(connectionPage);
     connectionLayout->setContentsMargins(18, 16, 18, 18);
-    auto* connectionHint = new QLabel(QStringLiteral("这里集中查看任务连接方式、源端/Relay 地址和最近状态。真实网络诊断按钮后续会接入 TLS 探测。"));
+    auto* connectionToolbar = new QHBoxLayout();
+    auto* connectionHint = new QLabel(QStringLiteral("这里集中查看任务连接方式、源端/Relay 地址和最近状态，并可测试 TLS 连通性。"));
     connectionHint->setWordWrap(true);
-    connectionLayout->addWidget(connectionHint);
+    auto* testConnectionButton = toolbarButton(QStringLiteral("测试选中连接"));
+    connect(testConnectionButton, &QPushButton::clicked, this, &MainWindow::testSelectedConnection);
+    connectionToolbar->addWidget(connectionHint, 1);
+    connectionToolbar->addWidget(testConnectionButton);
+    connectionLayout->addLayout(connectionToolbar);
     connectionTable = new QTableWidget(0, 6, this);
     connectionTable->setObjectName(QStringLiteral("taskTable"));
     connectionTable->setSelectionBehavior(QAbstractItemView::SelectRows);
@@ -388,6 +413,11 @@ void MainWindow::buildUi()
         << QStringLiteral("状态")
         << QStringLiteral("详情"));
     connectionTable->horizontalHeader()->setStretchLastSection(true);
+    connect(connectionTable, &QTableWidget::cellClicked, this, [this](int row, int) {
+        if (taskTable != nullptr && row >= 0 && row < tasks.size()) {
+            taskTable->selectRow(row);
+        }
+    });
     connectionLayout->addWidget(connectionTable, 1);
     pages->addWidget(connectionPage);
 
@@ -418,10 +448,10 @@ void MainWindow::buildUi()
     auto* aboutTitle = new QLabel(QStringLiteral("OneSync Win7 Qt"));
     aboutTitle->setObjectName(QStringLiteral("pageTitle"));
     auto* aboutText = new QLabel(QStringLiteral(
-        "版本：0.1.0\n"
+        "版本：%1\n"
         "定位：Windows 7 兼容客户端\n"
         "能力：创建同步、加入同步、Relay TLS、任务日志、诊断导出、托盘运行\n"
-        "说明：Win7 源端当前优先使用 Relay；直连监听会在后续版本继续完善。"));
+        "说明：Win7 源端当前优先使用 Relay；直连监听会在后续版本继续完善。").arg(kWin7Version));
     aboutText->setWordWrap(true);
     aboutLayout->addWidget(aboutTitle);
     aboutLayout->addWidget(aboutText);
@@ -601,6 +631,10 @@ void MainWindow::startSelectedTask()
     }
     if (task->running) {
         QMessageBox::information(this, QStringLiteral("任务正在运行"), QStringLiteral("这个任务已经在运行。"));
+        return;
+    }
+    if (task->deviceDisabled) {
+        QMessageBox::information(this, QStringLiteral("设备已禁用"), QStringLiteral("这个任务的设备已禁用，请到设备管理中启用后再启动。"));
         return;
     }
     QString error;
@@ -868,6 +902,76 @@ void MainWindow::deleteSelectedTask()
     appendLog(QStringLiteral("已删除同步任务：%1").arg(name));
 }
 
+void MainWindow::renameSelectedDevice()
+{
+    SyncTask* task = selectedTask();
+    if (task == nullptr) {
+        QMessageBox::information(this, QStringLiteral("未选择任务"), QStringLiteral("请先在设备管理中选择一个任务。"));
+        return;
+    }
+    bool ok = false;
+    const QString current = task->deviceAlias.isEmpty() ? task->name : task->deviceAlias;
+    const QString alias = QInputDialog::getText(
+        this,
+        QStringLiteral("重命名设备"),
+        QStringLiteral("设备别名"),
+        QLineEdit::Normal,
+        current,
+        &ok
+    ).trimmed();
+    if (!ok) {
+        return;
+    }
+    if (alias.isEmpty() || alias.size() > 64) {
+        QMessageBox::warning(this, QStringLiteral("别名不可用"), QStringLiteral("设备别名不能为空，且不能超过 64 个字符。"));
+        return;
+    }
+    task->deviceAlias = alias;
+    saveTasks();
+    refreshTaskTable();
+    appendTaskLog(task->id, QStringLiteral("设备别名已改为：%1").arg(alias));
+}
+
+void MainWindow::toggleSelectedDeviceDisabled()
+{
+    SyncTask* task = selectedTask();
+    if (task == nullptr) {
+        QMessageBox::information(this, QStringLiteral("未选择任务"), QStringLiteral("请先在设备管理中选择一个任务。"));
+        return;
+    }
+    if (task->running) {
+        QMessageBox::information(this, QStringLiteral("任务正在运行"), QStringLiteral("请先暂停任务，再禁用或启用设备。"));
+        return;
+    }
+    task->deviceDisabled = !task->deviceDisabled;
+    task->detail = task->deviceDisabled ? QStringLiteral("设备已禁用") : QStringLiteral("设备已启用");
+    if (task->deviceDisabled) {
+        task->connectedDevices = 0;
+        task->status = QStringLiteral("停止");
+    }
+    saveTasks();
+    refreshTaskTable();
+    appendTaskLog(task->id, task->deviceDisabled ? QStringLiteral("设备已禁用。") : QStringLiteral("设备已启用。"));
+}
+
+void MainWindow::testSelectedConnection()
+{
+    SyncTask* task = selectedTask();
+    if (task == nullptr) {
+        QMessageBox::information(this, QStringLiteral("未选择任务"), QStringLiteral("请先在连接管理中选择一个任务。"));
+        return;
+    }
+    QString detail;
+    appendTaskLog(task->id, QStringLiteral("开始测试连接。"));
+    const bool ok = testTaskConnection(*task, &detail);
+    appendTaskLog(task->id, detail);
+    QMessageBox::information(
+        this,
+        ok ? QStringLiteral("连接测试通过") : QStringLiteral("连接测试失败"),
+        detail
+    );
+}
+
 void MainWindow::exportDiagnostics()
 {
     const QString defaultDir = QStandardPaths::writableLocation(QStandardPaths::DesktopLocation);
@@ -999,6 +1103,8 @@ void MainWindow::loadTasks()
         task.id = settings.value(QStringLiteral("id"), newTaskID()).toString();
         task.role = settings.value(QStringLiteral("role")).toString() == QStringLiteral("source") ? SyncTask::Source : SyncTask::Target;
         task.name = settings.value(QStringLiteral("name"), QStringLiteral("接收任务")).toString();
+        task.deviceAlias = settings.value(QStringLiteral("deviceAlias")).toString();
+        task.deviceDisabled = settings.value(QStringLiteral("deviceDisabled")).toBool();
         task.linkText = settings.value(QStringLiteral("link")).toString();
         task.targetFolder = settings.value(QStringLiteral("targetFolder")).toString();
         task.ignoreRules = settings.value(QStringLiteral("ignoreRules")).toStringList();
@@ -1012,6 +1118,10 @@ void MainWindow::loadTasks()
         if (!parseTaskLink(&task, &error)) {
             task.status = QStringLiteral("链接无效");
             task.detail = error;
+        }
+        if (task.deviceDisabled) {
+            task.status = QStringLiteral("停止");
+            task.detail = QStringLiteral("设备已禁用");
         }
         tasks.append(task);
     }
@@ -1028,6 +1138,8 @@ void MainWindow::saveTasks() const
         settings.setValue(QStringLiteral("id"), task.id);
         settings.setValue(QStringLiteral("role"), task.role == SyncTask::Source ? QStringLiteral("source") : QStringLiteral("target"));
         settings.setValue(QStringLiteral("name"), task.name);
+        settings.setValue(QStringLiteral("deviceAlias"), task.deviceAlias);
+        settings.setValue(QStringLiteral("deviceDisabled"), task.deviceDisabled);
         settings.setValue(QStringLiteral("link"), task.linkText);
         settings.setValue(QStringLiteral("targetFolder"), task.targetFolder);
         settings.setValue(QStringLiteral("ignoreRules"), task.ignoreRules);
@@ -1045,11 +1157,13 @@ void MainWindow::refreshTaskTable()
     taskTable->setRowCount(tasks.size());
     for (int row = 0; row < tasks.size(); ++row) {
         const SyncTask& task = tasks[row];
-        const QString devices = QStringLiteral("%1 / %2").arg(task.connectedDevices).arg(task.totalDevices);
+        const QString devices = task.deviceDisabled
+            ? QStringLiteral("禁用")
+            : QStringLiteral("%1 / %2").arg(task.connectedDevices).arg(task.totalDevices);
         const QStringList values = {
             roleLabel(task),
             task.name,
-            task.status,
+            task.deviceDisabled ? QStringLiteral("已禁用") : task.status,
             devices,
             task.localBytes > 0 ? formatBytes(task.localBytes) : QStringLiteral("-"),
             task.globalBytes > 0 ? formatBytes(task.globalBytes) : QStringLiteral("-"),
@@ -1063,8 +1177,11 @@ void MainWindow::refreshTaskTable()
                 taskTable->setItem(row, column, item);
             }
             item->setText(values[column]);
-            item->setToolTip(QStringLiteral("%1\n接收总量：%2\n发送总量：%3\n忽略：%4 项")
-                .arg(task.detail, formatBytes(task.receivedBytes), formatBytes(task.sentBytes))
+            item->setToolTip(QStringLiteral("%1\n设备别名：%2\n接收总量：%3\n发送总量：%4\n忽略：%5 项")
+                .arg(task.detail,
+                    task.deviceAlias.isEmpty() ? QStringLiteral("-") : task.deviceAlias,
+                    formatBytes(task.receivedBytes),
+                    formatBytes(task.sentBytes))
                 .arg(task.ignoredCount));
         }
     }
@@ -1170,12 +1287,15 @@ void MainWindow::refreshSecondaryPages()
         deviceTable->setRowCount(tasks.size());
         for (int row = 0; row < tasks.size(); ++row) {
             const SyncTask& task = tasks[row];
-            const QString device = QStringLiteral("%1 / %2").arg(task.connectedDevices).arg(task.totalDevices);
+            const QString device = task.deviceDisabled
+                ? QStringLiteral("禁用")
+                : QStringLiteral("%1 / %2").arg(task.connectedDevices).arg(task.totalDevices);
             const QStringList values = {
                 task.name,
                 roleLabel(task),
+                task.deviceAlias.isEmpty() ? QStringLiteral("-") : task.deviceAlias,
                 device,
-                task.running ? QStringLiteral("在线") : QStringLiteral("未连接"),
+                task.deviceDisabled ? QStringLiteral("已禁用") : (task.running ? QStringLiteral("在线") : QStringLiteral("未连接")),
                 task.targetFolder,
                 task.detail
             };
@@ -1203,7 +1323,7 @@ void MainWindow::refreshSecondaryPages()
                 connection,
                 task.linkReady ? task.link.endpoint : QStringLiteral("-"),
                 task.linkReady && task.link.hasRelay() ? task.link.relayEndpoint : QStringLiteral("-"),
-                task.status,
+                task.deviceDisabled ? QStringLiteral("已禁用") : task.status,
                 task.detail
             };
             for (int column = 0; column < values.size(); ++column) {
@@ -1228,15 +1348,34 @@ void MainWindow::refreshSecondaryPages()
 
 int MainWindow::selectedTaskIndex() const
 {
+    return selectedTaskIndexFromTables();
+}
+
+int MainWindow::selectedTaskIndexFromTables() const
+{
     if (taskTable == nullptr) {
         return -1;
     }
     const QList<QTableWidgetItem*> selected = taskTable->selectedItems();
-    if (selected.isEmpty()) {
-        return -1;
+    if (!selected.isEmpty()) {
+        const int row = selected.first()->row();
+        return row >= 0 && row < tasks.size() ? row : -1;
     }
-    const int row = selected.first()->row();
-    return row >= 0 && row < tasks.size() ? row : -1;
+    if (deviceTable != nullptr) {
+        const QList<QTableWidgetItem*> deviceSelected = deviceTable->selectedItems();
+        if (!deviceSelected.isEmpty()) {
+            const int row = deviceSelected.first()->row();
+            return row >= 0 && row < tasks.size() ? row : -1;
+        }
+    }
+    if (connectionTable != nullptr) {
+        const QList<QTableWidgetItem*> connectionSelected = connectionTable->selectedItems();
+        if (!connectionSelected.isEmpty()) {
+            const int row = connectionSelected.first()->row();
+            return row >= 0 && row < tasks.size() ? row : -1;
+        }
+    }
+    return -1;
 }
 
 MainWindow::SyncTask* MainWindow::selectedTask()
@@ -1341,6 +1480,55 @@ QString MainWindow::buildSourceLink(const QString& relayEndpoint, const QString&
     object.insert(QStringLiteral("expires_at"), expiresAt.toString(Qt::ISODateWithMs));
     const QByteArray json = QJsonDocument(object).toJson(QJsonDocument::Compact);
     return base64Url(json);
+}
+
+bool MainWindow::testTaskConnection(const SyncTask& task, QString* detail) const
+{
+    SyncLink link = task.link;
+    if (!task.linkReady) {
+        QString error;
+        if (!SyncLinkParser::parse(task.linkText, &link, &error)) {
+            if (detail != nullptr) {
+                *detail = QStringLiteral("连接测试失败：同步链接无效：%1").arg(error);
+            }
+            return false;
+        }
+    }
+
+    const QString endpointText = link.hasRelay() ? link.relayEndpoint : link.endpoint;
+    Endpoint endpoint;
+    QString error;
+    if (!EndpointParser::parse(endpointText, &endpoint, &error)) {
+        if (detail != nullptr) {
+            *detail = QStringLiteral("连接测试失败：地址格式错误：%1").arg(error);
+        }
+        return false;
+    }
+
+    QSslSocket socket;
+    const QList<QSslCertificate> certificates = QSslCertificate::fromData(link.caCertificatePem.toUtf8(), QSsl::Pem);
+    if (!certificates.isEmpty()) {
+        socket.setCaCertificates(certificates);
+    }
+    socket.setPeerVerifyMode(QSslSocket::VerifyPeer);
+    socket.setPeerVerifyName(endpoint.host);
+    socket.connectToHostEncrypted(endpoint.host, endpoint.port);
+    if (!socket.waitForEncrypted(8000)) {
+        if (detail != nullptr) {
+            *detail = QStringLiteral("连接测试失败：%1 %2。地址：%3")
+                .arg(link.hasRelay() ? QStringLiteral("Relay TLS") : QStringLiteral("直连 TLS"),
+                    socket.errorString(),
+                    endpoint.display());
+        }
+        return false;
+    }
+    socket.disconnectFromHost();
+    if (detail != nullptr) {
+        *detail = QStringLiteral("连接测试通过：%1 握手成功。地址：%2")
+            .arg(link.hasRelay() ? QStringLiteral("Relay TLS") : QStringLiteral("直连 TLS"),
+                endpoint.display());
+    }
+    return true;
 }
 
 bool MainWindow::runTaskDialog(SyncTask* task, bool editing)
@@ -1608,6 +1796,8 @@ QString MainWindow::taskDiagnosticsText(const SyncTask& task) const
     QString text;
     text += QStringLiteral("任务: %1\n").arg(task.name);
     text += QStringLiteral("类型: %1\n").arg(roleLabel(task));
+    text += QStringLiteral("设备别名: %1\n").arg(task.deviceAlias.isEmpty() ? QStringLiteral("-") : task.deviceAlias);
+    text += QStringLiteral("设备禁用: %1\n").arg(task.deviceDisabled ? QStringLiteral("是") : QStringLiteral("否"));
     text += QStringLiteral("状态: %1\n").arg(task.status);
     text += QStringLiteral("详情: %1\n").arg(task.detail);
     text += QStringLiteral("%1目录: %2\n").arg(isSourceTask(task) ? QStringLiteral("发送") : QStringLiteral("接收"), task.targetFolder);

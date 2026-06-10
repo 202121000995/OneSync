@@ -20,6 +20,8 @@
 - 接收/发送列显示任务本轮平均速度，悬停可看收发总量。
 - 日志支持全部日志、选中任务和指定任务过滤。
 - 可导出全部诊断，也可只导出选中任务诊断。
+- 设备管理页可重命名设备、禁用/启用任务设备状态。
+- 连接管理页可对选中任务发起 TLS 连通性测试，失败原因会写入任务日志。
 - 发送任务可通过 Relay 等待目标端接入，认证后请求目标端快照、生成同步计划并发送新增/变更文件。
 - 生成并保存目标端稳定设备身份 `peer_id`。
 - 通过 TLS 连接直连源端或 Relay。
@@ -34,7 +36,7 @@
 - Windows qmake 打包时使用 OneSync 图标。
 - 导出诊断文本。
 
-注意：macOS 上的 Qt 只能生成 macOS 可执行文件，不能直接生成 Windows `.exe`。Win7 `.exe` 需要在 Windows Qt 5 环境里构建，或准备 Windows 交叉编译工具链。
+注意：当前开发机已经准备了 Windows Qt 5.12.12 MinGW 32-bit 交叉编译工具链，可直接用 `build-win7.sh` 生成 Win7 x86 测试包。普通 macOS Qt 环境本身仍不能直接生成 Windows `.exe`。
 
 尚未接入：
 
@@ -73,8 +75,8 @@ package-win7.cmd
 成功后会生成：
 
 ```text
-clients\win7-qt\dist\OneSyncWin7-win7-qt-v0.1.0\OneSyncWin7.exe
-clients\win7-qt\dist\OneSyncWin7-win7-qt-v0.1.0.zip
+clients\win7-qt\dist\OneSyncWin7-win7-qt-v1.01\OneSyncWin7.exe
+clients\win7-qt\dist\OneSyncWin7-win7-qt-v1.01.zip
 ```
 
 这个目录和 zip 会同时包含 Qt DLL。脚本会尽量自动复制 OpenSSL DLL；如果 Win7 上 TLS 连接失败，请检查 `libssl` / `libcrypto` DLL 是否在 exe 同目录。
@@ -91,7 +93,7 @@ sh clients/win7-qt/build-win7.sh
 
 ```text
 clients/win7-qt/release-win7/OneSyncWin7.exe
-clients/win7-qt/dist/OneSyncWin7-win7-x86-v0.1.0.zip
+clients/win7-qt/dist/OneSyncWin7-win7-x86-v1.01.zip
 ```
 
 这是 32 位 Windows GUI 程序，包内包含 Qt 5 DLL、OpenSSL DLL 和 `platforms/qwindows.dll`，可用于 Windows 7 SP1 测试。

@@ -35,6 +35,9 @@ private slots:
     void rescanSelectedTask();
     void editSelectedTask();
     void deleteSelectedTask();
+    void renameSelectedDevice();
+    void toggleSelectedDeviceDisabled();
+    void testSelectedConnection();
     void exportDiagnostics();
     void exportSelectedTaskDiagnostics();
     void showFromTray();
@@ -50,6 +53,7 @@ private:
         QString id;
         Role role = Target;
         QString name;
+        QString deviceAlias;
         QString linkText;
         QString targetFolder;
         QString status;
@@ -67,6 +71,7 @@ private:
         int localFiles = 0;
         int connectedDevices = 0;
         int totalDevices = 1;
+        bool deviceDisabled = false;
     };
 
     void closeEvent(QCloseEvent* event) override;
@@ -81,6 +86,7 @@ private:
     void switchPage(int page);
     void refreshSecondaryPages();
     int selectedTaskIndex() const;
+    int selectedTaskIndexFromTables() const;
     SyncTask* selectedTask();
     const SyncTask* selectedTask() const;
     SyncTask* taskByID(const QString& taskID);
@@ -92,6 +98,7 @@ private:
     bool runTaskDialog(SyncTask* task, bool editing);
     bool runSourceTaskDialog(SyncTask* task, bool editing);
     QString buildSourceLink(const QString& relayEndpoint, const QString& relayToken, const QString& caCertificatePem, QString* error) const;
+    bool testTaskConnection(const SyncTask& task, QString* detail) const;
     void showSourceLink(const SyncTask& task);
     void showTaskParameters(SyncTask* task);
     QString taskDiagnosticsText(const SyncTask& task) const;
