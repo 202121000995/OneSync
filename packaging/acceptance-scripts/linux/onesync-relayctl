@@ -138,6 +138,17 @@ print_token() {
 	printf '\n'
 }
 
+print_cert() {
+	need_root
+	if [ ! -f "$CERT" ]; then
+		printf 'Relay certificate file does not exist: %s\n' "$CERT" >&2
+		exit 1
+	fi
+	printf 'Relay certificate PEM:\n'
+	cat "$CERT"
+	printf '\n'
+}
+
 install_service() {
 	need_root
 	dir=$(script_dir)
@@ -186,8 +197,10 @@ EOF
 	printf 'Use Relay TLS address: <Relay domain or IP>:%s\n' "${LISTEN##*:}"
 	printf 'Use Relay token from: %s\n' "$TOKEN_FILE"
 	print_token
+	printf 'Use Relay certificate from: %s\n' "$CERT"
+	print_cert
 	printf 'Menu command: onesyncr\n'
-	printf 'Use: onesync-relayctl start|stop|restart|status|logs|token|upgrade|uninstall\n'
+	printf 'Use: onesync-relayctl start|stop|restart|status|logs|token|cert|upgrade|uninstall\n'
 }
 
 upgrade_service() {
@@ -202,7 +215,7 @@ upgrade_service() {
 	url=$(latest_linux_package_url)
 	if [ -z "$url" ]; then
 		printf 'Cannot find latest Linux package from GitHub repo %s.\n' "$REPO" >&2
-		printf 'Retry with RELEASE_TAG=v1.01 or PACKAGE_URL=https://...tar.gz.\n' >&2
+		printf 'Retry with RELEASE_TAG=v1.02 or PACKAGE_URL=https://...tar.gz.\n' >&2
 		exit 1
 	fi
 	curl -fL "$(proxy_url "$url")" -o "$tmp/onesync-linux.tar.gz"
@@ -270,6 +283,9 @@ case "${1:-status}" in
 	token)
 		print_token
 		;;
+	cert|certificate)
+		print_cert
+		;;
 	upgrade)
 		upgrade_service
 		;;
@@ -277,7 +293,7 @@ case "${1:-status}" in
 		uninstall_service
 		;;
 	*)
-		printf 'Usage: onesync-relayctl install|start|run|stop|restart|status|logs|token|upgrade|uninstall\n' >&2
+		printf 'Usage: onesync-relayctl install|start|run|stop|restart|status|logs|token|cert|upgrade|uninstall\n' >&2
 		printf 'Install options: RELAY_HOSTS=domain-or-ip RELAY_PORT=7443 RELAY_TOKEN=secret ONESYNC_RELAY_CERT=/path/cert ONESYNC_RELAY_KEY=/path/key\n' >&2
 		exit 2
 		;;

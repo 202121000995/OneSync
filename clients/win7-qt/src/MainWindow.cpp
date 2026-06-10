@@ -162,7 +162,7 @@ void applyModernDialogStyle(QDialog* dialog)
 }
 } // namespace
 
-const QString kWin7Version = QStringLiteral("1.01");
+const QString kWin7Version = QStringLiteral("1.02");
 
 MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent)
@@ -1620,7 +1620,7 @@ bool MainWindow::runSourceTaskDialog(SyncTask* task, bool editing)
     auto* relayTokenEdit = new QLineEdit(task->linkReady ? task->link.relayToken : QString());
     auto* caEdit = new QTextEdit(task->linkReady ? task->link.caCertificatePem : QString());
     caEdit->setAcceptRichText(false);
-    caEdit->setPlaceholderText(QStringLiteral("可选：Relay 证书 PEM。使用公网可信证书时通常不用填。"));
+    caEdit->setPlaceholderText(QStringLiteral("可选：公网可信证书通常不用填。自建 Relay 使用自签证书时，粘贴 sudo onesync-relayctl cert 输出的 PEM。"));
 
     auto* folderRow = new QHBoxLayout();
     auto* chooseButton = new QPushButton(QStringLiteral("选择目录"));
@@ -1637,10 +1637,10 @@ bool MainWindow::runSourceTaskDialog(SyncTask* task, bool editing)
     form->addRow(QStringLiteral("发送目录"), folderRow);
     form->addRow(QStringLiteral("Relay 地址"), relayEdit);
     form->addRow(QStringLiteral("Relay 令牌"), relayTokenEdit);
-    form->addRow(QStringLiteral("Relay 证书"), caEdit);
+    form->addRow(QStringLiteral("Relay 证书（可选）"), caEdit);
     layout->addLayout(form);
 
-    auto* hint = new QLabel(QStringLiteral("Win7 源端第一版走 Relay：创建后会生成一段同步链接，目标端只需要粘贴这段链接加入。"));
+    auto* hint = new QLabel(QStringLiteral("Win7 源端第一版走 Relay：创建后会生成一段同步链接，目标端只需要粘贴这段链接加入。自建 Relay 如果不是公网可信证书，请把 Relay 证书一起粘贴进来。"));
     hint->setWordWrap(true);
     layout->addWidget(hint);
 

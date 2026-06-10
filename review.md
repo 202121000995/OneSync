@@ -2058,3 +2058,42 @@
 - Win7 Qt 的 TLS 连通性测试只是握手级诊断，不等同于完整同步验收。
 - 设备管理当前是按任务维度保存别名和禁用状态，还不是跨任务统一设备库。
 - 本次在 macOS 交叉编译和压缩包完整性层面验证，仍需要真实 Win7/Win10/Linux 多机联调确认体验。
+
+## v1.02 Relay 证书复制体验审核
+
+审核分支：`feature/v1.02-relay-cert-output`
+
+审核结论：通过。
+
+审核说明：
+
+- 根版本号从 `1.01` 提升到 `1.02`，主包、Win7 Qt 包、Linux 安装/升级示例统一使用 `v1.02`。
+- `onesync-relayctl` 新增 `cert` / `certificate` 命令，可直接输出 Relay 证书 PEM 文本。
+- Relay 一键部署完成后会同时输出 Relay 地址、Relay 令牌和 Relay 证书文本，便于复制到 Win7 Qt 创建同步窗口。
+- Relay 中文菜单新增 `sudo onesync-relayctl cert` 说明。
+- Win7 Qt 创建同步窗口把 `Relay 证书` 改为 `Relay 证书（可选）`，提示公网可信证书通常不用填；自建自签 Relay 时粘贴 `sudo onesync-relayctl cert` 输出。
+
+验证结果：
+
+- `git diff --check` 通过。
+- `sh -n packaging/package-acceptance.sh` 通过。
+- `sh -n packaging/acceptance-scripts/linux/onesync-relayctl` 通过。
+- `sh -n packaging/acceptance-scripts/linux/deploy-relaytls.sh` 通过。
+- `sh -n clients/win7-qt/build-win7.sh` 通过。
+- `sh clients/win7-qt/build-win7.sh` 成功，生成 `clients/win7-qt/dist/OneSyncWin7-win7-x86-v1.02.zip`。
+- `PATH=/Users/apple/Library/Go/sdk/go1.26.3/bin:$PATH sh packaging/package-acceptance.sh` 成功，生成主 Windows/Linux v1.02 包。
+- `unzip -t clients/win7-qt/dist/OneSyncWin7-win7-x86-v1.02.zip` 通过。
+- `strings clients/win7-qt/release-win7/OneSyncWin7.exe | rg "GetSystemTimePreciseAsFileTime"` 无匹配。
+- `unzip -t dist/acceptance-packages/onesync-windows-amd64-v1.02.zip` 通过。
+- `tar -tzf dist/acceptance-packages/onesync-linux-amd64-v1.02.tar.gz` 通过。
+
+本地包路径：
+
+- `/Users/apple/Documents/同步软件/clients/win7-qt/dist/OneSyncWin7-win7-x86-v1.02.zip`
+- `/Users/apple/Documents/同步软件/dist/acceptance-packages/onesync-windows-amd64-v1.02.zip`
+- `/Users/apple/Documents/同步软件/dist/acceptance-packages/onesync-linux-amd64-v1.02.tar.gz`
+
+剩余风险：
+
+- 已安装的旧 Relay 需要先升级到 v1.02，才会拥有 `sudo onesync-relayctl cert` 命令。
+- 自签 Relay 证书必须包含创建同步时填写的 Relay 域名或 IP，否则 TLS 校验仍会失败。
