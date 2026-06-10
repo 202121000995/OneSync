@@ -36,6 +36,7 @@
 #include <QRegExp>
 #include <QSettings>
 #include <QStandardPaths>
+#include <QStackedWidget>
 #include <QStyle>
 #include <QStyleFactory>
 #include <QSystemTrayIcon>
@@ -113,6 +114,48 @@ QPushButton* toolbarButton(const QString& text, const QString& objectName = QStr
     }
     return button;
 }
+
+void applyModernDialogStyle(QDialog* dialog)
+{
+    dialog->setObjectName(QStringLiteral("modernDialog"));
+    dialog->setStyleSheet(QStringLiteral(R"(
+        QDialog#modernDialog {
+            background: #f4f7fb;
+            color: #1f2937;
+            font-family: "Microsoft YaHei", "Segoe UI", sans-serif;
+            font-size: 10.5pt;
+        }
+        QLabel {
+            color: #334155;
+            font-weight: 600;
+        }
+        QLineEdit, QTextEdit {
+            background: #ffffff;
+            border: 1px solid #cfd9e8;
+            border-radius: 10px;
+            padding: 8px 10px;
+            selection-background-color: #bfdbfe;
+        }
+        QLineEdit:focus, QTextEdit:focus {
+            border-color: #2563eb;
+        }
+        QPushButton {
+            background: #ffffff;
+            color: #263241;
+            border: 1px solid #d8e0ea;
+            border-radius: 10px;
+            padding: 8px 18px;
+            font-weight: 700;
+        }
+        QPushButton:hover {
+            background: #f8fbff;
+            border-color: #a8c3f5;
+        }
+        QDialogButtonBox QPushButton {
+            min-width: 78px;
+        }
+    )"));
+}
 } // namespace
 
 MainWindow::MainWindow(QWidget* parent)
@@ -157,10 +200,18 @@ void MainWindow::buildUi()
         QStringLiteral("关于")
     };
     for (int index = 0; index < navItems.size(); ++index) {
-        auto* item = new QLabel(navItems.at(index));
-        item->setObjectName(index == 0 ? QStringLiteral("navItemActive") : QStringLiteral("navItem"));
+        auto* item = new QPushButton(navItems.at(index));
+        item->setObjectName(QStringLiteral("navButton"));
+        item->setProperty("active", index == 0);
         item->setMinimumHeight(38);
-        item->setAlignment(Qt::AlignVCenter | Qt::AlignLeft);
+        item->setCursor(Qt::PointingHandCursor);
+        item->setFlat(true);
+        item->setCheckable(true);
+        item->setChecked(index == 0);
+        connect(item, &QPushButton::clicked, this, [this, index]() {
+            switchPage(index);
+        });
+        navButtons.append(item);
         sidebarLayout->addWidget(item);
     }
     sidebarLayout->addStretch(1);
@@ -171,18 +222,25 @@ void MainWindow::buildUi()
     layout->setSpacing(14);
 
     auto* titleRow = new QHBoxLayout();
-    auto* title = new QLabel(QStringLiteral("同步任务"));
-    title->setObjectName(QStringLiteral("pageTitle"));
-    QFont titleFont = title->font();
+    pageTitleLabel = new QLabel(QStringLiteral("同步任务"));
+    pageTitleLabel->setObjectName(QStringLiteral("pageTitle"));
+    QFont titleFont = pageTitleLabel->font();
     titleFont.setPointSize(titleFont.pointSize() + 5);
     titleFont.setBold(true);
-    title->setFont(titleFont);
+    pageTitleLabel->setFont(titleFont);
     summaryLabel = new QLabel(QStringLiteral("0 个任务"));
     summaryLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
-    titleRow->addWidget(title);
+    titleRow->addWidget(pageTitleLabel);
     titleRow->addStretch(1);
     titleRow->addWidget(summaryLabel);
     layout->addLayout(titleRow);
+
+    pages = new QStackedWidget(content);
+    pages->setObjectName(QStringLiteral("pages"));
+    auto* syncPage = new QWidget();
+    auto* syncLayout = new QVBoxLayout(syncPage);
+    syncLayout->setContentsMargins(0, 0, 0, 0);
+    syncLayout->setSpacing(14);
 
     auto* toolbar = new QHBoxLayout();
     toolbar->setSpacing(10);
@@ -216,7 +274,7 @@ void MainWindow::buildUi()
     toolbar->addWidget(addButton);
     toolbar->addWidget(selectedDiagnosticsButton);
     toolbar->addWidget(diagnosticsButton);
-    layout->addLayout(toolbar);
+    syncLayout->addLayout(toolbar);
 
     auto* tableCard = new QFrame();
     tableCard->setObjectName(QStringLiteral("card"));
@@ -256,7 +314,7 @@ void MainWindow::buildUi()
         editSelectedTask();
     });
     tableLayout->addWidget(taskTable);
-    layout->addWidget(tableCard, 3);
+    syncLayout->addWidget(tableCard, 3);
 
     auto* logBox = new QFrame();
     logBox->setObjectName(QStringLiteral("card"));
@@ -279,7 +337,98 @@ void MainWindow::buildUi()
     logEdit->setReadOnly(true);
     logEdit->setPlaceholderText(QStringLiteral("运行日志会显示在这里。"));
     logLayout->addWidget(logEdit);
-    layout->addWidget(logBox, 2);
+    syncLayout->addWidget(logBox, 2);
+
+    pages->addWidget(syncPage);
+
+    auto* devicePage = new QFrame();
+    devicePage->setObjectName(QStringLiteral("card"));
+    auto* deviceLayout = new QVBoxLayout(devicePage);
+    deviceLayout->setContentsMargins(18, 16, 18, 18);
+    auto* deviceHint = new QLabel(QStringLiteral("这里汇总每个同步任务已知的设备状态。Win7 Qt 当前从任务连接状态中统计设备，后续会扩展为重命名、禁用和踢出。"));
+    deviceHint->setWordWrap(true);
+    deviceLayout->addWidget(deviceHint);
+    deviceTable = new QTableWidget(0, 6, this);
+    deviceTable->setObjectName(QStringLiteral("taskTable"));
+    deviceTable->setSelectionBehavior(QAbstractItemView::SelectRows);
+    deviceTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    deviceTable->verticalHeader()->setVisible(false);
+    deviceTable->setShowGrid(false);
+    deviceTable->setAlternatingRowColors(true);
+    deviceTable->setHorizontalHeaderLabels(QStringList()
+        << QStringLiteral("任务")
+        << QStringLiteral("类型")
+        << QStringLiteral("设备")
+        << QStringLiteral("状态")
+        << QStringLiteral("本地目录")
+        << QStringLiteral("详情"));
+    deviceTable->horizontalHeader()->setStretchLastSection(true);
+    deviceLayout->addWidget(deviceTable, 1);
+    pages->addWidget(devicePage);
+
+    auto* connectionPage = new QFrame();
+    connectionPage->setObjectName(QStringLiteral("card"));
+    auto* connectionLayout = new QVBoxLayout(connectionPage);
+    connectionLayout->setContentsMargins(18, 16, 18, 18);
+    auto* connectionHint = new QLabel(QStringLiteral("这里集中查看任务连接方式、源端/Relay 地址和最近状态。真实网络诊断按钮后续会接入 TLS 探测。"));
+    connectionHint->setWordWrap(true);
+    connectionLayout->addWidget(connectionHint);
+    connectionTable = new QTableWidget(0, 6, this);
+    connectionTable->setObjectName(QStringLiteral("taskTable"));
+    connectionTable->setSelectionBehavior(QAbstractItemView::SelectRows);
+    connectionTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    connectionTable->verticalHeader()->setVisible(false);
+    connectionTable->setShowGrid(false);
+    connectionTable->setAlternatingRowColors(true);
+    connectionTable->setHorizontalHeaderLabels(QStringList()
+        << QStringLiteral("任务")
+        << QStringLiteral("连接")
+        << QStringLiteral("源端地址")
+        << QStringLiteral("Relay 地址")
+        << QStringLiteral("状态")
+        << QStringLiteral("详情"));
+    connectionTable->horizontalHeader()->setStretchLastSection(true);
+    connectionLayout->addWidget(connectionTable, 1);
+    pages->addWidget(connectionPage);
+
+    auto* logsPage = new QFrame();
+    logsPage->setObjectName(QStringLiteral("card"));
+    auto* logsLayout = new QVBoxLayout(logsPage);
+    logsLayout->setContentsMargins(18, 16, 18, 18);
+    auto* logsToolbar = new QHBoxLayout();
+    auto* logsHint = new QLabel(QStringLiteral("完整运行日志"));
+    logsHint->setObjectName(QStringLiteral("cardTitle"));
+    auto* exportLogsButton = toolbarButton(QStringLiteral("导出诊断"));
+    connect(exportLogsButton, &QPushButton::clicked, this, &MainWindow::exportDiagnostics);
+    logsToolbar->addWidget(logsHint);
+    logsToolbar->addStretch(1);
+    logsToolbar->addWidget(exportLogsButton);
+    logsLayout->addLayout(logsToolbar);
+    pageLogEdit = new QPlainTextEdit();
+    pageLogEdit->setObjectName(QStringLiteral("logEdit"));
+    pageLogEdit->setReadOnly(true);
+    logsLayout->addWidget(pageLogEdit, 1);
+    pages->addWidget(logsPage);
+
+    auto* aboutPage = new QFrame();
+    aboutPage->setObjectName(QStringLiteral("card"));
+    auto* aboutLayout = new QVBoxLayout(aboutPage);
+    aboutLayout->setContentsMargins(26, 24, 26, 24);
+    aboutLayout->setSpacing(12);
+    auto* aboutTitle = new QLabel(QStringLiteral("OneSync Win7 Qt"));
+    aboutTitle->setObjectName(QStringLiteral("pageTitle"));
+    auto* aboutText = new QLabel(QStringLiteral(
+        "版本：0.1.0\n"
+        "定位：Windows 7 兼容客户端\n"
+        "能力：创建同步、加入同步、Relay TLS、任务日志、诊断导出、托盘运行\n"
+        "说明：Win7 源端当前优先使用 Relay；直连监听会在后续版本继续完善。"));
+    aboutText->setWordWrap(true);
+    aboutLayout->addWidget(aboutTitle);
+    aboutLayout->addWidget(aboutText);
+    aboutLayout->addStretch(1);
+    pages->addWidget(aboutPage);
+
+    layout->addWidget(pages, 1);
 
     shell->addWidget(sidebar);
     shell->addWidget(content, 1);
@@ -301,13 +450,19 @@ void MainWindow::buildUi()
             font-weight: 700;
             padding: 4px 4px 14px 4px;
         }
-        QLabel#navItem, QLabel#navItemActive {
+        QPushButton#navButton {
+            background: transparent;
+            border: none;
             border-radius: 10px;
-            padding-left: 14px;
+            padding: 9px 12px;
             color: #475569;
             font-weight: 600;
+            text-align: left;
         }
-        QLabel#navItemActive {
+        QPushButton#navButton:hover {
+            background: #f1f5f9;
+        }
+        QPushButton#navButton[active="true"] {
             background: #e8f1ff;
             color: #1d4ed8;
             border-left: 4px solid #2563eb;
@@ -917,6 +1072,7 @@ void MainWindow::refreshTaskTable()
     if (selected >= 0 && selected < tasks.size()) {
         taskTable->selectRow(selected);
     }
+    refreshSecondaryPages();
     refreshButtons();
 }
 
@@ -971,6 +1127,103 @@ void MainWindow::rebuildLogView()
     QTextCursor cursor = logEdit->textCursor();
     cursor.movePosition(QTextCursor::End);
     logEdit->setTextCursor(cursor);
+    if (pageLogEdit != nullptr) {
+        pageLogEdit->setPlainText(globalLogs.join(QStringLiteral("\n")));
+        QTextCursor pageCursor = pageLogEdit->textCursor();
+        pageCursor.movePosition(QTextCursor::End);
+        pageLogEdit->setTextCursor(pageCursor);
+    }
+}
+
+void MainWindow::switchPage(int page)
+{
+    if (pages == nullptr || page < 0 || page >= pages->count()) {
+        return;
+    }
+    pages->setCurrentIndex(page);
+    const QStringList titles = {
+        QStringLiteral("同步任务"),
+        QStringLiteral("设备管理"),
+        QStringLiteral("连接管理"),
+        QStringLiteral("日志"),
+        QStringLiteral("关于")
+    };
+    if (pageTitleLabel != nullptr && page < titles.size()) {
+        pageTitleLabel->setText(titles.at(page));
+    }
+    if (summaryLabel != nullptr) {
+        summaryLabel->setVisible(page == 0);
+    }
+    for (int index = 0; index < navButtons.size(); ++index) {
+        const bool active = index == page;
+        navButtons[index]->setChecked(active);
+        navButtons[index]->setProperty("active", active);
+        navButtons[index]->style()->unpolish(navButtons[index]);
+        navButtons[index]->style()->polish(navButtons[index]);
+    }
+    refreshSecondaryPages();
+}
+
+void MainWindow::refreshSecondaryPages()
+{
+    if (deviceTable != nullptr) {
+        deviceTable->setRowCount(tasks.size());
+        for (int row = 0; row < tasks.size(); ++row) {
+            const SyncTask& task = tasks[row];
+            const QString device = QStringLiteral("%1 / %2").arg(task.connectedDevices).arg(task.totalDevices);
+            const QStringList values = {
+                task.name,
+                roleLabel(task),
+                device,
+                task.running ? QStringLiteral("在线") : QStringLiteral("未连接"),
+                task.targetFolder,
+                task.detail
+            };
+            for (int column = 0; column < values.size(); ++column) {
+                auto* item = deviceTable->item(row, column);
+                if (item == nullptr) {
+                    item = new QTableWidgetItem();
+                    deviceTable->setItem(row, column, item);
+                }
+                item->setText(values.at(column));
+                item->setToolTip(values.at(column));
+            }
+        }
+    }
+
+    if (connectionTable != nullptr) {
+        connectionTable->setRowCount(tasks.size());
+        for (int row = 0; row < tasks.size(); ++row) {
+            const SyncTask& task = tasks[row];
+            const QString connection = task.linkReady
+                ? (task.link.hasRelay() ? QStringLiteral("Relay TLS") : QStringLiteral("直连 TLS"))
+                : QStringLiteral("-");
+            const QStringList values = {
+                task.name,
+                connection,
+                task.linkReady ? task.link.endpoint : QStringLiteral("-"),
+                task.linkReady && task.link.hasRelay() ? task.link.relayEndpoint : QStringLiteral("-"),
+                task.status,
+                task.detail
+            };
+            for (int column = 0; column < values.size(); ++column) {
+                auto* item = connectionTable->item(row, column);
+                if (item == nullptr) {
+                    item = new QTableWidgetItem();
+                    connectionTable->setItem(row, column, item);
+                }
+                item->setText(values.at(column));
+                item->setToolTip(values.at(column));
+            }
+        }
+    }
+
+    if (pageLogEdit != nullptr) {
+        pageLogEdit->setPlainText(globalLogs.join(QStringLiteral("\n")));
+        QTextCursor cursor = pageLogEdit->textCursor();
+        cursor.movePosition(QTextCursor::End);
+        pageLogEdit->setTextCursor(cursor);
+    }
 }
 
 int MainWindow::selectedTaskIndex() const
@@ -1094,7 +1347,10 @@ bool MainWindow::runTaskDialog(SyncTask* task, bool editing)
 {
     QDialog dialog(this);
     dialog.setWindowTitle(editing ? QStringLiteral("任务参数") : QStringLiteral("加入同步"));
+    applyModernDialogStyle(&dialog);
     auto* layout = new QVBoxLayout(&dialog);
+    layout->setContentsMargins(22, 20, 22, 18);
+    layout->setSpacing(14);
     auto* form = new QFormLayout();
     auto* nameEdit = new QLineEdit(task->name);
     auto* folderEdit = new QLineEdit(task->targetFolder);
@@ -1165,7 +1421,10 @@ bool MainWindow::runSourceTaskDialog(SyncTask* task, bool editing)
 {
     QDialog dialog(this);
     dialog.setWindowTitle(editing ? QStringLiteral("发送任务参数") : QStringLiteral("创建同步"));
+    applyModernDialogStyle(&dialog);
     auto* layout = new QVBoxLayout(&dialog);
+    layout->setContentsMargins(22, 20, 22, 18);
+    layout->setSpacing(14);
     auto* form = new QFormLayout();
     auto* nameEdit = new QLineEdit(task->name);
     auto* folderEdit = new QLineEdit(task->targetFolder);
@@ -1251,7 +1510,10 @@ void MainWindow::showSourceLink(const SyncTask& task)
 {
     QDialog dialog(this);
     dialog.setWindowTitle(QStringLiteral("同步链接"));
+    applyModernDialogStyle(&dialog);
     auto* layout = new QVBoxLayout(&dialog);
+    layout->setContentsMargins(22, 20, 22, 18);
+    layout->setSpacing(14);
     auto* hint = new QLabel(QStringLiteral("把下面这段同步链接发给目标端，在目标端点击“加入同步”后粘贴即可。"));
     hint->setWordWrap(true);
     layout->addWidget(hint);
@@ -1278,7 +1540,10 @@ void MainWindow::showTaskParameters(SyncTask* task)
     }
     QDialog dialog(this);
     dialog.setWindowTitle(QStringLiteral("任务参数"));
+    applyModernDialogStyle(&dialog);
     auto* layout = new QVBoxLayout(&dialog);
+    layout->setContentsMargins(22, 20, 22, 18);
+    layout->setSpacing(14);
 
     auto* editButton = new QPushButton(isSourceTask(*task)
         ? QStringLiteral("修改名称、目录和 Relay")

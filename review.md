@@ -1988,3 +1988,33 @@
 - Win7 源端第一版优先支持 Relay，不做直连 TLS 监听；直连源端仍需后续单独设计证书生成、端口监听和防火墙体验。
 - 源端 Relay 发送链路已编译通过，但仍需要两台真实 Windows 机器配合 Relay 做端到端验收。
 - 现代皮肤依赖 Qt 5 QSS，Win7 真实字体和主题渲染可能与 Mac 预览略有差异。
+
+## Win7 Qt 弹窗与左侧导航审核
+
+审核分支：`feature/win7-qt-navigation-dialogs`
+
+审核结论：通过。
+
+审核说明：
+
+- 创建同步、加入同步、同步链接和任务参数弹窗统一套用现代浅色 QSS，避免内容区继续呈现 Win32 灰底样式。
+- 左侧导航从静态文字改为可点击按钮，支持切换同步任务、设备管理、连接管理、日志和关于页面。
+- 设备管理页面按任务汇总设备数、在线状态、本地目录和详情。
+- 连接管理页面按任务汇总直连/Relay、源端地址、Relay 地址、状态和详情。
+- 日志页面独立展示完整日志，并提供导出诊断入口。
+- 关于页面显示 Win7 Qt 客户端版本、定位和当前能力说明。
+
+验证结果：
+
+- `git diff --check` 通过。
+- `sh -n clients/win7-qt/build-win7.sh` 通过。
+- `sh clients/win7-qt/build-win7.sh` 成功。
+- `file clients/win7-qt/release-win7/OneSyncWin7.exe` 显示 `PE32 executable (GUI) Intel 80386, for MS Windows`。
+- `strings clients/win7-qt/release-win7/OneSyncWin7.exe | rg "GetSystemTimePreciseAsFileTime"` 无匹配。
+- `unzip -t clients/win7-qt/dist/OneSyncWin7-win7-x86-v0.1.0.zip` 通过。
+
+剩余风险：
+
+- 左侧设备管理目前是基于任务连接状态的汇总视图，还没有做重命名、禁用、踢出设备等操作。
+- 连接管理目前是状态汇总视图，TLS 实时探测和网络诊断按钮后续再接。
+- Win7 原生窗口标题栏仍由系统绘制；本次主要统一弹窗内容区和控件风格。

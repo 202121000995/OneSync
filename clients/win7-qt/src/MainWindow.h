@@ -13,6 +13,7 @@ class QLabel;
 class QMenu;
 class QPushButton;
 class QPlainTextEdit;
+class QStackedWidget;
 class QSystemTrayIcon;
 class QTableWidget;
 class QThread;
@@ -77,6 +78,8 @@ private:
     void refreshButtons();
     void refreshLogFilter();
     void rebuildLogView();
+    void switchPage(int page);
+    void refreshSecondaryPages();
     int selectedTaskIndex() const;
     SyncTask* selectedTask();
     const SyncTask* selectedTask() const;
@@ -100,14 +103,20 @@ private:
     QString diagnosticsText() const;
 
     QTableWidget* taskTable = nullptr;
+    QTableWidget* deviceTable = nullptr;
+    QTableWidget* connectionTable = nullptr;
     QComboBox* logFilterCombo = nullptr;
     QPlainTextEdit* logEdit = nullptr;
+    QPlainTextEdit* pageLogEdit = nullptr;
     QPushButton* startButton = nullptr;
     QPushButton* pauseButton = nullptr;
     QPushButton* rescanButton = nullptr;
     QPushButton* parametersButton = nullptr;
     QPushButton* deleteButton = nullptr;
+    QLabel* pageTitleLabel = nullptr;
     QLabel* summaryLabel = nullptr;
+    QStackedWidget* pages = nullptr;
+    QList<QPushButton*> navButtons;
     QList<SyncTask> tasks;
     QMap<QString, QThread*> connectionThreads;
     QMap<QString, TargetConnector*> connectors;
