@@ -94,6 +94,8 @@ clients/win7-qt/dist/OneSyncWin7-win7-x86-v0.1.0.zip
 
 这是 32 位 Windows GUI 程序，包内包含 Qt 5 DLL、OpenSSL DLL 和 `platforms/qwindows.dll`，可用于 Windows 7 SP1 测试。
 
+打包脚本会显式使用 `_WIN32_WINNT=0x0601` / `WINVER=0x0601`，并在链接阶段避开 Zig 自带 libc++，防止生成的 EXE 直接导入 Windows 8 才有的 `GetSystemTimePreciseAsFileTime`。
+
 ### 使用 qmake
 
 如果本机没有 CMake，但安装了 Qt 5，可以直接使用 qmake：

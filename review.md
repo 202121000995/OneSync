@@ -1941,6 +1941,7 @@
 - 新增 `clients/win7-qt/build-win7.sh`，可在当前 Apple Silicon Mac 上复用本机已有 Zig 和 Windows Qt 5.12.12 MinGW 32-bit 工具链打包。
 - 新增 `clients/win7-qt/tools/make_icon_res.py`，把 `packaging/icons/OneSync.ico` 转成 Windows `.res` 并链接进 exe。
 - 打包输出为 32 位 Windows GUI 程序，目标兼容 Windows 7 SP1。
+- 打包脚本链接阶段禁用 Zig 自带 libc++，改用随 Qt 包分发的 MinGW C++ 运行库，避免 EXE 导入 Windows 8 才有的 `GetSystemTimePreciseAsFileTime`。
 - zip 包包含 `OneSyncWin7.exe`、Qt5Core/Gui/Widgets/Network、OpenSSL 1.1 DLL、MinGW 运行库、`platforms/qwindows.dll`、README 和协议说明。
 - `.gitignore` 已排除 `clients/win7-qt/build-win7/`、`release-win7/` 和 `dist/`，避免提交本地构建产物。
 
@@ -1948,6 +1949,8 @@
 
 - `sh clients/win7-qt/build-win7.sh` 成功。
 - `file clients/win7-qt/release-win7/OneSyncWin7.exe` 显示 `PE32 executable (GUI) Intel 80386, for MS Windows`。
+- `strings clients/win7-qt/release-win7/OneSyncWin7.exe | rg "GetSystemTimePreciseAsFileTime"` 无匹配。
+- 对 `clients/win7-qt/release-win7` 全包扫描，未发现 `GetSystemTimePreciseAsFileTime`。
 - `unzip -t clients/win7-qt/dist/OneSyncWin7-win7-x86-v0.1.0.zip` 通过。
 - 最终 zip 大小约 13 MB。
 

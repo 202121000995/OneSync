@@ -9,6 +9,7 @@ QT_WIN=${QT_WIN:-"$TOOLS_ROOT/Qt/5.12.12/mingw73_32"}
 QT_HOST=${QT_HOST:-/Users/apple/Qt5.12.12/5.12.12/clang_64}
 OPENSSL_WIN=${OPENSSL_WIN:-/Users/apple/Documents/建站和证书申请软件/qt/runtime/win32}
 VERSION=${ONESYNC_WIN7_VERSION:-0.1.0}
+WIN_TARGET=${WIN_TARGET:-x86-windows-gnu}
 
 BUILD="$ROOT/build-win7"
 RELEASE="$ROOT/release-win7"
@@ -49,8 +50,8 @@ compile()
 {
     source_file=$1
     object_file=$2
-    "$ZIG" c++ -target x86-windows-gnu -std=c++17 -O2 \
-        -Wno-ignored-attributes $DEFINES $INCLUDES \
+    "$ZIG" c++ -target "$WIN_TARGET" -std=c++17 -O2 \
+        -fno-exceptions -fno-rtti -Wno-ignored-attributes $DEFINES $INCLUDES \
         -c "$source_file" -o "$object_file"
 }
 
@@ -69,7 +70,7 @@ compile "$BUILD/moc/moc_TargetConnector.cpp" "$BUILD/obj/moc_TargetConnector.obj
 
 python3 "$ROOT/tools/make_icon_res.py" "$REPO_ROOT/packaging/icons/OneSync.ico" "$BUILD/obj/OneSync.res"
 
-"$ZIG" c++ -target x86-windows-gnu -O2 \
+"$ZIG" c++ -target "$WIN_TARGET" -O2 -nostdlib++ \
     "$BUILD/obj/main.obj" \
     "$BUILD/obj/Endpoint.obj" \
     "$BUILD/obj/FileReceiver.obj" \
@@ -84,7 +85,9 @@ python3 "$ROOT/tools/make_icon_res.py" "$REPO_ROOT/packaging/icons/OneSync.ico" 
     "$BUILD/obj/moc_TargetConnector.obj" \
     "$BUILD/obj/OneSync.res" \
     -L"$QT_WIN/lib" \
+    -L"$QT_WIN/bin" \
     -lqtmain -lQt5Widgets -lQt5Gui -lQt5Network -lQt5Core \
+    "$QT_WIN/bin/libstdc++-6.dll" \
     -Wl,--subsystem=windows \
     -o "$RELEASE/OneSyncWin7.exe"
 
@@ -105,6 +108,7 @@ rm -f "$RELEASE"/*.pdb "$RELEASE"/*.lib
     echo "OneSync Win7 Qt package"
     echo "Version: $VERSION"
     echo "Target: Windows 7 x86"
+    echo "Zig target: $WIN_TARGET"
     echo "Qt: 5.12.12 mingw73_32"
     echo "Built at: $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
 } > "$RELEASE/BUILD.txt"
