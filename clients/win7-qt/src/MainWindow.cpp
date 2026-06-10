@@ -1,14 +1,17 @@
 #include "MainWindow.h"
 
 #include "SnapshotScanner.h"
+#include "SourceConnector.h"
 #include "TargetConnector.h"
 
 #include <QAction>
 #include <QApplication>
 #include <QAbstractItemView>
 #include <QBoxLayout>
+#include <QClipboard>
 #include <QCloseEvent>
 #include <QComboBox>
+#include <QCryptographicHash>
 #include <QDateTime>
 #include <QDialog>
 #include <QDialogButtonBox>
@@ -17,19 +20,24 @@
 #include <QFileInfo>
 #include <QFormLayout>
 #include <QFont>
+#include <QFrame>
 #include <QGroupBox>
 #include <QHeaderView>
 #include <QIODevice>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QLabel>
 #include <QLineEdit>
 #include <QMenu>
 #include <QMessageBox>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QRandomGenerator>
 #include <QRegExp>
 #include <QSettings>
 #include <QStandardPaths>
 #include <QStyle>
+#include <QStyleFactory>
 #include <QSystemTrayIcon>
 #include <QTableWidget>
 #include <QTableWidgetItem>
@@ -79,13 +87,40 @@ QString newTaskID()
 {
     return QUuid::createUuid().toString(QUuid::WithoutBraces);
 }
+
+QByteArray randomBytes(int size)
+{
+    QByteArray data(size, Qt::Uninitialized);
+    QRandomGenerator* random = QRandomGenerator::system();
+    for (int index = 0; index < size; ++index) {
+        data[index] = char(random->bounded(256));
+    }
+    return data;
+}
+
+QString base64Url(const QByteArray& data)
+{
+    return QString::fromLatin1(data.toBase64(QByteArray::Base64UrlEncoding | QByteArray::OmitTrailingEquals));
+}
+
+QPushButton* toolbarButton(const QString& text, const QString& objectName = QString())
+{
+    auto* button = new QPushButton(text);
+    button->setMinimumHeight(34);
+    button->setCursor(Qt::PointingHandCursor);
+    if (!objectName.isEmpty()) {
+        button->setObjectName(objectName);
+    }
+    return button;
+}
 } // namespace
 
 MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent)
 {
     setWindowTitle(QStringLiteral("OneSync Win7"));
-    resize(980, 620);
+    resize(1120, 680);
+    QApplication::setStyle(QStyleFactory::create(QStringLiteral("Fusion")));
 
     buildUi();
     setupTray();
@@ -98,10 +133,46 @@ MainWindow::MainWindow(QWidget* parent)
 void MainWindow::buildUi()
 {
     auto* root = new QWidget(this);
-    auto* layout = new QVBoxLayout(root);
+    root->setObjectName(QStringLiteral("appRoot"));
+    auto* shell = new QHBoxLayout(root);
+    shell->setContentsMargins(0, 0, 0, 0);
+    shell->setSpacing(0);
+
+    auto* sidebar = new QFrame(root);
+    sidebar->setObjectName(QStringLiteral("sidebar"));
+    sidebar->setFixedWidth(168);
+    auto* sidebarLayout = new QVBoxLayout(sidebar);
+    sidebarLayout->setContentsMargins(14, 18, 14, 18);
+    sidebarLayout->setSpacing(10);
+
+    auto* brand = new QLabel(QStringLiteral("OneSync"));
+    brand->setObjectName(QStringLiteral("brand"));
+    sidebarLayout->addWidget(brand);
+
+    const QStringList navItems = {
+        QStringLiteral("同步任务"),
+        QStringLiteral("设备管理"),
+        QStringLiteral("连接管理"),
+        QStringLiteral("日志"),
+        QStringLiteral("关于")
+    };
+    for (int index = 0; index < navItems.size(); ++index) {
+        auto* item = new QLabel(navItems.at(index));
+        item->setObjectName(index == 0 ? QStringLiteral("navItemActive") : QStringLiteral("navItem"));
+        item->setMinimumHeight(38);
+        item->setAlignment(Qt::AlignVCenter | Qt::AlignLeft);
+        sidebarLayout->addWidget(item);
+    }
+    sidebarLayout->addStretch(1);
+
+    auto* content = new QWidget(root);
+    auto* layout = new QVBoxLayout(content);
+    layout->setContentsMargins(22, 20, 22, 20);
+    layout->setSpacing(14);
 
     auto* titleRow = new QHBoxLayout();
     auto* title = new QLabel(QStringLiteral("同步任务"));
+    title->setObjectName(QStringLiteral("pageTitle"));
     QFont titleFont = title->font();
     titleFont.setPointSize(titleFont.pointSize() + 5);
     titleFont.setBold(true);
@@ -114,15 +185,18 @@ void MainWindow::buildUi()
     layout->addLayout(titleRow);
 
     auto* toolbar = new QHBoxLayout();
-    startButton = new QPushButton(QStringLiteral("开始"));
-    pauseButton = new QPushButton(QStringLiteral("暂停"));
-    rescanButton = new QPushButton(QStringLiteral("重新扫描"));
-    parametersButton = new QPushButton(QStringLiteral("参数"));
-    deleteButton = new QPushButton(QStringLiteral("删除"));
-    auto* addButton = new QPushButton(QStringLiteral("加入同步"));
-    auto* selectedDiagnosticsButton = new QPushButton(QStringLiteral("导出选中任务"));
-    auto* diagnosticsButton = new QPushButton(QStringLiteral("导出诊断"));
+    toolbar->setSpacing(10);
+    startButton = toolbarButton(QStringLiteral("开始"));
+    pauseButton = toolbarButton(QStringLiteral("暂停"));
+    rescanButton = toolbarButton(QStringLiteral("重新扫描"));
+    parametersButton = toolbarButton(QStringLiteral("参数"));
+    deleteButton = toolbarButton(QStringLiteral("删除"));
+    auto* createButton = toolbarButton(QStringLiteral("+ 创建同步"), QStringLiteral("primaryButton"));
+    auto* addButton = toolbarButton(QStringLiteral("加入同步"), QStringLiteral("secondaryButton"));
+    auto* selectedDiagnosticsButton = toolbarButton(QStringLiteral("导出选中任务"));
+    auto* diagnosticsButton = toolbarButton(QStringLiteral("导出诊断"));
 
+    connect(createButton, &QPushButton::clicked, this, &MainWindow::createTask);
     connect(startButton, &QPushButton::clicked, this, &MainWindow::startSelectedTask);
     connect(pauseButton, &QPushButton::clicked, this, &MainWindow::pauseSelectedTask);
     connect(rescanButton, &QPushButton::clicked, this, &MainWindow::rescanSelectedTask);
@@ -138,18 +212,29 @@ void MainWindow::buildUi()
     toolbar->addWidget(parametersButton);
     toolbar->addWidget(deleteButton);
     toolbar->addStretch(1);
+    toolbar->addWidget(createButton);
     toolbar->addWidget(addButton);
     toolbar->addWidget(selectedDiagnosticsButton);
     toolbar->addWidget(diagnosticsButton);
     layout->addLayout(toolbar);
 
+    auto* tableCard = new QFrame();
+    tableCard->setObjectName(QStringLiteral("card"));
+    auto* tableLayout = new QVBoxLayout(tableCard);
+    tableLayout->setContentsMargins(1, 1, 1, 1);
+    tableLayout->setSpacing(0);
     taskTable = new QTableWidget(0, ColumnCount, this);
+    taskTable->setObjectName(QStringLiteral("taskTable"));
     taskTable->setSelectionBehavior(QAbstractItemView::SelectRows);
     taskTable->setSelectionMode(QAbstractItemView::SingleSelection);
     taskTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    taskTable->setAlternatingRowColors(true);
+    taskTable->setShowGrid(false);
     taskTable->verticalHeader()->setVisible(false);
     taskTable->horizontalHeader()->setStretchLastSection(true);
     taskTable->horizontalHeader()->setSectionResizeMode(QHeaderView::Interactive);
+    taskTable->horizontalHeader()->setMinimumHeight(42);
+    taskTable->setMinimumHeight(280);
     for (int column = 0; column < ColumnCount; ++column) {
         taskTable->setHorizontalHeaderItem(column, new QTableWidgetItem(columnTitle(column)));
     }
@@ -170,32 +255,175 @@ void MainWindow::buildUi()
     connect(taskTable, &QTableWidget::cellDoubleClicked, this, [this](int, int) {
         editSelectedTask();
     });
-    layout->addWidget(taskTable, 1);
+    tableLayout->addWidget(taskTable);
+    layout->addWidget(tableCard, 3);
 
-    auto* logBox = new QGroupBox(QStringLiteral("日志"));
+    auto* logBox = new QFrame();
+    logBox->setObjectName(QStringLiteral("card"));
     auto* logLayout = new QVBoxLayout(logBox);
+    logLayout->setContentsMargins(18, 14, 18, 18);
+    auto* logTitleRow = new QHBoxLayout();
+    auto* logTitle = new QLabel(QStringLiteral("日志"));
+    logTitle->setObjectName(QStringLiteral("cardTitle"));
+    logTitleRow->addWidget(logTitle);
+    logTitleRow->addStretch(1);
     auto* logFilterRow = new QHBoxLayout();
-    logFilterRow->addWidget(new QLabel(QStringLiteral("日志范围")));
+    logFilterRow->addWidget(new QLabel(QStringLiteral("范围")));
     logFilterCombo = new QComboBox();
     connect(logFilterCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &MainWindow::rebuildLogView);
     logFilterRow->addWidget(logFilterCombo);
-    logFilterRow->addStretch(1);
-    logLayout->addLayout(logFilterRow);
+    logTitleRow->addLayout(logFilterRow);
+    logLayout->addLayout(logTitleRow);
     logEdit = new QPlainTextEdit();
+    logEdit->setObjectName(QStringLiteral("logEdit"));
     logEdit->setReadOnly(true);
     logEdit->setPlaceholderText(QStringLiteral("运行日志会显示在这里。"));
     logLayout->addWidget(logEdit);
-    layout->addWidget(logBox, 1);
+    layout->addWidget(logBox, 2);
 
+    shell->addWidget(sidebar);
+    shell->addWidget(content, 1);
     setCentralWidget(root);
+    setStyleSheet(QStringLiteral(R"(
+        QWidget#appRoot {
+            background: #f4f7fb;
+            color: #1f2937;
+            font-family: "Microsoft YaHei", "Segoe UI", sans-serif;
+            font-size: 10.5pt;
+        }
+        QFrame#sidebar {
+            background: #ffffff;
+            border-right: 1px solid #e5eaf2;
+        }
+        QLabel#brand {
+            color: #0f172a;
+            font-size: 18pt;
+            font-weight: 700;
+            padding: 4px 4px 14px 4px;
+        }
+        QLabel#navItem, QLabel#navItemActive {
+            border-radius: 10px;
+            padding-left: 14px;
+            color: #475569;
+            font-weight: 600;
+        }
+        QLabel#navItemActive {
+            background: #e8f1ff;
+            color: #1d4ed8;
+            border-left: 4px solid #2563eb;
+        }
+        QLabel#pageTitle {
+            color: #111827;
+            font-size: 19pt;
+            font-weight: 700;
+        }
+        QLabel#cardTitle {
+            color: #111827;
+            font-size: 12pt;
+            font-weight: 700;
+        }
+        QFrame#card {
+            background: #ffffff;
+            border: 1px solid #dbe3ef;
+            border-radius: 14px;
+        }
+        QPushButton {
+            background: #ffffff;
+            color: #263241;
+            border: 1px solid #d8e0ea;
+            border-radius: 9px;
+            padding: 7px 15px;
+            font-weight: 600;
+        }
+        QPushButton:hover {
+            background: #f8fbff;
+            border-color: #a8c3f5;
+        }
+        QPushButton:disabled {
+            color: #a0a8b3;
+            background: #f3f5f8;
+        }
+        QPushButton#primaryButton {
+            background: #2563eb;
+            color: white;
+            border-color: #2563eb;
+        }
+        QPushButton#primaryButton:hover {
+            background: #1d4ed8;
+        }
+        QPushButton#secondaryButton {
+            background: #f8fbff;
+            color: #1d4ed8;
+            border-color: #bcd2ff;
+        }
+        QTableWidget#taskTable {
+            background: #ffffff;
+            alternate-background-color: #f8fafc;
+            border: none;
+            border-radius: 14px;
+            selection-background-color: #e8f1ff;
+            selection-color: #0f172a;
+            gridline-color: transparent;
+        }
+        QHeaderView::section {
+            background: #f8fafc;
+            color: #475569;
+            border: none;
+            border-bottom: 1px solid #e5eaf2;
+            padding: 9px 8px;
+            font-weight: 700;
+        }
+        QTableWidget::item {
+            border-bottom: 1px solid #edf2f7;
+            padding: 9px 8px;
+        }
+        QPlainTextEdit#logEdit {
+            background: #0f172a;
+            color: #dbeafe;
+            border: none;
+            border-radius: 10px;
+            padding: 10px;
+            font-family: Consolas, "Microsoft YaHei", monospace;
+        }
+        QLineEdit, QTextEdit, QComboBox {
+            background: #ffffff;
+            border: 1px solid #d8e0ea;
+            border-radius: 8px;
+            padding: 7px;
+        }
+        QLineEdit:focus, QTextEdit:focus, QComboBox:focus {
+            border-color: #2563eb;
+        }
+    )"));
     refreshLogFilter();
     refreshButtons();
+}
+
+void MainWindow::createTask()
+{
+    SyncTask task;
+    task.id = newTaskID();
+    task.role = SyncTask::Source;
+    task.name = QStringLiteral("发送任务");
+    task.status = QStringLiteral("停止");
+    task.detail = QStringLiteral("尚未启动");
+    if (!runSourceTaskDialog(&task, false)) {
+        return;
+    }
+    tasks.append(task);
+    saveTasks();
+    refreshLogFilter();
+    refreshTaskTable();
+    taskTable->selectRow(tasks.size() - 1);
+    appendTaskLog(task.id, QStringLiteral("已创建发送同步任务。"));
+    showSourceLink(task);
 }
 
 void MainWindow::addTask()
 {
     SyncTask task;
     task.id = newTaskID();
+    task.role = SyncTask::Target;
     task.name = QStringLiteral("接收任务");
     task.status = QStringLiteral("停止");
     task.detail = QStringLiteral("尚未启动");
@@ -228,13 +456,16 @@ void MainWindow::startSelectedTask()
         QMessageBox::warning(this, QStringLiteral("同步链接不可用"), error);
         return;
     }
-    const QFileInfo targetInfo(task->targetFolder);
-    if (!targetInfo.exists() || !targetInfo.isDir()) {
-        QMessageBox::warning(this, QStringLiteral("目录不可用"), QStringLiteral("接收文件夹不存在或不是目录。"));
+    const QFileInfo folderInfo(task->targetFolder);
+    if (!folderInfo.exists() || !folderInfo.isDir()) {
+        QMessageBox::warning(this, QStringLiteral("目录不可用"), isSourceTask(*task)
+            ? QStringLiteral("发送文件夹不存在或不是目录。")
+            : QStringLiteral("接收文件夹不存在或不是目录。"));
         return;
     }
 
     const QString taskID = task->id;
+    const bool source = isSourceTask(*task);
     task->running = true;
     task->connectedDevices = 0;
     task->receivedBytes = 0;
@@ -242,53 +473,107 @@ void MainWindow::startSelectedTask()
     task->ignoredCount = 0;
     task->startedAtMs = QDateTime::currentDateTimeUtc().toMSecsSinceEpoch();
     task->status = QStringLiteral("运行-连接中");
-    task->detail = QStringLiteral("正在连接源端");
+    task->detail = source ? QStringLiteral("正在等待目标端") : QStringLiteral("正在连接源端");
     refreshTaskTable();
-    appendLog(QStringLiteral("[%1] 开始连接源端。").arg(task->name));
+    appendLog(source
+        ? QStringLiteral("[%1] 开始等待目标端。").arg(task->name)
+        : QStringLiteral("[%1] 开始连接源端。").arg(task->name));
 
     QThread* thread = new QThread(this);
-    auto* connector = new TargetConnector(task->link, task->targetFolder, task->ignoreRules);
-    connector->moveToThread(thread);
+    QObject* worker = nullptr;
+    TargetConnector* connector = nullptr;
+    SourceConnector* sourceConnector = nullptr;
+    if (source) {
+        sourceConnector = new SourceConnector(task->link, task->targetFolder, task->ignoreRules);
+        worker = sourceConnector;
+        sourceConnector->moveToThread(thread);
+        sourceConnectors.insert(taskID, sourceConnector);
+    } else {
+        connector = new TargetConnector(task->link, task->targetFolder, task->ignoreRules);
+        worker = connector;
+        connector->moveToThread(thread);
+        connectors.insert(taskID, connector);
+    }
     connectionThreads.insert(taskID, thread);
-    connectors.insert(taskID, connector);
 
-    connect(thread, &QThread::started, connector, &TargetConnector::run);
-    connect(connector, &TargetConnector::logMessage, this, [this, taskID](const QString& message) {
-        appendTaskLog(taskID, message);
-    });
-    connect(connector, &TargetConnector::statusChanged, this, [this, taskID](const QString& status) {
-        setTaskStatus(taskID, status);
-    });
-    connect(connector, &TargetConnector::trafficChanged, this, [this, taskID](quint64 receivedBytes, quint64 sentBytes) {
-        SyncTask* task = taskByID(taskID);
-        if (task == nullptr) {
-            return;
-        }
-        task->receivedBytes = receivedBytes;
-        task->sentBytes = sentBytes;
-        refreshTaskTable();
-    });
-    connect(connector, &TargetConnector::snapshotScanned, this, [this, taskID](quint64 fileCount, quint64 byteCount, quint64 ignoredCount) {
-        SyncTask* task = taskByID(taskID);
-        if (task == nullptr) {
-            return;
-        }
-        task->localFiles = int(fileCount);
-        task->localBytes = byteCount;
-        task->ignoredCount = ignoredCount;
-        task->detail = QStringLiteral("本地 %1 个文件，忽略 %2 项").arg(fileCount).arg(ignoredCount);
-        refreshTaskTable();
-    });
-    connect(connector, &TargetConnector::planReceived, this, [this, taskID](int operationCount, quint64 standardBytes) {
-        SyncTask* task = taskByID(taskID);
-        if (task == nullptr) {
-            return;
-        }
-        task->globalBytes = standardBytes;
-        task->detail = QStringLiteral("同步计划：%1 个文件").arg(operationCount);
-        refreshTaskTable();
-    });
-    connect(connector, &TargetConnector::finished, this, [this, taskID](bool ok, const QString& message) {
+    if (sourceConnector != nullptr) {
+        connect(thread, &QThread::started, sourceConnector, &SourceConnector::run);
+        connect(sourceConnector, &SourceConnector::logMessage, this, [this, taskID](const QString& message) {
+            appendTaskLog(taskID, message);
+        });
+        connect(sourceConnector, &SourceConnector::statusChanged, this, [this, taskID](const QString& status) {
+            setTaskStatus(taskID, status);
+        });
+        connect(sourceConnector, &SourceConnector::trafficChanged, this, [this, taskID](quint64 receivedBytes, quint64 sentBytes) {
+            SyncTask* task = taskByID(taskID);
+            if (task == nullptr) {
+                return;
+            }
+            task->receivedBytes = receivedBytes;
+            task->sentBytes = sentBytes;
+            refreshTaskTable();
+        });
+        connect(sourceConnector, &SourceConnector::snapshotScanned, this, [this, taskID](quint64 fileCount, quint64 byteCount, quint64 ignoredCount) {
+            SyncTask* task = taskByID(taskID);
+            if (task == nullptr) {
+                return;
+            }
+            task->localFiles = int(fileCount);
+            task->localBytes = byteCount;
+            task->globalBytes = byteCount;
+            task->ignoredCount = ignoredCount;
+            task->detail = QStringLiteral("本地 %1 个文件，忽略 %2 项").arg(fileCount).arg(ignoredCount);
+            refreshTaskTable();
+        });
+        connect(sourceConnector, &SourceConnector::planReceived, this, [this, taskID](int operationCount, quint64 standardBytes) {
+            SyncTask* task = taskByID(taskID);
+            if (task == nullptr) {
+                return;
+            }
+            task->globalBytes = standardBytes;
+            task->detail = QStringLiteral("同步计划：%1 个文件").arg(operationCount);
+            refreshTaskTable();
+        });
+    } else if (connector != nullptr) {
+        connect(thread, &QThread::started, connector, &TargetConnector::run);
+        connect(connector, &TargetConnector::logMessage, this, [this, taskID](const QString& message) {
+            appendTaskLog(taskID, message);
+        });
+        connect(connector, &TargetConnector::statusChanged, this, [this, taskID](const QString& status) {
+            setTaskStatus(taskID, status);
+        });
+        connect(connector, &TargetConnector::trafficChanged, this, [this, taskID](quint64 receivedBytes, quint64 sentBytes) {
+            SyncTask* task = taskByID(taskID);
+            if (task == nullptr) {
+                return;
+            }
+            task->receivedBytes = receivedBytes;
+            task->sentBytes = sentBytes;
+            refreshTaskTable();
+        });
+        connect(connector, &TargetConnector::snapshotScanned, this, [this, taskID](quint64 fileCount, quint64 byteCount, quint64 ignoredCount) {
+            SyncTask* task = taskByID(taskID);
+            if (task == nullptr) {
+                return;
+            }
+            task->localFiles = int(fileCount);
+            task->localBytes = byteCount;
+            task->ignoredCount = ignoredCount;
+            task->detail = QStringLiteral("本地 %1 个文件，忽略 %2 项").arg(fileCount).arg(ignoredCount);
+            refreshTaskTable();
+        });
+        connect(connector, &TargetConnector::planReceived, this, [this, taskID](int operationCount, quint64 standardBytes) {
+            SyncTask* task = taskByID(taskID);
+            if (task == nullptr) {
+                return;
+            }
+            task->globalBytes = standardBytes;
+            task->detail = QStringLiteral("同步计划：%1 个文件").arg(operationCount);
+            refreshTaskTable();
+        });
+    }
+
+    auto handleFinished = [this, taskID](bool ok, const QString& message) {
         for (SyncTask& item : tasks) {
             if (item.id != taskID) {
                 continue;
@@ -306,16 +591,30 @@ void MainWindow::startSelectedTask()
         if (!ok && !message.contains(QStringLiteral("取消"))) {
             QMessageBox::warning(this, QStringLiteral("同步失败"), message);
         }
-    });
-    connect(connector, &TargetConnector::finished, thread, &QThread::quit);
-    connect(connector, &TargetConnector::finished, connector, &TargetConnector::deleteLater);
+    };
+
+    if (sourceConnector != nullptr) {
+        connect(sourceConnector, &SourceConnector::finished, this, handleFinished);
+        connect(sourceConnector, &SourceConnector::finished, thread, &QThread::quit);
+        connect(sourceConnector, &SourceConnector::finished, sourceConnector, &SourceConnector::deleteLater);
+    } else if (connector != nullptr) {
+        connect(connector, &TargetConnector::finished, this, handleFinished);
+        connect(connector, &TargetConnector::finished, thread, &QThread::quit);
+        connect(connector, &TargetConnector::finished, connector, &TargetConnector::deleteLater);
+    }
+
     connect(thread, &QThread::finished, thread, &QThread::deleteLater);
     connect(thread, &QThread::finished, this, [this, taskID]() {
         connectionThreads.remove(taskID);
         connectors.remove(taskID);
+        sourceConnectors.remove(taskID);
         refreshButtons();
     });
 
+    if (worker == nullptr) {
+        thread->deleteLater();
+        return;
+    }
     thread->start();
 }
 
@@ -329,6 +628,10 @@ void MainWindow::pauseSelectedTask()
         TargetConnector* connector = connectors.value(task->id, nullptr);
         if (connector != nullptr) {
             connector->cancel();
+        }
+        SourceConnector* sourceConnector = sourceConnectors.value(task->id, nullptr);
+        if (sourceConnector != nullptr) {
+            sourceConnector->cancel();
         }
         task->status = QStringLiteral("停止中");
         task->detail = QStringLiteral("正在取消当前同步");
@@ -366,7 +669,7 @@ void MainWindow::rescanSelectedTask()
     task->localFiles = int(fileCount);
     task->localBytes = byteCount;
     task->ignoredCount = ignoredCount;
-    if (task->globalBytes == 0) {
+    if (isSourceTask(*task) || task->globalBytes == 0) {
         task->globalBytes = byteCount;
     }
     task->detail = QStringLiteral("本地 %1 个文件，忽略 %2 项").arg(fileCount).arg(ignoredCount);
@@ -539,6 +842,7 @@ void MainWindow::loadTasks()
         settings.setArrayIndex(index);
         SyncTask task;
         task.id = settings.value(QStringLiteral("id"), newTaskID()).toString();
+        task.role = settings.value(QStringLiteral("role")).toString() == QStringLiteral("source") ? SyncTask::Source : SyncTask::Target;
         task.name = settings.value(QStringLiteral("name"), QStringLiteral("接收任务")).toString();
         task.linkText = settings.value(QStringLiteral("link")).toString();
         task.targetFolder = settings.value(QStringLiteral("targetFolder")).toString();
@@ -567,6 +871,7 @@ void MainWindow::saveTasks() const
         const SyncTask& task = tasks[index];
         settings.setArrayIndex(index);
         settings.setValue(QStringLiteral("id"), task.id);
+        settings.setValue(QStringLiteral("role"), task.role == SyncTask::Source ? QStringLiteral("source") : QStringLiteral("target"));
         settings.setValue(QStringLiteral("name"), task.name);
         settings.setValue(QStringLiteral("link"), task.linkText);
         settings.setValue(QStringLiteral("targetFolder"), task.targetFolder);
@@ -587,7 +892,7 @@ void MainWindow::refreshTaskTable()
         const SyncTask& task = tasks[row];
         const QString devices = QStringLiteral("%1 / %2").arg(task.connectedDevices).arg(task.totalDevices);
         const QStringList values = {
-            QStringLiteral("接收"),
+            roleLabel(task),
             task.name,
             task.status,
             devices,
@@ -723,7 +1028,7 @@ void MainWindow::setTaskStatus(const QString& taskID, const QString& status, con
         if (!detail.isEmpty()) {
             task.detail = detail;
         }
-        if (status == QStringLiteral("运行-已连接源端")) {
+        if (status == QStringLiteral("运行-已连接源端") || status == QStringLiteral("运行-已连接目标端")) {
             task.connectedDevices = 1;
         }
         refreshTaskTable();
@@ -747,6 +1052,42 @@ bool MainWindow::parseTaskLink(SyncTask* task, QString* error)
     task->link = parsed;
     task->linkReady = true;
     return true;
+}
+
+QString MainWindow::roleLabel(const SyncTask& task) const
+{
+    return task.role == SyncTask::Source ? QStringLiteral("发送") : QStringLiteral("接收");
+}
+
+bool MainWindow::isSourceTask(const SyncTask& task) const
+{
+    return task.role == SyncTask::Source;
+}
+
+QString MainWindow::buildSourceLink(const QString& relayEndpoint, const QString& relayToken, const QString& caCertificatePem, QString* error) const
+{
+    Endpoint endpoint;
+    if (!EndpointParser::parse(relayEndpoint, &endpoint, error)) {
+        return {};
+    }
+    const QDateTime issuedAt = QDateTime::currentDateTimeUtc();
+    const QDateTime expiresAt = issuedAt.addSecs(24 * 60 * 60);
+    QJsonObject object;
+    object.insert(QStringLiteral("version"), 1);
+    object.insert(QStringLiteral("session_id"), newTaskID());
+    object.insert(QStringLiteral("endpoint"), QStringLiteral("127.0.0.1:0"));
+    object.insert(QStringLiteral("relay_endpoint"), endpoint.display());
+    if (!relayToken.trimmed().isEmpty()) {
+        object.insert(QStringLiteral("relay_token"), relayToken.trimmed());
+    }
+    if (!caCertificatePem.trimmed().isEmpty()) {
+        object.insert(QStringLiteral("ca_certificate_pem"), caCertificatePem.trimmed());
+    }
+    object.insert(QStringLiteral("token"), base64Url(randomBytes(32)));
+    object.insert(QStringLiteral("issued_at"), issuedAt.toString(Qt::ISODateWithMs));
+    object.insert(QStringLiteral("expires_at"), expiresAt.toString(Qt::ISODateWithMs));
+    const QByteArray json = QJsonDocument(object).toJson(QJsonDocument::Compact);
+    return base64Url(json);
 }
 
 bool MainWindow::runTaskDialog(SyncTask* task, bool editing)
@@ -805,6 +1146,7 @@ bool MainWindow::runTaskDialog(SyncTask* task, bool editing)
         return false;
     }
     task->name = name;
+    task->role = SyncTask::Target;
     task->targetFolder = folder;
     task->linkText = link;
     QString error;
@@ -819,6 +1161,116 @@ bool MainWindow::runTaskDialog(SyncTask* task, bool editing)
     return true;
 }
 
+bool MainWindow::runSourceTaskDialog(SyncTask* task, bool editing)
+{
+    QDialog dialog(this);
+    dialog.setWindowTitle(editing ? QStringLiteral("发送任务参数") : QStringLiteral("创建同步"));
+    auto* layout = new QVBoxLayout(&dialog);
+    auto* form = new QFormLayout();
+    auto* nameEdit = new QLineEdit(task->name);
+    auto* folderEdit = new QLineEdit(task->targetFolder);
+    auto* relayEdit = new QLineEdit(task->linkReady ? task->link.relayEndpoint : QString());
+    auto* relayTokenEdit = new QLineEdit(task->linkReady ? task->link.relayToken : QString());
+    auto* caEdit = new QTextEdit(task->linkReady ? task->link.caCertificatePem : QString());
+    caEdit->setAcceptRichText(false);
+    caEdit->setPlaceholderText(QStringLiteral("可选：Relay 证书 PEM。使用公网可信证书时通常不用填。"));
+
+    auto* folderRow = new QHBoxLayout();
+    auto* chooseButton = new QPushButton(QStringLiteral("选择目录"));
+    folderRow->addWidget(folderEdit);
+    folderRow->addWidget(chooseButton);
+    connect(chooseButton, &QPushButton::clicked, &dialog, [&dialog, folderEdit]() {
+        const QString folder = QFileDialog::getExistingDirectory(&dialog, QStringLiteral("选择发送文件夹"), folderEdit->text());
+        if (!folder.isEmpty()) {
+            folderEdit->setText(folder);
+        }
+    });
+
+    form->addRow(QStringLiteral("名称"), nameEdit);
+    form->addRow(QStringLiteral("发送目录"), folderRow);
+    form->addRow(QStringLiteral("Relay 地址"), relayEdit);
+    form->addRow(QStringLiteral("Relay 令牌"), relayTokenEdit);
+    form->addRow(QStringLiteral("Relay 证书"), caEdit);
+    layout->addLayout(form);
+
+    auto* hint = new QLabel(QStringLiteral("Win7 源端第一版走 Relay：创建后会生成一段同步链接，目标端只需要粘贴这段链接加入。"));
+    hint->setWordWrap(true);
+    layout->addWidget(hint);
+
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
+    buttons->button(QDialogButtonBox::Ok)->setText(editing ? QStringLiteral("保存并重新生成链接") : QStringLiteral("创建"));
+    buttons->button(QDialogButtonBox::Cancel)->setText(QStringLiteral("取消"));
+    layout->addWidget(buttons);
+
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+
+    if (dialog.exec() != QDialog::Accepted) {
+        return false;
+    }
+
+    const QString name = nameEdit->text().trimmed();
+    const QString folder = folderEdit->text().trimmed();
+    const QString relayEndpoint = relayEdit->text().trimmed();
+    const QString relayToken = relayTokenEdit->text().trimmed();
+    const QString caCertificatePem = caEdit->toPlainText().trimmed();
+    if (name.isEmpty()) {
+        QMessageBox::warning(this, QStringLiteral("名称为空"), QStringLiteral("请填写任务名称。"));
+        return false;
+    }
+    if (folder.isEmpty() || !QFileInfo(folder).isDir()) {
+        QMessageBox::warning(this, QStringLiteral("目录不可用"), QStringLiteral("请选择已经存在的发送文件夹。"));
+        return false;
+    }
+    if (relayEndpoint.isEmpty()) {
+        QMessageBox::warning(this, QStringLiteral("Relay 为空"), QStringLiteral("Win7 源端当前请填写 Relay 地址，例如 r.example.com:17443。"));
+        return false;
+    }
+
+    QString error;
+    const QString link = buildSourceLink(relayEndpoint, relayToken, caCertificatePem, &error);
+    if (link.isEmpty()) {
+        QMessageBox::warning(this, QStringLiteral("Relay 地址不可用"), error);
+        return false;
+    }
+
+    task->role = SyncTask::Source;
+    task->name = name;
+    task->targetFolder = folder;
+    task->linkText = link;
+    if (!parseTaskLink(task, &error)) {
+        QMessageBox::warning(this, QStringLiteral("同步链接生成失败"), error);
+        return false;
+    }
+    task->status = QStringLiteral("停止");
+    task->detail = QStringLiteral("Relay：%1").arg(task->link.relayEndpoint);
+    return true;
+}
+
+void MainWindow::showSourceLink(const SyncTask& task)
+{
+    QDialog dialog(this);
+    dialog.setWindowTitle(QStringLiteral("同步链接"));
+    auto* layout = new QVBoxLayout(&dialog);
+    auto* hint = new QLabel(QStringLiteral("把下面这段同步链接发给目标端，在目标端点击“加入同步”后粘贴即可。"));
+    hint->setWordWrap(true);
+    layout->addWidget(hint);
+    auto* linkEdit = new QTextEdit(task.linkText);
+    linkEdit->setAcceptRichText(false);
+    linkEdit->setReadOnly(true);
+    linkEdit->setMinimumSize(560, 180);
+    layout->addWidget(linkEdit);
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Close);
+    auto* copyButton = buttons->addButton(QStringLiteral("复制链接"), QDialogButtonBox::ActionRole);
+    buttons->button(QDialogButtonBox::Close)->setText(QStringLiteral("关闭"));
+    connect(copyButton, &QPushButton::clicked, &dialog, [linkEdit]() {
+        QApplication::clipboard()->setText(linkEdit->toPlainText());
+    });
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    layout->addWidget(buttons);
+    dialog.exec();
+}
+
 void MainWindow::showTaskParameters(SyncTask* task)
 {
     if (task == nullptr) {
@@ -828,16 +1280,30 @@ void MainWindow::showTaskParameters(SyncTask* task)
     dialog.setWindowTitle(QStringLiteral("任务参数"));
     auto* layout = new QVBoxLayout(&dialog);
 
-    auto* editButton = new QPushButton(QStringLiteral("修改名称、目录和链接"));
+    auto* editButton = new QPushButton(isSourceTask(*task)
+        ? QStringLiteral("修改名称、目录和 Relay")
+        : QStringLiteral("修改名称、目录和链接"));
     layout->addWidget(editButton);
     connect(editButton, &QPushButton::clicked, &dialog, [this, task]() {
-        if (runTaskDialog(task, true)) {
+        const bool ok = isSourceTask(*task) ? runSourceTaskDialog(task, true) : runTaskDialog(task, true);
+        if (ok) {
             saveTasks();
             refreshLogFilter();
             refreshTaskTable();
             appendTaskLog(task->id, QStringLiteral("任务参数已更新。"));
+            if (isSourceTask(*task)) {
+                showSourceLink(*task);
+            }
         }
     });
+
+    if (isSourceTask(*task)) {
+        auto* copyLinkButton = new QPushButton(QStringLiteral("复制同步链接"));
+        layout->addWidget(copyLinkButton);
+        connect(copyLinkButton, &QPushButton::clicked, &dialog, [this, task]() {
+            showSourceLink(*task);
+        });
+    }
 
     auto* ignoreLabel = new QLabel(QStringLiteral("忽略规则（每行一条，当前先保存规则；后续会接入扫描和同步过滤）："));
     ignoreLabel->setWordWrap(true);
@@ -876,10 +1342,10 @@ QString MainWindow::taskDiagnosticsText(const SyncTask& task) const
 {
     QString text;
     text += QStringLiteral("任务: %1\n").arg(task.name);
-    text += QStringLiteral("类型: 接收\n");
+    text += QStringLiteral("类型: %1\n").arg(roleLabel(task));
     text += QStringLiteral("状态: %1\n").arg(task.status);
     text += QStringLiteral("详情: %1\n").arg(task.detail);
-    text += QStringLiteral("接收目录: %1\n").arg(task.targetFolder);
+    text += QStringLiteral("%1目录: %2\n").arg(isSourceTask(task) ? QStringLiteral("发送") : QStringLiteral("接收"), task.targetFolder);
     text += QStringLiteral("源端地址: %1\n").arg(task.linkReady ? task.link.endpoint : QStringLiteral("-"));
     text += QStringLiteral("Relay 地址: %1\n").arg(task.linkReady && task.link.hasRelay() ? task.link.relayEndpoint : QStringLiteral("-"));
     text += QStringLiteral("会话编号: %1\n").arg(task.linkReady ? task.link.sessionId : QStringLiteral("-"));

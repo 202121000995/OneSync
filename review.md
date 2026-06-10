@@ -1958,3 +1958,33 @@
 
 - 当前只完成本地交叉编译和 zip 完整性检查，尚未在真实 Windows 7 机器启动验证。
 - OpenSSL DLL 复用本机 LightWebServer 项目已有 Win32 运行库，后续最好沉淀为 OneSync 自己的第三方依赖目录或 CI 缓存。
+
+## Win7 Qt 现代界面与创建同步审核
+
+审核分支：`feature/win7-qt-modern-source`
+
+审核结论：通过。
+
+审核说明：
+
+- Win7 Qt 主界面改为现代浅色皮肤，增加左侧导航、卡片式任务表格和深色日志面板。
+- 任务类型从单一接收扩展为发送/接收，任务表格、诊断和状态文案按角色显示。
+- 新增“创建同步”入口，发送端可选择发送目录、填写 Relay 地址和可选 Relay 令牌，生成一段同步链接。
+- 新增 `SourceConnector`，Win7 源端第一版通过 Relay 连接目标端，完成目标端认证、快照请求、同步计划生成和新增/变更文件发送。
+- 目标端原有“加入同步”链路保持不变，仍支持粘贴链接后接收文件。
+- 打包脚本、qmake 和 CMake 工程已加入 `SourceConnector`。
+
+验证结果：
+
+- `git diff --check` 通过。
+- `sh -n clients/win7-qt/build-win7.sh` 通过。
+- `sh clients/win7-qt/build-win7.sh` 成功。
+- `file clients/win7-qt/release-win7/OneSyncWin7.exe` 显示 `PE32 executable (GUI) Intel 80386, for MS Windows`。
+- `strings clients/win7-qt/release-win7/OneSyncWin7.exe | rg "GetSystemTimePreciseAsFileTime"` 无匹配。
+- `unzip -t clients/win7-qt/dist/OneSyncWin7-win7-x86-v0.1.0.zip` 通过。
+
+剩余风险：
+
+- Win7 源端第一版优先支持 Relay，不做直连 TLS 监听；直连源端仍需后续单独设计证书生成、端口监听和防火墙体验。
+- 源端 Relay 发送链路已编译通过，但仍需要两台真实 Windows 机器配合 Relay 做端到端验收。
+- 现代皮肤依赖 Qt 5 QSS，Win7 真实字体和主题渲染可能与 Mac 预览略有差异。

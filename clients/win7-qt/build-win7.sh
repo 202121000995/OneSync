@@ -41,6 +41,7 @@ INCLUDES="-I$ROOT -I$ROOT/src -I$BUILD/moc -I$QT_WIN/include \
 -I$QT_WIN/include/QtWidgets -I$QT_WIN/include/QtNetwork"
 
 "$QT_HOST/bin/moc" $DEFINES $INCLUDES "$ROOT/src/MainWindow.h" -o "$BUILD/moc/moc_MainWindow.cpp"
+"$QT_HOST/bin/moc" $DEFINES $INCLUDES "$ROOT/src/SourceConnector.h" -o "$BUILD/moc/moc_SourceConnector.cpp"
 "$QT_HOST/bin/moc" $DEFINES $INCLUDES "$ROOT/src/TargetConnector.h" -o "$BUILD/moc/moc_TargetConnector.cpp"
 
 export ZIG_LOCAL_CACHE_DIR="$BUILD/zig-cache"
@@ -61,11 +62,13 @@ compile "$ROOT/src/FileReceiver.cpp" "$BUILD/obj/FileReceiver.obj"
 compile "$ROOT/src/IgnoreMatcher.cpp" "$BUILD/obj/IgnoreMatcher.obj"
 compile "$ROOT/src/MainWindow.cpp" "$BUILD/obj/MainWindow.obj"
 compile "$ROOT/src/PeerIdentity.cpp" "$BUILD/obj/PeerIdentity.obj"
+compile "$ROOT/src/SourceConnector.cpp" "$BUILD/obj/SourceConnector.obj"
 compile "$ROOT/src/SnapshotScanner.cpp" "$BUILD/obj/SnapshotScanner.obj"
 compile "$ROOT/src/SyncLink.cpp" "$BUILD/obj/SyncLink.obj"
 compile "$ROOT/src/SyncProtocol.cpp" "$BUILD/obj/SyncProtocol.obj"
 compile "$ROOT/src/TargetConnector.cpp" "$BUILD/obj/TargetConnector.obj"
 compile "$BUILD/moc/moc_MainWindow.cpp" "$BUILD/obj/moc_MainWindow.obj"
+compile "$BUILD/moc/moc_SourceConnector.cpp" "$BUILD/obj/moc_SourceConnector.obj"
 compile "$BUILD/moc/moc_TargetConnector.cpp" "$BUILD/obj/moc_TargetConnector.obj"
 
 python3 "$ROOT/tools/make_icon_res.py" "$REPO_ROOT/packaging/icons/OneSync.ico" "$BUILD/obj/OneSync.res"
@@ -77,11 +80,13 @@ python3 "$ROOT/tools/make_icon_res.py" "$REPO_ROOT/packaging/icons/OneSync.ico" 
     "$BUILD/obj/IgnoreMatcher.obj" \
     "$BUILD/obj/MainWindow.obj" \
     "$BUILD/obj/PeerIdentity.obj" \
+    "$BUILD/obj/SourceConnector.obj" \
     "$BUILD/obj/SnapshotScanner.obj" \
     "$BUILD/obj/SyncLink.obj" \
     "$BUILD/obj/SyncProtocol.obj" \
     "$BUILD/obj/TargetConnector.obj" \
     "$BUILD/obj/moc_MainWindow.obj" \
+    "$BUILD/obj/moc_SourceConnector.obj" \
     "$BUILD/obj/moc_TargetConnector.obj" \
     "$BUILD/obj/OneSync.res" \
     -L"$QT_WIN/lib" \

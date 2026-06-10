@@ -18,6 +18,7 @@ SOURCES += \
     src/IgnoreMatcher.cpp \
     src/MainWindow.cpp \
     src/PeerIdentity.cpp \
+    src/SourceConnector.cpp \
     src/SnapshotScanner.cpp \
     src/SyncLink.cpp \
     src/SyncProtocol.cpp \
@@ -29,6 +30,7 @@ HEADERS += \
     src/IgnoreMatcher.h \
     src/MainWindow.h \
     src/PeerIdentity.h \
+    src/SourceConnector.h \
     src/SnapshotScanner.h \
     src/SyncLink.h \
     src/SyncProtocol.h \

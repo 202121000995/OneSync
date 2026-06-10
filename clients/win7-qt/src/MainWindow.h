@@ -16,6 +16,7 @@ class QPlainTextEdit;
 class QSystemTrayIcon;
 class QTableWidget;
 class QThread;
+class SourceConnector;
 class TargetConnector;
 
 class MainWindow : public QMainWindow
@@ -26,6 +27,7 @@ public:
     explicit MainWindow(QWidget* parent = nullptr);
 
 private slots:
+    void createTask();
     void addTask();
     void startSelectedTask();
     void pauseSelectedTask();
@@ -39,7 +41,13 @@ private slots:
 
 private:
     struct SyncTask {
+        enum Role {
+            Source,
+            Target
+        };
+
         QString id;
+        Role role = Target;
         QString name;
         QString linkText;
         QString targetFolder;
@@ -76,7 +84,12 @@ private:
     const SyncTask* taskByID(const QString& taskID) const;
     void setTaskStatus(const QString& taskID, const QString& status, const QString& detail = QString());
     bool parseTaskLink(SyncTask* task, QString* error);
+    QString roleLabel(const SyncTask& task) const;
+    bool isSourceTask(const SyncTask& task) const;
     bool runTaskDialog(SyncTask* task, bool editing);
+    bool runSourceTaskDialog(SyncTask* task, bool editing);
+    QString buildSourceLink(const QString& relayEndpoint, const QString& relayToken, const QString& caCertificatePem, QString* error) const;
+    void showSourceLink(const SyncTask& task);
     void showTaskParameters(SyncTask* task);
     QString taskDiagnosticsText(const SyncTask& task) const;
     QString formatBytes(quint64 value) const;
@@ -98,6 +111,7 @@ private:
     QList<SyncTask> tasks;
     QMap<QString, QThread*> connectionThreads;
     QMap<QString, TargetConnector*> connectors;
+    QMap<QString, SourceConnector*> sourceConnectors;
     QStringList globalLogs;
     QMap<QString, QStringList> taskLogs;
     QSystemTrayIcon* trayIcon = nullptr;
