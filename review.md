@@ -1929,3 +1929,29 @@
 - 暂停不是强杀线程；TLS 握手或网络等待可能需要等当前 500ms 检查周期或连接等待返回后结束。
 - 忽略规则尚未提供可视化规则测试器，复杂规则需要后续在真机上校准。
 - 收发速度目前是本轮平均速度，不是滑动窗口瞬时速度。
+
+## Win7 Qt 客户端 Mac 交叉打包审核
+
+审核分支：`feature/win7-qt-mac-cross-package`
+
+审核结论：通过。
+
+审核说明：
+
+- 新增 `clients/win7-qt/build-win7.sh`，可在当前 Apple Silicon Mac 上复用本机已有 Zig 和 Windows Qt 5.12.12 MinGW 32-bit 工具链打包。
+- 新增 `clients/win7-qt/tools/make_icon_res.py`，把 `packaging/icons/OneSync.ico` 转成 Windows `.res` 并链接进 exe。
+- 打包输出为 32 位 Windows GUI 程序，目标兼容 Windows 7 SP1。
+- zip 包包含 `OneSyncWin7.exe`、Qt5Core/Gui/Widgets/Network、OpenSSL 1.1 DLL、MinGW 运行库、`platforms/qwindows.dll`、README 和协议说明。
+- `.gitignore` 已排除 `clients/win7-qt/build-win7/`、`release-win7/` 和 `dist/`，避免提交本地构建产物。
+
+验证结果：
+
+- `sh clients/win7-qt/build-win7.sh` 成功。
+- `file clients/win7-qt/release-win7/OneSyncWin7.exe` 显示 `PE32 executable (GUI) Intel 80386, for MS Windows`。
+- `unzip -t clients/win7-qt/dist/OneSyncWin7-win7-x86-v0.1.0.zip` 通过。
+- 最终 zip 大小约 13 MB。
+
+剩余风险：
+
+- 当前只完成本地交叉编译和 zip 完整性检查，尚未在真实 Windows 7 机器启动验证。
+- OpenSSL DLL 复用本机 LightWebServer 项目已有 Win32 运行库，后续最好沉淀为 OneSync 自己的第三方依赖目录或 CI 缓存。

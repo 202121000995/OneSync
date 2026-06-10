@@ -3,6 +3,11 @@
 *.test
 *.out
 
+# Win7 Qt local build output
+/clients/win7-qt/build-win7/
+/clients/win7-qt/release-win7/
+/clients/win7-qt/dist/
+
 # Local runtime data
 /data/
 /tmp/
