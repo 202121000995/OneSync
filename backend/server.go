@@ -50,6 +50,7 @@ type taskManager interface {
 	SetDeviceTrusted(ctx context.Context, taskID string, trusted bool) error
 	SetDeviceDisabled(ctx context.Context, taskID string, disabled bool) error
 	ClearDeviceBinding(ctx context.Context, taskID string) error
+	ClearLogs(ctx context.Context, taskID string) error
 	Get(ctx context.Context, taskID string) (task.Task, error)
 	List(ctx context.Context) ([]task.Task, error)
 }
@@ -237,6 +238,7 @@ func NewServerWithOptions(manager taskManager, links *syncauth.LinkService, cred
 	mux.HandleFunc("POST /api/tasks/{id}/device/kick", server.kickDevice)
 	mux.HandleFunc("POST /api/tasks/{id}/ignore-preview", server.previewIgnored)
 	mux.HandleFunc("GET /api/tasks/{id}/diagnostics", server.taskDiagnostics)
+	mux.HandleFunc("POST /api/logs/clear", server.clearLogs)
 	mux.HandleFunc("DELETE /api/tasks/{id}", server.deleteTask)
 	mux.HandleFunc("POST /api/links", server.issueLink)
 	mux.HandleFunc("POST /api/links/join", server.joinLink)
@@ -489,6 +491,20 @@ func (s *Server) stopTask(writer http.ResponseWriter, request *http.Request) {
 		return
 	}
 	writeJSON(writer, http.StatusOK, map[string]string{"status": "stopped"})
+}
+
+func (s *Server) clearLogs(writer http.ResponseWriter, request *http.Request) {
+	var input struct {
+		TaskID string `json:"task_id"`
+	}
+	if err := decodeJSON(writer, request, &input); err != nil {
+		return
+	}
+	if err := s.manager.ClearLogs(request.Context(), input.TaskID); err != nil {
+		writeAPIError(writer, statusForTaskError(err), err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, map[string]string{"status": "cleared"})
 }
 
 func (s *Server) updateTask(writer http.ResponseWriter, request *http.Request) {

@@ -117,6 +117,7 @@ func TestWebPageKeepsTaskTableAsMainSurface(t *testing.T) {
 		"任务日志",
 		"复制当前日志",
 		"下载当前日志",
+		"清空当前日志",
 		"Relay 令牌",
 		"目标端仍只需要粘贴这一段同步链接",
 		"复制诊断",

@@ -741,6 +741,25 @@ function downloadVisibleLogs() {
   notify("当前日志已下载");
 }
 
+async function clearVisibleLogs() {
+  const task = selectedTask();
+  const scopeText = task ? `任务「${task.id}」` : "全部任务";
+  if (!confirm(`确定清空${scopeText}的任务日志吗？此操作不会删除服务日志文件。`)) {
+    return;
+  }
+  try {
+    await api("/api/logs/clear", {
+      method: "POST",
+      body: JSON.stringify({ task_id: task ? task.id : "" }),
+    });
+    await loadTasks();
+    renderLogs();
+    notify("任务日志已清空");
+  } catch (error) {
+    notify(error.message);
+  }
+}
+
 function openDevicesDialog(task) {
   devicesTitle.textContent = `设备详情 - ${task.id}`;
   const devices = task.devices || {};
@@ -1372,6 +1391,7 @@ document.querySelector("#download-diagnostics").addEventListener("click", downlo
 document.querySelector("#download-diagnostics-package").addEventListener("click", downloadDiagnosticsPackage);
 document.querySelector("#copy-visible-logs").addEventListener("click", copyVisibleLogs);
 document.querySelector("#download-visible-logs").addEventListener("click", downloadVisibleLogs);
+document.querySelector("#clear-visible-logs").addEventListener("click", clearVisibleLogs);
 logLevelFilter.addEventListener("change", renderLogs);
 logSearch.addEventListener("input", renderLogs);
 document.querySelector("#copy-all-diagnostics").addEventListener("click", async () => {

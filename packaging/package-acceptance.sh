@@ -68,9 +68,9 @@ fi
 rm -f "$windows_zip" "$linux_tar"
 (
 	cd "$PACKAGE_DIR"
-	zip -qr "$windows_zip" "$windows_name"
-	env COPYFILE_DISABLE=1 LC_ALL=C LANG=C tar --no-xattrs -czf "$linux_tar" "$linux_name" 2>/dev/null ||
-		env COPYFILE_DISABLE=1 LC_ALL=C LANG=C tar -czf "$linux_tar" "$linux_name"
+	zip -qr "$(basename "$windows_zip")" "$windows_name"
+	env COPYFILE_DISABLE=1 LC_ALL=C LANG=C tar --no-xattrs -czf "$(basename "$linux_tar")" "$linux_name" 2>/dev/null ||
+		env COPYFILE_DISABLE=1 LC_ALL=C LANG=C tar -czf "$(basename "$linux_tar")" "$linux_name"
 )
 
 {

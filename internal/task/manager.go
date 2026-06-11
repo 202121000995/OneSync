@@ -768,6 +768,45 @@ func (m *Manager) addLog(taskID, level, message string) error {
 	return nil
 }
 
+// ClearLogs removes task logs shown in the management page. Service logs on disk
+// are intentionally left untouched for diagnostics.
+func (m *Manager) ClearLogs(ctx context.Context, taskID string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if taskID != "" {
+		task, exists := m.tasks[taskID]
+		if !exists {
+			return ErrTaskNotFound
+		}
+		previous := task
+		task.Logs = nil
+		task.UpdatedAt = m.now().UTC()
+		m.tasks[taskID] = task
+		if err := m.store.save(m.tasks); err != nil {
+			m.tasks[taskID] = previous
+			return err
+		}
+		return nil
+	}
+	previous := make(map[string]Task, len(m.tasks))
+	for id, item := range m.tasks {
+		previous[id] = item
+	}
+	for id, item := range m.tasks {
+		item.Logs = nil
+		item.UpdatedAt = m.now().UTC()
+		m.tasks[id] = item
+	}
+	if err := m.store.save(m.tasks); err != nil {
+		m.tasks = previous
+		return err
+	}
+	return nil
+}
+
 func (m *Manager) finishRun(taskID string, runtime *runtimeTask, state, lastError string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()

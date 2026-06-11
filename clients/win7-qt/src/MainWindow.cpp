@@ -182,7 +182,7 @@ void applyModernDialogStyle(QDialog* dialog)
 }
 } // namespace
 
-const QString kWin7Version = QStringLiteral("1.31");
+const QString kWin7Version = QStringLiteral("1.32");
 
 MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent)
@@ -843,9 +843,6 @@ void MainWindow::startSelectedTask()
         }
         saveTasks();
         refreshTaskTable();
-        if (!ok && !message.contains(QStringLiteral("取消"))) {
-            QMessageBox::warning(this, QStringLiteral("同步失败"), message);
-        }
     };
 
     if (sourceConnector != nullptr) {

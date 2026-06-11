@@ -28,8 +28,8 @@ const int kConnectedIdleDelayMs = 10 * 60 * 1000;
 const int kAuthenticationTimeoutMs = 60000;
 const int kSyncMessageTimeoutMs = 120000;
 const int kMaxPayload = 16 * 1024 * 1024;
-const int kMaxChunkSize = 1024 * 1024;
-const int kPipelineChunks = 4;
+const int kMaxChunkSize = 512 * 1024;
+const int kPipelineChunks = 16;
 const int kProgressLogIntervalMs = 10000;
 const int kHashSize = 32;
 const quint64 kSnapshotRequestID = 1;
@@ -236,9 +236,14 @@ void SourceConnector::run()
             }
             emit statusChanged(QStringLiteral("运行-等待"));
             emit logMessage(QStringLiteral("本轮同步完成，保持 Relay 连接并等待下一轮。"));
-            if (!waitBeforeConnectedCycle(&controlSocket, &error)) {
-                emit finished(false, error);
-                return;
+            QString waitError;
+            if (!waitBeforeConnectedCycle(&controlSocket, &waitError)) {
+                if (isCancelled(&error)) {
+                    emit finished(false, error);
+                    return;
+                }
+                emit logMessage(QStringLiteral("%1，将自动重连 Relay 控制通道。").arg(waitError));
+                break;
             }
         }
         socket.disconnectFromHost();

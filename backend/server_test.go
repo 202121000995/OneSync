@@ -738,6 +738,23 @@ func (m *fakeManager) ClearDeviceBinding(_ context.Context, id string) error {
 	return nil
 }
 
+func (m *fakeManager) ClearLogs(_ context.Context, id string) error {
+	if id != "" {
+		found, ok := m.tasks[id]
+		if !ok {
+			return task.ErrTaskNotFound
+		}
+		found.Logs = nil
+		m.tasks[id] = found
+		return nil
+	}
+	for taskID, found := range m.tasks {
+		found.Logs = nil
+		m.tasks[taskID] = found
+	}
+	return nil
+}
+
 func (m *fakeManager) Get(_ context.Context, id string) (task.Task, error) {
 	found, ok := m.tasks[id]
 	if !ok {

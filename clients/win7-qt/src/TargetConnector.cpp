@@ -204,9 +204,14 @@ void TargetConnector::run()
             }
             emit statusChanged(QStringLiteral("运行-等待"));
             emit logMessage(QStringLiteral("本轮同步完成，保持 Relay 连接并等待下一轮。"));
-            if (!waitBeforeConnectedCycle(link.hasRelay() ? &controlSocket : nullptr, &error)) {
-                emit finished(false, error);
-                return;
+            QString waitError;
+            if (!waitBeforeConnectedCycle(link.hasRelay() ? &controlSocket : nullptr, &waitError)) {
+                if (isCancelled(&error)) {
+                    emit finished(false, error);
+                    return;
+                }
+                emit logMessage(QStringLiteral("%1，将自动重连 Relay 控制通道。").arg(waitError));
+                break;
             }
         }
         socket.disconnectFromHost();
