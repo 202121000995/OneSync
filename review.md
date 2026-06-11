@@ -3058,3 +3058,49 @@
 
 - 当前实现仍由源端周期性发起下一轮快照请求，目标端变化不会主动发专门的 wake 消息；但双方不再重新配对 Relay，等待主要缩短为已连接状态下的空闲轮询时间。
 - 后续可继续增加轻量 wake/heartbeat 消息，让目标端变化可以主动唤醒源端，而不是等待 2 秒轮询。
+
+## v1.30 Relay 控制连接与数据会话审核
+
+审核分支：`main`
+
+审核结论：本地验证通过，准备发布 GitHub Release。
+
+现场目标：
+
+- 空闲时，每个客户端只保持一条 Relay 控制连接。
+- 需要同步时，Relay 给源端和目标端发送数据会话邀请。
+- 源端和目标端收到邀请后，再建立独立的数据会话进行转发。
+- Relay 只负责在线状态、邀请和转发，不保存文件。
+- Win7 Qt 与 Go/Linux 客户端使用同一套新 Relay 协议，避免混合测试时一端新协议、一端旧协议导致互相等不到。
+
+修复说明：
+
+- Relay 新增控制连接协议：客户端先 `control join`，Relay 确认后保持该连接在线。
+- Relay 新增数据会话邀请：源端通过控制连接请求同步时，Relay 为双方生成一次性 session key，并通过控制连接发给源端和目标端。
+- Relay 新增数据会话接入：双方使用 session key 开新连接加入数据会话，Relay 配对后只做字节转发。
+- Relay 新增控制通道 wake 消息：收到一端 wake 后转发给同一任务的另一端控制连接。
+- Relay 保留旧登记配对协议，旧 Win7/旧客户端仍可连接新版 Relay；新版 Go/Linux 和新版 Win7 使用新控制连接协议。
+- Go/Linux 客户端改为先建立 Relay 控制连接，再建立 Relay 数据连接；任务停止时同时关闭数据连接和控制连接。
+- Go/Linux 客户端检测到本地变化后会通过 Relay 控制连接发送 wake；收到对端 wake 后会立即开始下一轮同步。
+- Win7 Qt 源端和目标端同步改为同样的控制连接 + 数据连接流程。
+- 根版本号从 `1.29` 提升到 `1.30`，主包、Win7 Qt 包、Linux 安装/升级示例统一使用 `v1.30`。
+
+验证结果：
+
+- `go test ./...` 通过。
+- `sh clients/win7-qt/build-win7.sh` 成功，生成 `clients/win7-qt/dist/OneSyncWin7-win7-x86-v1.30.zip`。
+- `PATH=/Users/apple/Library/Go/sdk/go1.26.3/bin:$PATH sh packaging/package-acceptance.sh` 成功，生成主 Windows/Linux v1.30 包。
+- `unzip -t clients/win7-qt/dist/OneSyncWin7-win7-x86-v1.30.zip` 通过。
+- `unzip -t dist/acceptance-packages/onesync-windows-amd64-v1.30.zip` 通过。
+- `tar -tzf dist/acceptance-packages/onesync-linux-amd64-v1.30.tar.gz` 通过。
+- `strings clients/win7-qt/dist/OneSyncWin7-win7-x86-v1.30/OneSyncWin7.exe | rg 'GetSystemTimePreciseAsFileTime|KERNEL32\.dll|1\.30'` 只匹配到 `KERNEL32.dll`。
+- `sh -n` 检查 Linux 一键脚本和控制脚本通过。
+- `git diff --check` 通过。
+- 仓库内未检出用户测试域名、测试 IP 或测试 token。
+
+剩余风险：
+
+- Win7 Qt v1.30 已接入 Relay 控制通道 wake：已连接状态下检测到本地文件变化会通知对端，收到对端 wake 后会立即进入下一轮同步；Relay 模式空闲等待最长 30 秒，直连模式仍保留 1 秒等待节奏。
+- Win7 Qt 源端发送文件时会显示断点续传偏移，任务表格会显示“正在发送：文件名，已传/总量”。
+- Win7 Qt 目标端接收文件时会显示“正在接收：文件名，已收/总量”，接收端断点临时文件进度会同步上报给界面。
+- Relay 数据会话邀请当前仍由源端请求触发；后续可扩展为任意一端通过控制连接请求发起数据会话。

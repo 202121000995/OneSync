@@ -141,20 +141,70 @@ func connectRelay(
 	maxPayload uint32,
 ) (network.Session, error) {
 	dialer := tls.Dialer{NetDialer: &net.Dialer{}, Config: config.Clone()}
-	connection, err := dialer.DialContext(ctx, "tcp", endpoint)
+	controlConnection, err := dialer.DialContext(ctx, "tcp", endpoint)
 	if err != nil {
 		return nil, fmt.Errorf("connect Relay TLS endpoint: %w", err)
 	}
-	if err := relay.Register(ctx, connection, sessionID, role, token, accessToken); err != nil {
-		_ = connection.Close()
-		return nil, err
-	}
-	session, err := network.NewSession(connection, maxPayload)
+	control, err := relay.JoinControl(ctx, controlConnection, sessionID, role, token, accessToken)
 	if err != nil {
-		_ = connection.Close()
+		_ = controlConnection.Close()
 		return nil, err
 	}
-	return session, nil
+	var sessionKey [32]byte
+	if role == relay.RoleSource {
+		sessionKey, err = control.RequestSession(ctx)
+	} else {
+		sessionKey, err = control.WaitSession(ctx)
+	}
+	if err != nil {
+		_ = control.Close()
+		return nil, err
+	}
+	dataConnection, err := dialer.DialContext(ctx, "tcp", endpoint)
+	if err != nil {
+		_ = control.Close()
+		return nil, fmt.Errorf("connect Relay data endpoint: %w", err)
+	}
+	if err := relay.JoinSession(ctx, dataConnection, sessionID, role, sessionKey); err != nil {
+		_ = dataConnection.Close()
+		_ = control.Close()
+		return nil, err
+	}
+	session, err := network.NewSession(dataConnection, maxPayload)
+	if err != nil {
+		_ = dataConnection.Close()
+		_ = control.Close()
+		return nil, err
+	}
+	return relayControlledSession{Session: session, control: control}, nil
+}
+
+type relayControlledSession struct {
+	network.Session
+	control *relay.ControlClient
+}
+
+func (s relayControlledSession) Close() error {
+	sessionErr := s.Session.Close()
+	controlErr := s.control.Close()
+	if sessionErr != nil {
+		return sessionErr
+	}
+	return controlErr
+}
+
+func (s relayControlledSession) SendWake(ctx context.Context) error {
+	if s.control == nil {
+		return nil
+	}
+	return s.control.SendWake(ctx)
+}
+
+func (s relayControlledSession) WaitWake(ctx context.Context) error {
+	if s.control == nil {
+		return errConnectionUnavailable
+	}
+	return s.control.WaitWake(ctx)
 }
 
 func firstConnection(

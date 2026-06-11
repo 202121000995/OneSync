@@ -274,7 +274,11 @@ func (r *runner) runCycle(ctx context.Context, taskID string, reporter task.Stat
 		if err != nil {
 			return err
 		}
-		return r.runConnectedCycles(ctx, taskID, reporter, engine)
+		var wake wakeController
+		if _, ok := connection.session.(wakeController); ok {
+			wake = transferSession
+		}
+		return r.runConnectedCycles(ctx, taskID, reporter, engine, wake)
 	}
 
 	clientTLS, err := clientTLSForCredential(r.factory.clientTLS, credential)
@@ -318,10 +322,19 @@ func (r *runner) runCycle(ctx context.Context, taskID string, reporter task.Stat
 	if err != nil {
 		return err
 	}
-	return r.runConnectedCycles(ctx, taskID, reporter, engine)
+	var wake wakeController
+	if _, ok := connection.session.(wakeController); ok {
+		wake = transferSession
+	}
+	return r.runConnectedCycles(ctx, taskID, reporter, engine, wake)
 }
 
-func (r *runner) runConnectedCycles(ctx context.Context, taskID string, reporter task.StateReporter, engine *sync.Engine) error {
+type wakeController interface {
+	SendWake(context.Context) error
+	WaitWake(context.Context) error
+}
+
+func (r *runner) runConnectedCycles(ctx context.Context, taskID string, reporter task.StateReporter, engine *sync.Engine, wake wakeController) error {
 	idleInterval := connectedIdleInterval(r.factory.syncInterval)
 	for {
 		if err := ctx.Err(); err != nil {
@@ -336,13 +349,58 @@ func (r *runner) runConnectedCycles(ctx context.Context, taskID string, reporter
 		if err := reportState(ctx, reporter, task.StateIdle); err != nil {
 			return err
 		}
-		changed, err := filewatch.WaitForChangeOrPeriodic(ctx, r.localRoot(), r.task.IgnoreRules, idleInterval)
+		changed, woke, err := r.waitForConnectedChange(ctx, wake, idleInterval)
 		if err != nil {
 			return err
 		}
 		if changed {
+			if wake != nil {
+				_ = wake.SendWake(ctx)
+			}
 			addLog(ctx, reporter, "info", fmt.Sprintf("检测到同步目录变化，并已等待 %s 确认文件写入稳定，使用现有连接开始下一轮同步", filewatch.DescribeChangeWait()))
 		}
+		if woke {
+			addLog(ctx, reporter, "info", "收到对端变化通知，使用现有连接开始下一轮同步")
+		}
+	}
+}
+
+func (r *runner) waitForConnectedChange(ctx context.Context, wake wakeController, idleInterval time.Duration) (changed bool, woke bool, err error) {
+	if wake == nil {
+		changed, err = filewatch.WaitForChangeOrPeriodic(ctx, r.localRoot(), r.task.IgnoreRules, idleInterval)
+		return changed, false, err
+	}
+	waitContext, cancel := context.WithCancel(ctx)
+	defer cancel()
+	type fileResult struct {
+		changed bool
+		err     error
+	}
+	fileResults := make(chan fileResult, 1)
+	wakeResults := make(chan error, 1)
+	go func() {
+		changed, err := filewatch.WaitForChangeOrPeriodic(waitContext, r.localRoot(), r.task.IgnoreRules, idleInterval)
+		fileResults <- fileResult{changed: changed, err: err}
+	}()
+	go func() {
+		wakeResults <- wake.WaitWake(waitContext)
+	}()
+	select {
+	case result := <-fileResults:
+		cancel()
+		return result.changed, false, result.err
+	case err := <-wakeResults:
+		cancel()
+		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				return false, false, ctx.Err()
+			}
+			return false, false, err
+		}
+		return false, true, nil
+	case <-ctx.Done():
+		cancel()
+		return false, false, ctx.Err()
 	}
 }
 
@@ -471,6 +529,22 @@ func (s meteredSession) Receive(ctx context.Context) (network.Message, error) {
 
 func (s meteredSession) Close() error {
 	return s.base.Close()
+}
+
+func (s meteredSession) SendWake(ctx context.Context) error {
+	wake, ok := s.base.(wakeController)
+	if !ok {
+		return nil
+	}
+	return wake.SendWake(ctx)
+}
+
+func (s meteredSession) WaitWake(ctx context.Context) error {
+	wake, ok := s.base.(wakeController)
+	if !ok {
+		return errConnectionUnavailable
+	}
+	return wake.WaitWake(ctx)
 }
 
 func messageWireSize(message network.Message) uint64 {

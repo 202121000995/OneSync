@@ -104,6 +104,9 @@ bool FileReceiver::receive(QSslSocket* socket, const QString& root, const SyncPr
     if (!writeAck(socket, beginFrame.requestID, encodeOffset(offset), options, error)) {
         return false;
     }
+    if (options != nullptr && options->onFileProgress) {
+        options->onFileProgress(relativePath, offset, totalSize);
+    }
     qint64 lastFlushedOffset = offset;
 
     for (;;) {
@@ -140,6 +143,9 @@ bool FileReceiver::receive(QSslSocket* socket, const QString& root, const SyncPr
                 return false;
             }
             offset += chunk.size();
+            if (options != nullptr && options->onFileProgress) {
+                options->onFileProgress(relativePath, offset, totalSize);
+            }
             if (offset - lastFlushedOffset >= kFlushIntervalBytes) {
                 if (!part.flush()) {
                     if (error != nullptr) {
@@ -193,6 +199,9 @@ bool FileReceiver::receive(QSslSocket* socket, const QString& root, const SyncPr
             }
             if (transferredPath != nullptr) {
                 *transferredPath = relativePath;
+            }
+            if (options != nullptr && options->onFileProgress) {
+                options->onFileProgress(relativePath, totalSize, totalSize);
             }
             return writeAck(socket, frame.requestID, QByteArray(), options, error);
         }

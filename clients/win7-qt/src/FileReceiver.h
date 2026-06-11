@@ -20,6 +20,7 @@ public:
         quint64* receivedBytes = nullptr;
         quint64* sentBytes = nullptr;
         std::function<void()> onTrafficChanged;
+        std::function<void(const QString&, qint64, qint64)> onFileProgress;
         bool skipped = false;
     };
 

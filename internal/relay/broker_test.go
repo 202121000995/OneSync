@@ -34,6 +34,87 @@ func TestBrokerRelaysBytesInBothDirections(t *testing.T) {
 	waitBrokerResults(t, errorsChannel, false)
 }
 
+func TestBrokerControlConnectionInvitesDataSession(t *testing.T) {
+	broker := mustBroker(t, Config{
+		WaitTimeout: time.Second,
+		IdleTimeout: time.Second,
+		MaxWaiting:  10,
+		MaxBytes:    1024,
+	})
+	token := bytes.Repeat([]byte{0x42}, tokenSize)
+	sourceControlServer, sourceControlClient := net.Pipe()
+	targetControlServer, targetControlClient := net.Pipe()
+	controlResults := make(chan error, 2)
+	go func() { controlResults <- broker.Handle(context.Background(), sourceControlServer) }()
+	go func() { controlResults <- broker.Handle(context.Background(), targetControlServer) }()
+
+	sourceControl, err := JoinControl(context.Background(), sourceControlClient, "session", RoleSource, token, "")
+	if err != nil {
+		t.Fatalf("source JoinControl() error = %v", err)
+	}
+	targetControl, err := JoinControl(context.Background(), targetControlClient, "session", RoleTarget, token, "")
+	if err != nil {
+		t.Fatalf("target JoinControl() error = %v", err)
+	}
+	sourceKeyResult := make(chan [sessionKeySize]byte, 1)
+	sourceErr := make(chan error, 1)
+	targetKeyResult := make(chan [sessionKeySize]byte, 1)
+	targetErr := make(chan error, 1)
+	go func() {
+		key, err := sourceControl.RequestSession(context.Background())
+		sourceKeyResult <- key
+		sourceErr <- err
+	}()
+	go func() {
+		key, err := targetControl.WaitSession(context.Background())
+		targetKeyResult <- key
+		targetErr <- err
+	}()
+	sourceKey := <-sourceKeyResult
+	if err := <-sourceErr; err != nil {
+		t.Fatalf("source RequestSession() error = %v", err)
+	}
+	targetKey := <-targetKeyResult
+	if err := <-targetErr; err != nil {
+		t.Fatalf("target WaitSession() error = %v", err)
+	}
+	if sourceKey != targetKey {
+		t.Fatal("source and target received different Relay data session keys")
+	}
+
+	sourceDataServer, sourceDataClient := net.Pipe()
+	targetDataServer, targetDataClient := net.Pipe()
+	dataResults := make(chan error, 2)
+	go func() { dataResults <- broker.Handle(context.Background(), sourceDataServer) }()
+	go func() { dataResults <- broker.Handle(context.Background(), targetDataServer) }()
+	sourceReady := make(chan error, 1)
+	targetReady := make(chan error, 1)
+	go func() {
+		sourceReady <- JoinSession(context.Background(), sourceDataClient, "session", RoleSource, sourceKey)
+	}()
+	go func() {
+		targetReady <- JoinSession(context.Background(), targetDataClient, "session", RoleTarget, targetKey)
+	}()
+	if err := <-sourceReady; err != nil {
+		t.Fatalf("source JoinSession() error = %v", err)
+	}
+	if err := <-targetReady; err != nil {
+		t.Fatalf("target JoinSession() error = %v", err)
+	}
+
+	if _, err := sourceDataClient.Write([]byte("source-to-target")); err != nil {
+		t.Fatalf("source data Write() error = %v", err)
+	}
+	assertRead(t, targetDataClient, "source-to-target")
+
+	_ = sourceDataClient.Close()
+	_ = targetDataClient.Close()
+	waitBrokerResults(t, dataResults, false)
+	_ = sourceControl.Close()
+	_ = targetControl.Close()
+	waitBrokerResults(t, controlResults, true)
+}
+
 func TestBrokerRejectsWrongToken(t *testing.T) {
 	broker := mustBroker(t, Config{
 		WaitTimeout: 100 * time.Millisecond,

@@ -24,6 +24,7 @@ signals:
     void logMessage(const QString& message);
     void statusChanged(const QString& status);
     void trafficChanged(quint64 receivedBytes, quint64 sentBytes);
+    void fileProgress(const QString& path, quint64 transferredBytes, quint64 totalBytes);
     void snapshotScanned(quint64 fileCount, quint64 byteCount, quint64 ignoredCount);
     void planReceived(int operationCount, quint64 standardBytes);
     void finished(bool ok, const QString& message);
@@ -31,9 +32,15 @@ signals:
 private:
     bool isCancelled(QString* error) const;
     bool waitBeforeRetry(QString* error) const;
-    bool waitBeforeConnectedCycle(QString* error) const;
+    bool waitBeforeConnectedCycle(QSslSocket* controlSocket, QString* error);
     bool connectTls(QSslSocket* socket, const Endpoint& endpoint, int timeoutMs, QString* error);
     bool registerRelay(QSslSocket* socket, const QByteArray& token, QString* error);
+    bool joinRelayControl(QSslSocket* socket, const QByteArray& token, QString* error);
+    bool waitRelaySession(QSslSocket* socket, QByteArray* sessionKey, QString* error);
+    bool joinRelayDataSession(QSslSocket* socket, const QByteArray& sessionKey, QString* error);
+    bool sendRelayWake(QSslSocket* socket, QString* error);
+    bool readRelayControlMessage(QSslSocket* socket, int timeoutMs, quint8* type, QByteArray* payload, bool* gotMessage, QString* error);
+    QString folderSignature(QString* error) const;
     bool authenticate(QSslSocket* socket, const QByteArray& token, const QString& peerID, QString* error);
     bool respondSnapshot(QSslSocket* socket, QString* error);
     bool receivePlan(QSslSocket* socket, QString* error);
@@ -50,4 +57,5 @@ private:
     quint64 sentBytes = 0;
     quint64 lastReportedReceivedBytes = 0;
     quint64 lastReportedSentBytes = 0;
+    QString lastFolderSignature;
 };

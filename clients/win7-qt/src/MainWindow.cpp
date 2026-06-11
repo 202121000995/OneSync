@@ -182,7 +182,7 @@ void applyModernDialogStyle(QDialog* dialog)
 }
 } // namespace
 
-const QString kWin7Version = QStringLiteral("1.29");
+const QString kWin7Version = QStringLiteral("1.30");
 
 MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent)
@@ -749,6 +749,16 @@ void MainWindow::startSelectedTask()
             updateTaskTraffic(task, receivedBytes, sentBytes);
             refreshTaskTable();
         });
+        connect(sourceConnector, &SourceConnector::fileProgress, this, [this, taskID](const QString& path, quint64 transferredBytes, quint64 totalBytes) {
+            SyncTask* task = taskByID(taskID);
+            if (task == nullptr) {
+                return;
+            }
+            task->status = QStringLiteral("运行-传输中");
+            task->detail = QStringLiteral("正在发送：%1，%2 / %3")
+                .arg(path, formatBytes(transferredBytes), formatBytes(totalBytes));
+            refreshTaskTable();
+        });
         connect(sourceConnector, &SourceConnector::snapshotScanned, this, [this, taskID](quint64 fileCount, quint64 byteCount, quint64 ignoredCount) {
             SyncTask* task = taskByID(taskID);
             if (task == nullptr) {
@@ -784,6 +794,16 @@ void MainWindow::startSelectedTask()
                 return;
             }
             updateTaskTraffic(task, receivedBytes, sentBytes);
+            refreshTaskTable();
+        });
+        connect(connector, &TargetConnector::fileProgress, this, [this, taskID](const QString& path, quint64 transferredBytes, quint64 totalBytes) {
+            SyncTask* task = taskByID(taskID);
+            if (task == nullptr) {
+                return;
+            }
+            task->status = QStringLiteral("运行-传输中");
+            task->detail = QStringLiteral("正在接收：%1，%2 / %3")
+                .arg(path, formatBytes(transferredBytes), formatBytes(totalBytes));
             refreshTaskTable();
         });
         connect(connector, &TargetConnector::snapshotScanned, this, [this, taskID](quint64 fileCount, quint64 byteCount, quint64 ignoredCount) {
@@ -1663,6 +1683,9 @@ QString MainWindow::statusLabel(const SyncTask& task) const
     }
     if (task.status == QStringLiteral("运行-连接中")) {
         return isSourceTask(task) ? QStringLiteral("运行-等待目标端") : QStringLiteral("运行-连接源端");
+    }
+    if (task.status == QStringLiteral("运行-传输中")) {
+        return QStringLiteral("运行-传输中");
     }
     if (task.status == QStringLiteral("运行-已连接源端")) {
         return QStringLiteral("运行-已连接源端");

@@ -1,9 +1,13 @@
 #include "SourceConnector.h"
 
+#include "IgnoreMatcher.h"
 #include "SnapshotScanner.h"
 
+#include <algorithm>
 #include <QCryptographicHash>
+#include <QDateTime>
 #include <QDir>
+#include <QDirIterator>
 #include <QElapsedTimer>
 #include <QFile>
 #include <QFileInfo>
@@ -20,7 +24,7 @@ namespace {
 const int kTlsTimeoutMs = 15000;
 const int kRelayWaitTimeoutMs = 120000;
 const int kRetryDelayMs = 5000;
-const int kConnectedIdleDelayMs = 1000;
+const int kConnectedIdleDelayMs = 30000;
 const int kAuthenticationTimeoutMs = 15000;
 const int kSyncMessageTimeoutMs = 120000;
 const int kMaxPayload = 16 * 1024 * 1024;
@@ -154,8 +158,8 @@ void SourceConnector::run()
         }
         emit statusChanged(QStringLiteral("运行-连接中"));
         QString cycleError;
-        QSslSocket socket;
-        if (!connectTls(&socket, endpoint, kTlsTimeoutMs, &cycleError)) {
+        QSslSocket controlSocket;
+        if (!connectTls(&controlSocket, endpoint, kTlsTimeoutMs, &cycleError)) {
             emit logMessage(QStringLiteral("本轮连接 Relay 失败：%1").arg(cycleError));
             if (!waitBeforeRetry(&error)) {
                 emit finished(false, error);
@@ -164,22 +168,54 @@ void SourceConnector::run()
             continue;
         }
 
-        emit logMessage(QStringLiteral("已连接 Relay TLS：%1").arg(endpoint.display()));
-        emit logMessage(QStringLiteral("等待目标端加入同步。"));
-        if (!registerRelay(&socket, token, &cycleError)) {
-            emit logMessage(QStringLiteral("本轮 Relay 配对未完成：%1").arg(cycleError));
-            socket.disconnectFromHost();
+        emit logMessage(QStringLiteral("已连接 Relay 控制通道：%1").arg(endpoint.display()));
+        if (!joinRelayControl(&controlSocket, token, &cycleError)) {
+            emit logMessage(QStringLiteral("本轮 Relay 控制通道登记失败：%1").arg(cycleError));
+            controlSocket.disconnectFromHost();
             if (!waitBeforeRetry(&error)) {
                 emit finished(false, error);
                 return;
             }
             continue;
         }
-        emit logMessage(QStringLiteral("Relay 已配对，等待目标端认证。"));
+        emit logMessage(QStringLiteral("Relay 控制通道已登记，等待目标端在线并邀请数据会话。"));
+        QByteArray sessionKey;
+        if (!requestRelaySession(&controlSocket, &sessionKey, &cycleError)) {
+            emit logMessage(QStringLiteral("本轮 Relay 数据会话邀请失败：%1").arg(cycleError));
+            controlSocket.disconnectFromHost();
+            if (!waitBeforeRetry(&error)) {
+                emit finished(false, error);
+                return;
+            }
+            continue;
+        }
+
+        QSslSocket socket;
+        if (!connectTls(&socket, endpoint, kTlsTimeoutMs, &cycleError)) {
+            emit logMessage(QStringLiteral("本轮连接 Relay 数据通道失败：%1").arg(cycleError));
+            controlSocket.disconnectFromHost();
+            if (!waitBeforeRetry(&error)) {
+                emit finished(false, error);
+                return;
+            }
+            continue;
+        }
+        if (!joinRelayDataSession(&socket, sessionKey, &cycleError)) {
+            emit logMessage(QStringLiteral("本轮加入 Relay 数据通道失败：%1").arg(cycleError));
+            socket.disconnectFromHost();
+            controlSocket.disconnectFromHost();
+            if (!waitBeforeRetry(&error)) {
+                emit finished(false, error);
+                return;
+            }
+            continue;
+        }
+        emit logMessage(QStringLiteral("Relay 数据通道已建立，等待目标端认证。"));
 
         if (!authenticateTarget(&socket, authenticationToken, &cycleError)) {
             emit logMessage(QStringLiteral("本轮目标端认证失败：%1").arg(cycleError));
             socket.disconnectFromHost();
+            controlSocket.disconnectFromHost();
             if (!waitBeforeRetry(&error)) {
                 emit finished(false, error);
                 return;
@@ -200,12 +236,13 @@ void SourceConnector::run()
             }
             emit statusChanged(QStringLiteral("运行-等待"));
             emit logMessage(QStringLiteral("本轮同步完成，保持 Relay 连接并等待下一轮。"));
-            if (!waitBeforeConnectedCycle(&error)) {
+            if (!waitBeforeConnectedCycle(&controlSocket, &error)) {
                 emit finished(false, error);
                 return;
             }
         }
         socket.disconnectFromHost();
+        controlSocket.disconnectFromHost();
         if (!waitBeforeRetry(&error)) {
             emit finished(false, error);
             return;
@@ -235,13 +272,71 @@ bool SourceConnector::waitBeforeRetry(QString* error) const
     return true;
 }
 
-bool SourceConnector::waitBeforeConnectedCycle(QString* error) const
+bool SourceConnector::waitBeforeConnectedCycle(QSslSocket* controlSocket, QString* error)
 {
-    for (int elapsed = 0; elapsed < kConnectedIdleDelayMs; elapsed += 100) {
+    QString baselineError;
+    const QString baseline = folderSignature(&baselineError);
+    if (!baseline.isEmpty()) {
+        lastFolderSignature = baseline;
+    }
+    int elapsedSinceSignatureCheck = 0;
+    const int idleLimitMs = controlSocket != nullptr ? kConnectedIdleDelayMs : 1000;
+    for (int elapsed = 0; elapsed < idleLimitMs; elapsed += 250) {
         if (isCancelled(error)) {
             return false;
         }
-        QThread::msleep(100);
+        if (controlSocket != nullptr && controlSocket->state() == QAbstractSocket::ConnectedState) {
+            quint8 type = 0;
+            QByteArray payload;
+            bool gotMessage = false;
+            if (!readRelayControlMessage(controlSocket, 250, &type, &payload, &gotMessage, error)) {
+                return false;
+            }
+            if (gotMessage) {
+                if (type == SyncProtocol::RelayControlWake) {
+                    emit logMessage(QStringLiteral("收到目标端文件变化通知，立即启动下一轮同步。"));
+                    return true;
+                }
+                if (type == SyncProtocol::RelayControlPing) {
+                    if (!writeAll(controlSocket, SyncProtocol::buildRelayControlMessage(SyncProtocol::RelayControlPong, QByteArray()), kAuthenticationTimeoutMs, error)) {
+                        return false;
+                    }
+                }
+                if (type == SyncProtocol::RelayControlError) {
+                    if (error != nullptr) {
+                        *error = QStringLiteral("Relay 控制通道报错：%1").arg(QString::fromUtf8(payload));
+                    }
+                    return false;
+                }
+            }
+        } else {
+            QThread::msleep(250);
+        }
+        elapsedSinceSignatureCheck += 250;
+        if (elapsedSinceSignatureCheck < 1000) {
+            continue;
+        }
+        elapsedSinceSignatureCheck = 0;
+        QString signatureError;
+        const QString currentSignature = folderSignature(&signatureError);
+        if (currentSignature.isEmpty()) {
+            continue;
+        }
+        if (!lastFolderSignature.isEmpty() && currentSignature != lastFolderSignature) {
+            lastFolderSignature = currentSignature;
+            if (controlSocket != nullptr && controlSocket->state() == QAbstractSocket::ConnectedState) {
+                QString wakeError;
+                if (!sendRelayWake(controlSocket, &wakeError)) {
+                    emit logMessage(QStringLiteral("检测到本地文件变化，但通知目标端失败：%1").arg(wakeError));
+                } else {
+                    emit logMessage(QStringLiteral("检测到本地文件变化，已通知目标端并立即启动下一轮同步。"));
+                }
+            } else {
+                emit logMessage(QStringLiteral("检测到本地文件变化，立即启动下一轮同步。"));
+            }
+            return true;
+        }
+        lastFolderSignature = currentSignature;
     }
     return true;
 }
@@ -309,6 +404,183 @@ bool SourceConnector::registerRelay(QSslSocket* socket, const QByteArray& token,
         return false;
     }
     return true;
+}
+
+bool SourceConnector::joinRelayControl(QSslSocket* socket, const QByteArray& token, QString* error)
+{
+    const QByteArray registration = SyncProtocol::buildRelayControlJoin(
+        link.sessionId,
+        kRelayRoleSource,
+        token,
+        link.relayToken
+    );
+    if (registration.isEmpty()) {
+        if (error != nullptr) {
+            *error = QStringLiteral("Relay 控制通道登记数据生成失败。");
+        }
+        return false;
+    }
+    if (!writeAll(socket, registration, kAuthenticationTimeoutMs, error)) {
+        return false;
+    }
+    const QByteArray ready = readExact(socket, 1, kAuthenticationTimeoutMs, error);
+    if (ready.size() != 1 || quint8(ready[0]) != 1) {
+        if (error != nullptr) {
+            *error = QStringLiteral("Relay 控制通道未确认。");
+        }
+        return false;
+    }
+    return true;
+}
+
+bool SourceConnector::requestRelaySession(QSslSocket* socket, QByteArray* sessionKey, QString* error)
+{
+    if (sessionKey == nullptr) {
+        if (error != nullptr) {
+            *error = QStringLiteral("内部错误：Relay 会话 key 为空。");
+        }
+        return false;
+    }
+    const QByteArray request = SyncProtocol::buildRelayControlMessage(SyncProtocol::RelayControlRequestSession, QByteArray());
+    if (request.isEmpty()) {
+        if (error != nullptr) {
+            *error = QStringLiteral("Relay 数据会话请求生成失败。");
+        }
+        return false;
+    }
+    if (!writeAll(socket, request, kAuthenticationTimeoutMs, error)) {
+        return false;
+    }
+    while (true) {
+        const QByteArray header = readExact(socket, 3, kRelayWaitTimeoutMs, error);
+        if (header.size() != 3) {
+            return false;
+        }
+        const quint8 type = quint8(header[0]);
+        const quint16 payloadLength = qFromBigEndian<quint16>(reinterpret_cast<const uchar*>(header.constData() + 1));
+        const QByteArray payload = readExact(socket, payloadLength, kAuthenticationTimeoutMs, error);
+        if (payload.size() != payloadLength) {
+            return false;
+        }
+        if (type == SyncProtocol::RelayControlInviteSession && payload.size() == 32) {
+            *sessionKey = payload;
+            return true;
+        }
+        if (type == SyncProtocol::RelayControlError) {
+            if (error != nullptr) {
+                *error = QStringLiteral("Relay 拒绝数据会话：%1").arg(QString::fromUtf8(payload));
+            }
+            return false;
+        }
+        if (type == SyncProtocol::RelayControlPing) {
+            if (!writeAll(socket, SyncProtocol::buildRelayControlMessage(SyncProtocol::RelayControlPong, QByteArray()), kAuthenticationTimeoutMs, error)) {
+                return false;
+            }
+        }
+    }
+}
+
+bool SourceConnector::joinRelayDataSession(QSslSocket* socket, const QByteArray& sessionKey, QString* error)
+{
+    const QByteArray join = SyncProtocol::buildRelaySessionJoin(link.sessionId, kRelayRoleSource, sessionKey);
+    if (join.isEmpty()) {
+        if (error != nullptr) {
+            *error = QStringLiteral("Relay 数据通道加入数据生成失败。");
+        }
+        return false;
+    }
+    if (!writeAll(socket, join, kAuthenticationTimeoutMs, error)) {
+        return false;
+    }
+    const QByteArray ready = readExact(socket, 1, kRelayWaitTimeoutMs, error);
+    if (ready.size() != 1 || quint8(ready[0]) != 1) {
+        if (error != nullptr) {
+            *error = QStringLiteral("Relay 数据通道未确认。");
+        }
+        return false;
+    }
+    return true;
+}
+
+bool SourceConnector::sendRelayWake(QSslSocket* socket, QString* error)
+{
+    return writeAll(socket, SyncProtocol::buildRelayControlMessage(SyncProtocol::RelayControlWake, QByteArray()), kAuthenticationTimeoutMs, error);
+}
+
+bool SourceConnector::readRelayControlMessage(QSslSocket* socket, int timeoutMs, quint8* type, QByteArray* payload, bool* gotMessage, QString* error)
+{
+    if (gotMessage != nullptr) {
+        *gotMessage = false;
+    }
+    if (socket == nullptr) {
+        return true;
+    }
+    if (socket->bytesAvailable() <= 0) {
+        if (!socket->waitForReadyRead(timeoutMs)) {
+            if (socket->state() != QAbstractSocket::ConnectedState) {
+                if (error != nullptr) {
+                    *error = QStringLiteral("Relay 控制通道已断开：%1").arg(socket->errorString());
+                }
+                return false;
+            }
+            return true;
+        }
+    }
+    const QByteArray header = readExact(socket, 3, kAuthenticationTimeoutMs, error);
+    if (header.size() != 3) {
+        return false;
+    }
+    const quint8 messageType = quint8(header[0]);
+    const quint16 payloadLength = qFromBigEndian<quint16>(reinterpret_cast<const uchar*>(header.constData() + 1));
+    if (payloadLength > 1024) {
+        if (error != nullptr) {
+            *error = QStringLiteral("Relay 控制消息过大。");
+        }
+        return false;
+    }
+    const QByteArray body = payloadLength == 0 ? QByteArray() : readExact(socket, payloadLength, kAuthenticationTimeoutMs, error);
+    if (body.size() != payloadLength) {
+        return false;
+    }
+    if (type != nullptr) {
+        *type = messageType;
+    }
+    if (payload != nullptr) {
+        *payload = body;
+    }
+    if (gotMessage != nullptr) {
+        *gotMessage = true;
+    }
+    return true;
+}
+
+QString SourceConnector::folderSignature(QString* error) const
+{
+    QFileInfo rootInfo(sourceFolder);
+    if (!rootInfo.exists() || !rootInfo.isDir()) {
+        if (error != nullptr) {
+            *error = QStringLiteral("发送文件夹不存在或不是目录。");
+        }
+        return {};
+    }
+    IgnoreMatcher matcher(ignoreRules);
+    QDir rootDir(rootInfo.absoluteFilePath());
+    QDirIterator it(rootInfo.absoluteFilePath(), QDir::Files | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
+    QStringList entries;
+    while (it.hasNext()) {
+        it.next();
+        const QFileInfo info = it.fileInfo();
+        const QString relativePath = QDir::fromNativeSeparators(rootDir.relativeFilePath(info.absoluteFilePath()));
+        if (matcher.matches(relativePath, false)) {
+            continue;
+        }
+        entries.append(QStringLiteral("%1|%2|%3")
+            .arg(relativePath)
+            .arg(info.size())
+            .arg(info.lastModified().toUTC().toMSecsSinceEpoch()));
+    }
+    std::sort(entries.begin(), entries.end());
+    return entries.join(QLatin1Char('\n'));
 }
 
 bool SourceConnector::authenticateTarget(QSslSocket* socket, const QByteArray& token, QString* error)
@@ -517,6 +789,10 @@ bool SourceConnector::sendFile(QSslSocket* socket, quint64 requestID, const Snap
         }
         return false;
     }
+    if (offset > 0) {
+        emit logMessage(QStringLiteral("检测到目标端临时文件，从 %1 / %2 继续发送：%3")
+                            .arg(humanBytes(offset), humanBytes(file.size()), entry.path));
+    }
 
     QElapsedTimer transferTimer;
     transferTimer.start();
@@ -528,6 +804,7 @@ bool SourceConnector::sendFile(QSslSocket* socket, quint64 requestID, const Snap
     qint64 confirmedOffset = offset;
     qint64 lastLoggedOffset = confirmedOffset;
     qint64 lastProgressLogMs = 0;
+    emit fileProgress(entry.path, quint64(confirmedOffset), quint64(file.size()));
     while (offset < file.size()) {
         if (isCancelled(error)) {
             return false;
@@ -564,6 +841,7 @@ bool SourceConnector::sendFile(QSslSocket* socket, quint64 requestID, const Snap
                 sentBytes += quint64(confirmed - confirmedOffset);
                 confirmedOffset = confirmed;
                 emitTrafficIfChanged();
+                emit fileProgress(entry.path, quint64(confirmedOffset), quint64(file.size()));
                 const qint64 elapsedMs = transferTimer.elapsed();
                 if (elapsedMs - lastProgressLogMs >= kProgressLogIntervalMs) {
                     emit logMessage(QStringLiteral("发送进度：%1 / %2，最近 %3，平均速度 %4")
@@ -590,6 +868,7 @@ bool SourceConnector::sendFile(QSslSocket* socket, quint64 requestID, const Snap
             sentBytes += quint64(confirmed - confirmedOffset);
             confirmedOffset = confirmed;
             emitTrafficIfChanged();
+            emit fileProgress(entry.path, quint64(confirmedOffset), quint64(file.size()));
             const qint64 elapsedMs = transferTimer.elapsed();
             if (elapsedMs - lastProgressLogMs >= kProgressLogIntervalMs && confirmedOffset < file.size()) {
                 emit logMessage(QStringLiteral("发送进度：%1 / %2，最近 %3，平均速度 %4")
@@ -608,6 +887,7 @@ bool SourceConnector::sendFile(QSslSocket* socket, quint64 requestID, const Snap
     }
     emit logMessage(QStringLiteral("文件发送完成：%1，大小 %2，耗时 %3，平均速度 %4")
                         .arg(entry.path, humanBytes(file.size()), humanDuration(transferTimer.elapsed()), humanRate(file.size(), transferTimer.elapsed())));
+    emit fileProgress(entry.path, quint64(file.size()), quint64(file.size()));
     return true;
 }
 

@@ -1,6 +1,7 @@
 package relay
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -26,6 +27,27 @@ type waitingPeer struct {
 	registration registration
 	ready        chan pairResult
 	done         chan struct{}
+}
+
+type controlPeer struct {
+	connection   net.Conn
+	registration registration
+	outgoing     chan controlMessage
+	done         chan struct{}
+	closeOnce    sync.Once
+}
+
+type controlSession struct {
+	source  *controlPeer
+	target  *controlPeer
+	pending *controlPeer
+}
+
+type waitingDataSession struct {
+	connection net.Conn
+	join       sessionJoin
+	ready      chan pairResult
+	done       chan struct{}
 }
 
 type pairResult struct {
@@ -55,6 +77,8 @@ type Config struct {
 type Broker struct {
 	mu                  sync.Mutex
 	waiting             map[string]*waitingPeer
+	controls            map[string]*controlSession
+	dataWaiting         map[string]*waitingDataSession
 	waitTimeout         time.Duration
 	idleTimeout         time.Duration
 	maxWaiting          int
@@ -109,6 +133,8 @@ func NewBroker(config Config) (*Broker, error) {
 	}
 	return &Broker{
 		waiting:             make(map[string]*waitingPeer),
+		controls:            make(map[string]*controlSession),
+		dataWaiting:         make(map[string]*waitingDataSession),
 		waitTimeout:         config.WaitTimeout,
 		idleTimeout:         config.IdleTimeout,
 		maxWaiting:          config.MaxWaiting,
@@ -136,15 +162,38 @@ func (b *Broker) Handle(ctx context.Context, connection net.Conn) error {
 
 	registrationContext, cancelRegistration := context.WithTimeout(ctx, b.waitTimeout)
 	stopDeadline := applyDeadline(registrationContext, connection)
-	registration, err := readRegistration(connection)
+	version := []byte{0}
+	_, firstErr := io.ReadFull(connection, version)
 	registrationContextErr := registrationContext.Err()
 	stopDeadline()
 	cancelRegistration()
-	if err != nil {
-		b.logger.Warn("Relay registration failed", "remote", remote, "error", err)
+	if firstErr != nil {
+		b.logger.Warn("Relay registration failed", "remote", remote, "error", firstErr)
 		if registrationContextErr != nil {
 			return registrationContextErr
 		}
+		return firstErr
+	}
+
+	reader := io.MultiReader(bytes.NewReader(version), connection)
+	switch version[0] {
+	case legacyRegistrationVersion, registrationVersion:
+		return b.handleLegacyPair(ctx, connection, reader, remote)
+	case controlJoinVersion:
+		return b.handleControl(ctx, connection, reader, remote)
+	case sessionJoinVersion:
+		return b.handleDataSession(ctx, connection, reader, remote)
+	default:
+		err := fmt.Errorf("unsupported Relay protocol version %d", version[0])
+		b.logger.Warn("Relay registration failed", "remote", remote, "error", err)
+		return err
+	}
+}
+
+func (b *Broker) handleLegacyPair(ctx context.Context, connection net.Conn, reader io.Reader, remote string) error {
+	registration, err := readRegistration(reader)
+	if err != nil {
+		b.logger.Warn("Relay registration failed", "remote", remote, "error", err)
 		return err
 	}
 	sessionLabel := sessionDigest(registration.sessionID)
@@ -180,6 +229,101 @@ func (b *Broker) Handle(ctx context.Context, connection net.Conn) error {
 	return b.forward(ctx, connection, outcome.peer, registration.sessionID, registration.role)
 }
 
+func (b *Broker) handleControl(ctx context.Context, connection net.Conn, reader io.Reader, remote string) error {
+	registration, err := readControlJoin(reader)
+	if err != nil {
+		b.logger.Warn("Relay control join failed", "remote", remote, "error", err)
+		return err
+	}
+	sessionLabel := sessionDigest(registration.sessionID)
+	role := relayRoleLabel(registration.role)
+	if !b.authorize(registration) {
+		b.logger.Warn("Relay access token rejected", "remote", remote, "session", sessionLabel, "role", role)
+		return errors.New("Relay access token is invalid")
+	}
+	peer := &controlPeer{
+		connection:   connection,
+		registration: registration,
+		outgoing:     make(chan controlMessage, 8),
+		done:         make(chan struct{}),
+	}
+	remove := b.registerControl(peer)
+	defer remove()
+	b.logger.Info("Relay control joined", "remote", remote, "session", sessionLabel, "role", role, "token_present", registration.accessTokenPresent)
+	if err := writeAll(connection, []byte{1}); err != nil {
+		return fmt.Errorf("confirm Relay control join: %w", err)
+	}
+
+	incoming := make(chan controlMessage, 1)
+	readErrors := make(chan error, 1)
+	go func() {
+		for {
+			message, err := readControlMessage(connection)
+			if err != nil {
+				readErrors <- err
+				return
+			}
+			incoming <- message
+		}
+	}()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case err := <-readErrors:
+			b.logger.Info("Relay control closed", "remote", remote, "session", sessionLabel, "role", role, "error", err)
+			return err
+		case message := <-incoming:
+			switch message.messageType {
+			case controlMessageRequestSession:
+				b.requestDataSession(peer)
+			case controlMessagePing:
+				peer.send(controlMessage{messageType: controlMessagePong})
+			case controlMessageWake:
+				b.forwardWake(peer)
+			}
+		case message := <-peer.outgoing:
+			if err := writeControlMessage(connection, message.messageType, message.payload); err != nil {
+				return fmt.Errorf("write Relay control message: %w", err)
+			}
+		}
+	}
+}
+
+func (b *Broker) handleDataSession(ctx context.Context, connection net.Conn, reader io.Reader, remote string) error {
+	join, err := readSessionJoin(reader)
+	if err != nil {
+		b.logger.Warn("Relay data session join failed", "remote", remote, "error", err)
+		return err
+	}
+	sessionLabel := sessionDigest(join.sessionID)
+	role := relayRoleLabel(join.role)
+	outcome, err := b.pairDataSession(ctx, connection, join)
+	if err != nil {
+		b.logger.Warn("Relay data session pairing failed", "remote", remote, "session", sessionLabel, "role", role, "error", err)
+		return err
+	}
+	if !outcome.owner {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-outcome.done:
+			return nil
+		}
+	}
+	defer close(outcome.done)
+	defer b.releaseActive()
+	defer outcome.peer.Close()
+	if err := writeAll(connection, []byte{1}); err != nil {
+		return fmt.Errorf("confirm Relay data session: %w", err)
+	}
+	if err := writeAll(outcome.peer, []byte{1}); err != nil {
+		return fmt.Errorf("confirm Relay peer data session: %w", err)
+	}
+	return b.forward(ctx, connection, outcome.peer, join.sessionID, join.role)
+}
+
 func (b *Broker) authorize(registration registration) bool {
 	if !b.accessTokenRequired {
 		return true
@@ -196,6 +340,210 @@ func (b *Broker) authorize(registration registration) bool {
 		return false
 	}
 	return registration.accessTokenPresent && sameToken(b.accessTokenHash, registration.accessTokenHash)
+}
+
+func (p *controlPeer) send(message controlMessage) {
+	select {
+	case p.outgoing <- message:
+	case <-p.done:
+	default:
+	}
+}
+
+func (p *controlPeer) closeDone() {
+	p.closeOnce.Do(func() {
+		close(p.done)
+	})
+}
+
+func (b *Broker) registerControl(peer *controlPeer) func() {
+	var replaced *controlPeer
+	var invitations []controlMessageTarget
+	b.mu.Lock()
+	state := b.controls[peer.registration.sessionID]
+	if state == nil {
+		state = &controlSession{}
+		b.controls[peer.registration.sessionID] = state
+	}
+	if peer.registration.role == roleSource {
+		replaced = state.source
+		state.source = peer
+	} else {
+		replaced = state.target
+		state.target = peer
+	}
+	if replaced != nil {
+		replaced.closeDone()
+	}
+	invitations = b.pendingInvitationsLocked(peer.registration.sessionID, state)
+	b.mu.Unlock()
+	if replaced != nil {
+		_ = replaced.connection.Close()
+	}
+	sendControlMessages(invitations)
+	return func() {
+		b.removeControl(peer)
+	}
+}
+
+type controlMessageTarget struct {
+	peer    *controlPeer
+	message controlMessage
+}
+
+func sendControlMessages(messages []controlMessageTarget) {
+	for _, target := range messages {
+		target.peer.send(target.message)
+	}
+}
+
+func (b *Broker) requestDataSession(peer *controlPeer) {
+	var messages []controlMessageTarget
+	b.mu.Lock()
+	state := b.controls[peer.registration.sessionID]
+	if state == nil {
+		state = &controlSession{}
+		b.controls[peer.registration.sessionID] = state
+	}
+	state.pending = peer
+	messages = b.pendingInvitationsLocked(peer.registration.sessionID, state)
+	b.mu.Unlock()
+	sendControlMessages(messages)
+}
+
+func (b *Broker) forwardWake(peer *controlPeer) {
+	var target *controlPeer
+	b.mu.Lock()
+	state := b.controls[peer.registration.sessionID]
+	if state != nil {
+		if peer.registration.role == roleSource {
+			target = state.target
+		} else {
+			target = state.source
+		}
+	}
+	b.mu.Unlock()
+	if target != nil {
+		target.send(controlMessage{messageType: controlMessageWake})
+	}
+}
+
+func (b *Broker) pendingInvitationsLocked(sessionID string, state *controlSession) []controlMessageTarget {
+	if state == nil || state.pending == nil || state.source == nil || state.target == nil {
+		return nil
+	}
+	requester := state.pending
+	if requester != state.source && requester != state.target {
+		state.pending = nil
+		return nil
+	}
+	if !sameToken(state.source.registration.tokenHash, state.target.registration.tokenHash) {
+		requester.send(controlMessage{messageType: controlMessageError, payload: []byte("Relay session authentication failed")})
+		state.pending = nil
+		return nil
+	}
+	key, err := newSessionKey()
+	if err != nil {
+		requester.send(controlMessage{messageType: controlMessageError, payload: []byte(err.Error())})
+		state.pending = nil
+		return nil
+	}
+	state.pending = nil
+	sessionKey := hex.EncodeToString(key[:])
+	b.dataWaiting[sessionKey] = nil
+	payload := key[:]
+	b.logger.Info("Relay data session invited", "session", sessionDigest(sessionID), "requester", relayRoleLabel(requester.registration.role))
+	return []controlMessageTarget{
+		{peer: state.source, message: controlMessage{messageType: controlMessageInviteSession, payload: payload}},
+		{peer: state.target, message: controlMessage{messageType: controlMessageInviteSession, payload: payload}},
+	}
+}
+
+func (b *Broker) removeControl(peer *controlPeer) {
+	peer.closeDone()
+	b.mu.Lock()
+	state := b.controls[peer.registration.sessionID]
+	if state != nil {
+		if state.source == peer {
+			state.source = nil
+		}
+		if state.target == peer {
+			state.target = nil
+		}
+		if state.pending == peer {
+			state.pending = nil
+		}
+		if state.source == nil && state.target == nil {
+			delete(b.controls, peer.registration.sessionID)
+		}
+	}
+	b.mu.Unlock()
+}
+
+func (b *Broker) pairDataSession(ctx context.Context, connection net.Conn, join sessionJoin) (pairOutcome, error) {
+	sessionKey := hex.EncodeToString(join.key[:])
+	sessionLabel := sessionDigest(join.sessionID)
+	role := relayRoleLabel(join.role)
+	b.mu.Lock()
+	if waiting, exists := b.dataWaiting[sessionKey]; exists && waiting != nil {
+		if waiting.join.role == join.role {
+			b.mu.Unlock()
+			return pairOutcome{}, errors.New("Relay data session already has this role")
+		}
+		if waiting.join.sessionID != join.sessionID {
+			b.mu.Unlock()
+			return pairOutcome{}, errors.New("Relay data session ID mismatch")
+		}
+		if b.active >= b.maxActive {
+			b.mu.Unlock()
+			return pairOutcome{}, errors.New("Relay active session limit reached")
+		}
+		delete(b.dataWaiting, sessionKey)
+		b.active++
+		b.markActiveLocked(join.sessionID, waiting.join.role, waiting.connection.RemoteAddr().String(), join.role, connection.RemoteAddr().String())
+		b.mu.Unlock()
+		b.logger.Info("Relay data peer matched", "session", sessionLabel, "role", role)
+		waiting.ready <- pairResult{peer: connection}
+		close(waiting.ready)
+		return pairOutcome{owner: false, done: waiting.done}, nil
+	}
+	if _, invited := b.dataWaiting[sessionKey]; !invited {
+		b.mu.Unlock()
+		return pairOutcome{}, errors.New("Relay data session was not invited")
+	}
+	waiting := &waitingDataSession{
+		connection: connection,
+		join:       join,
+		ready:      make(chan pairResult, 1),
+		done:       make(chan struct{}),
+	}
+	b.dataWaiting[sessionKey] = waiting
+	b.markWaitingLocked(join.sessionID, join.role, connection.RemoteAddr().String())
+	b.mu.Unlock()
+	b.logger.Info("Relay data peer waiting", "session", sessionLabel, "role", role, "timeout", b.waitTimeout.String())
+
+	timer := time.NewTimer(b.waitTimeout)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		b.removeWaitingData(sessionKey, waiting)
+		return pairOutcome{}, ctx.Err()
+	case <-timer.C:
+		b.removeWaitingData(sessionKey, waiting)
+		b.logger.Warn("Relay data pairing timed out", "session", sessionLabel, "role", role)
+		return pairOutcome{}, errors.New("Relay data pairing timed out")
+	case result := <-waiting.ready:
+		return pairOutcome{peer: result.peer, owner: true, done: waiting.done}, result.err
+	}
+}
+
+func (b *Broker) removeWaitingData(sessionKey string, waiting *waitingDataSession) {
+	b.mu.Lock()
+	if b.dataWaiting[sessionKey] == waiting {
+		delete(b.dataWaiting, sessionKey)
+		b.markClosedLocked(waiting.join.sessionID, "waiting data session removed")
+	}
+	b.mu.Unlock()
 }
 
 func (b *Broker) pair(ctx context.Context, connection net.Conn, registration registration) (pairOutcome, error) {

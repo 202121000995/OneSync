@@ -5,7 +5,7 @@ set "ROOT=%~dp0"
 cd /d "%ROOT%"
 
 set "APP_NAME=OneSyncWin7"
-set "VERSION=1.29"
+set "VERSION=1.30"
 set "BUILD_DIR=%ROOT%build-win7"
 set "DIST_ROOT=%ROOT%dist"
 set "DIST_NAME=%APP_NAME%-win7-qt-v%VERSION%"
