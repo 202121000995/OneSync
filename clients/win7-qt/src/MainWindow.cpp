@@ -182,7 +182,7 @@ void applyModernDialogStyle(QDialog* dialog)
 }
 } // namespace
 
-const QString kWin7Version = QStringLiteral("1.15");
+const QString kWin7Version = QStringLiteral("1.16");
 
 MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent)
@@ -1565,13 +1565,10 @@ QString MainWindow::buildSourceLink(const QString& relayEndpoint, const QString&
     if (!EndpointParser::parse(relayEndpoint, &endpoint, error)) {
         return {};
     }
-    QString trustedCertificatePem = caCertificatePem.trimmed();
-    if (trustedCertificatePem.isEmpty()) {
-        trustedCertificatePem = relayCertificateForLink(endpoint, error);
-        if (error != nullptr && !error->isEmpty()) {
-            return {};
-        }
+    if (error != nullptr) {
+        error->clear();
     }
+    QString trustedCertificatePem = caCertificatePem.trimmed();
     const QDateTime issuedAt = QDateTime::currentDateTimeUtc();
     const QDateTime expiresAt = issuedAt.addSecs(24 * 60 * 60);
     QJsonObject object;
@@ -1590,46 +1587,6 @@ QString MainWindow::buildSourceLink(const QString& relayEndpoint, const QString&
     object.insert(QStringLiteral("expires_at"), expiresAt.toString(Qt::ISODateWithMs));
     const QByteArray json = QJsonDocument(object).toJson(QJsonDocument::Compact);
     return base64Url(json);
-}
-
-QString MainWindow::relayCertificateForLink(const Endpoint& endpoint, QString* error) const
-{
-    QSslSocket verifiedSocket;
-    verifiedSocket.setPeerVerifyMode(QSslSocket::VerifyPeer);
-    verifiedSocket.setPeerVerifyName(endpoint.host);
-    verifiedSocket.connectToHostEncrypted(endpoint.host, endpoint.port);
-    if (verifiedSocket.waitForEncrypted(5000)) {
-        verifiedSocket.disconnectFromHost();
-        if (error != nullptr) {
-            error->clear();
-        }
-        return {};
-    }
-    verifiedSocket.abort();
-
-    QSslSocket socket;
-    socket.setPeerVerifyMode(QSslSocket::QueryPeer);
-    socket.ignoreSslErrors();
-    socket.connectToHostEncrypted(endpoint.host, endpoint.port);
-    if (!socket.waitForEncrypted(8000)) {
-        if (error != nullptr) {
-            *error = QStringLiteral("Relay 证书为空，且自动读取 Relay 证书失败：%1。请运行 sudo onesync-relayctl info，把 Relay 证书粘贴到这里。")
-                .arg(socket.errorString());
-        }
-        return {};
-    }
-    const QSslCertificate certificate = socket.peerCertificate();
-    socket.disconnectFromHost();
-    if (certificate.isNull()) {
-        if (error != nullptr) {
-            *error = QStringLiteral("Relay 没有返回 TLS 证书。请确认 Relay 地址和端口正确。");
-        }
-        return {};
-    }
-    if (error != nullptr) {
-        error->clear();
-    }
-    return QString::fromUtf8(certificate.toPem()).trimmed();
 }
 
 bool MainWindow::testTaskConnection(const SyncTask& task, QString* detail) const
@@ -1782,7 +1739,7 @@ bool MainWindow::runSourceTaskDialog(SyncTask* task, bool editing)
     auto* relayTokenEdit = new QLineEdit(task->linkReady ? task->link.relayToken : QString());
     auto* caEdit = new QTextEdit(task->linkReady ? task->link.caCertificatePem : QString());
     caEdit->setAcceptRichText(false);
-    caEdit->setPlaceholderText(QStringLiteral("可选：公网可信证书通常不用填。自建 Relay 使用自签证书时，粘贴 sudo onesync-relayctl cert 输出的 PEM。"));
+    caEdit->setPlaceholderText(QStringLiteral("公网 SSL / 通配符证书请留空。只有自签 Relay 证书才粘贴 sudo onesync-relayctl cert 输出的 PEM。"));
 
     auto* folderRow = new QHBoxLayout();
     auto* chooseButton = new QPushButton(QStringLiteral("选择目录"));
@@ -1802,7 +1759,7 @@ bool MainWindow::runSourceTaskDialog(SyncTask* task, bool editing)
     form->addRow(QStringLiteral("Relay 证书（可选）"), caEdit);
     layout->addLayout(form);
 
-    auto* hint = new QLabel(QStringLiteral("Win7 源端第一版走 Relay：创建后会生成一段同步链接，目标端只需要粘贴这段链接加入。自建 Relay 如果不是公网可信证书，请把 Relay 证书一起粘贴进来。"));
+    auto* hint = new QLabel(QStringLiteral("Win7 源端第一版走 Relay：创建后会生成一段同步链接，目标端只需要粘贴这段链接加入。Relay 使用公网 SSL 或通配符证书时，Relay 证书留空；自签证书才需要粘贴。"));
     hint->setWordWrap(true);
     layout->addWidget(hint);
 

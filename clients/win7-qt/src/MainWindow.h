@@ -102,7 +102,6 @@ private:
     bool runTaskDialog(SyncTask* task, bool editing);
     bool runSourceTaskDialog(SyncTask* task, bool editing);
     QString buildSourceLink(const QString& relayEndpoint, const QString& relayToken, const QString& caCertificatePem, QString* error) const;
-    QString relayCertificateForLink(const Endpoint& endpoint, QString* error) const;
     bool testTaskConnection(const SyncTask& task, QString* detail) const;
     void showSourceLink(const SyncTask& task);
     void showTaskParameters(SyncTask* task);

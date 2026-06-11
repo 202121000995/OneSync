@@ -2588,3 +2588,34 @@
 - 这类日志一般来自旧服务配置或历史启动失败记录，当时 systemd 里 Relay 监听端口仍是 `:443`，而服务器 443 已被 nginx、宝塔、1Panel 或其他服务占用。
 - v1.15 面板会显示当前 Relay 监听和面板监听；日志区域提示日志可能包含历史端口报错。
 - 升级到 v1.15 后，可在面板里改端口，或执行 `sudo onesync-relayctl set-ports 17443 8766` 重写服务配置并重启。
+
+## v1.16 Win7 Relay 公网证书留空审核
+
+审核分支：`main`
+
+审核结论：本地通过，准备发布 GitHub Release。
+
+审核说明：
+
+- 根版本号从 `1.15` 提升到 `1.16`，主包、Win7 Qt 包、Linux 安装/升级示例统一使用 `v1.16`。
+- Win7 Qt 源端创建同步时，Relay 证书输入框为空不再自动连接 Relay 读取证书，也不再因为读取失败阻止创建同步。
+- Relay 证书输入框为空时，同步链接不携带 `ca_certificate_pem`，源端和目标端连接 Relay 时走系统证书信任链，适合公网可信 SSL 和通配符证书。
+- 自签 Relay 场景仍然支持手动粘贴 `sudo onesync-relayctl cert` 输出的 PEM，链接会继续携带证书并做指纹匹配。
+- Win7 创建同步窗口的提示文案改为“公网 SSL / 通配符证书请留空，自签 Relay 证书才粘贴”。
+- 架构说明同步更新：公网可信证书留空，自签证书才写入同步链接。
+
+验证结果：
+
+- `go test ./...` 通过。
+- `sh -n` 检查 Linux 一键脚本和控制脚本通过。
+- `git diff --check` 通过。
+- 仓库内未检出用户测试域名、测试 IP 或测试 token。
+- `sh clients/win7-qt/build-win7.sh` 成功，生成 `clients/win7-qt/dist/OneSyncWin7-win7-x86-v1.16.zip`。
+- `PATH=/Users/apple/Library/Go/sdk/go1.26.3/bin:$PATH sh packaging/package-acceptance.sh` 成功，生成主 Windows/Linux v1.16 包。
+- `unzip -t clients/win7-qt/dist/OneSyncWin7-win7-x86-v1.16.zip` 通过。
+- `unzip -t dist/acceptance-packages/onesync-windows-amd64-v1.16.zip` 通过。
+- `tar -tzf dist/acceptance-packages/onesync-linux-amd64-v1.16.tar.gz` 通过。
+
+剩余风险：
+
+- 如果 Windows 7 机器系统根证书过旧，即使 Relay 使用公网可信证书，也可能因为本机不信任签发 CA 而连接失败；这种情况下需要更新系统根证书，或临时粘贴 Relay 证书作为固定信任证书。

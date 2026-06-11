@@ -594,7 +594,7 @@ V1 不引入数据库。配置与任务状态使用本地文件持久化：
 37. `feature/task-params-logs-stats-icon`
    - 增加任务参数忽略规则、任务日志、接收/发送流量统计、关于版本号和 Windows 包图标资产。
 38. `feature/relay-cert-in-link`
-   - 生成链接时自动读取 Relay 公开证书并写入同步链接，源端和目标端无需手动复制 Relay 证书文件。
+   - 生成链接时支持把自签 Relay 公开证书写入同步链接；Relay 使用公网可信证书时证书字段留空，源端和目标端走系统证书信任链。
 39. `feature/task-size-devices-tray`
    - 任务表格展示本地/标准目录体积和可点击设备详情；Windows exe 使用 GUI 子系统、托盘常驻并嵌入图标资源。
 40. `feature/linux-relay-control-and-status-logs`
