@@ -17,6 +17,7 @@ namespace {
 const int kTlsTimeoutMs = 15000;
 const int kRelayWaitTimeoutMs = 120000;
 const int kRetryDelayMs = 5000;
+const int kConnectedIdleDelayMs = 1000;
 const int kAuthenticationTimeoutMs = 15000;
 const int kSyncMessageTimeoutMs = 120000;
 const int kMaxPayload = 16 * 1024 * 1024;
@@ -142,27 +143,28 @@ void TargetConnector::run()
             continue;
         }
 
-        emit statusChanged(QStringLiteral("运行-已连接源端"));
-        if (!respondSnapshot(&socket, &cycleError)) {
-            emit logMessage(QStringLiteral("本轮快照响应失败：%1").arg(cycleError));
-            socket.disconnectFromHost();
-            if (!waitBeforeRetry(&error)) {
+        emit logMessage(QStringLiteral("Relay 长连接已建立；后续同步会复用当前连接。"));
+        while (true) {
+            if (isCancelled(&error)) {
                 emit finished(false, error);
                 return;
             }
-            continue;
-        }
-        if (!receivePlan(&socket, &cycleError)) {
-            emit logMessage(QStringLiteral("本轮接收同步计划失败：%1").arg(cycleError));
-            socket.disconnectFromHost();
-            if (!waitBeforeRetry(&error)) {
+            emit statusChanged(QStringLiteral("运行-已连接源端"));
+            if (!respondSnapshot(&socket, &cycleError)) {
+                emit logMessage(QStringLiteral("本轮快照响应失败：%1").arg(cycleError));
+                break;
+            }
+            if (!receivePlan(&socket, &cycleError)) {
+                emit logMessage(QStringLiteral("本轮接收同步计划失败：%1").arg(cycleError));
+                break;
+            }
+            emit statusChanged(QStringLiteral("运行-等待"));
+            emit logMessage(QStringLiteral("本轮同步完成，保持 Relay 连接并等待下一轮。"));
+            if (!waitBeforeConnectedCycle(&error)) {
                 emit finished(false, error);
                 return;
             }
-            continue;
         }
-        emit statusChanged(QStringLiteral("运行-等待"));
-        emit logMessage(QStringLiteral("本轮同步完成，继续等待下一轮同步。"));
         socket.disconnectFromHost();
         if (!waitBeforeRetry(&error)) {
             emit finished(false, error);
@@ -189,6 +191,17 @@ bool TargetConnector::waitBeforeRetry(QString* error) const
             return false;
         }
         QThread::msleep(250);
+    }
+    return true;
+}
+
+bool TargetConnector::waitBeforeConnectedCycle(QString* error) const
+{
+    for (int elapsed = 0; elapsed < kConnectedIdleDelayMs; elapsed += 100) {
+        if (isCancelled(error)) {
+            return false;
+        }
+        QThread::msleep(100);
     }
     return true;
 }

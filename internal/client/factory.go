@@ -25,6 +25,7 @@ import (
 const DefaultSyncInterval = 10 * time.Second
 
 const maxConnectionRetryDelay = 30 * time.Second
+const maxConnectedIdleInterval = 2 * time.Second
 
 // Config provides shared dependencies for task runners.
 type Config struct {
@@ -273,7 +274,7 @@ func (r *runner) runCycle(ctx context.Context, taskID string, reporter task.Stat
 		if err != nil {
 			return err
 		}
-		return engine.Run(ctx, taskID)
+		return r.runConnectedCycles(ctx, taskID, reporter, engine)
 	}
 
 	clientTLS, err := clientTLSForCredential(r.factory.clientTLS, credential)
@@ -317,7 +318,42 @@ func (r *runner) runCycle(ctx context.Context, taskID string, reporter task.Stat
 	if err != nil {
 		return err
 	}
-	return engine.Run(ctx, taskID)
+	return r.runConnectedCycles(ctx, taskID, reporter, engine)
+}
+
+func (r *runner) runConnectedCycles(ctx context.Context, taskID string, reporter task.StateReporter, engine *sync.Engine) error {
+	idleInterval := connectedIdleInterval(r.factory.syncInterval)
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := reportState(ctx, reporter, task.StateSyncing); err != nil {
+			return err
+		}
+		if err := engine.Run(ctx, taskID); err != nil {
+			return err
+		}
+		if err := reportState(ctx, reporter, task.StateIdle); err != nil {
+			return err
+		}
+		changed, err := filewatch.WaitForChangeOrPeriodic(ctx, r.localRoot(), r.task.IgnoreRules, idleInterval)
+		if err != nil {
+			return err
+		}
+		if changed {
+			addLog(ctx, reporter, "info", fmt.Sprintf("检测到同步目录变化，并已等待 %s 确认文件写入稳定，使用现有连接开始下一轮同步", filewatch.DescribeChangeWait()))
+		}
+	}
+}
+
+func connectedIdleInterval(syncInterval time.Duration) time.Duration {
+	if syncInterval <= 0 {
+		return maxConnectedIdleInterval
+	}
+	if syncInterval < maxConnectedIdleInterval {
+		return syncInterval
+	}
+	return maxConnectedIdleInterval
 }
 
 func clientTLSForCredential(base *tls.Config, credential auth.Credential) (*tls.Config, error) {

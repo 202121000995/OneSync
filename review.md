@@ -3016,3 +3016,45 @@
 剩余风险：
 
 - 这仍是“周期性重连等待”模型，不是 Syncthing 那种长期保持双端会话；后续要进一步产品化，应把 Relay 会话改成长连接常驻或加入轻量心跳。
+
+## v1.29 Relay 长连接复用审核
+
+审核分支：`main`
+
+审核结论：本地验证中，准备发布 GitHub Release。
+
+现场目标：
+
+- 源端启动后一直挂在 Relay。
+- 目标端启动后一直挂在 Relay。
+- 同步完成后连接不关闭，继续等下一轮。
+- 目标端删除文件或本地变化后，尽快通过已有连接触发下一轮同步。
+- Relay 不保存文件，只转发两端流量。
+
+修复说明：
+
+- Go 主客户端源端/目标端连接成功后，不再每轮同步后关闭 session；改为在同一条直连/Relay session 上循环执行多轮同步。
+- Go 主客户端已连接状态下的空闲轮询间隔上限为 2 秒；只有连接出错、Relay 断开或认证失败时才回到重连流程。
+- Win7 Qt 源端/目标端 Relay 配对和同步认证通过后，不再每轮同步后断开 socket；改为复用当前 Relay 转发连接继续跑下一轮。
+- Win7 Qt 已连接状态下的空闲轮询间隔为 1 秒；连接失败重试仍保持 5 秒，避免 Relay 故障时频繁打满重连。
+- Win7 Qt 日志新增“Relay 长连接已建立”和“保持 Relay 连接并等待下一轮”，便于确认是否还在反复注册 Relay。
+- 根版本号从 `1.28` 提升到 `1.29`，主包、Win7 Qt 包、Linux 安装/升级示例统一使用 `v1.29`。
+
+验证结果：
+
+- `go test ./internal/client ./internal/sync ./internal/relay` 通过。
+- `go test ./...` 通过。
+- `git diff --check` 通过。
+- `sh clients/win7-qt/build-win7.sh` 成功，生成 `clients/win7-qt/dist/OneSyncWin7-win7-x86-v1.29.zip`。
+- `PATH=/Users/apple/Library/Go/sdk/go1.26.3/bin:$PATH sh packaging/package-acceptance.sh` 成功，生成主 Windows/Linux v1.29 包。
+- `unzip -t clients/win7-qt/dist/OneSyncWin7-win7-x86-v1.29.zip` 通过。
+- `unzip -t dist/acceptance-packages/onesync-windows-amd64-v1.29.zip` 通过。
+- `tar -tzf dist/acceptance-packages/onesync-linux-amd64-v1.29.tar.gz` 通过。
+- `strings clients/win7-qt/dist/OneSyncWin7-win7-x86-v1.29/OneSyncWin7.exe | rg 'GetSystemTimePreciseAsFileTime|KERNEL32\.dll|1\.29'` 只匹配到 `KERNEL32.dll`。
+- `sh -n` 检查 Linux 一键脚本和控制脚本通过。
+- 仓库内未检出用户测试域名、测试 IP 或测试 token。
+
+剩余风险：
+
+- 当前实现仍由源端周期性发起下一轮快照请求，目标端变化不会主动发专门的 wake 消息；但双方不再重新配对 Relay，等待主要缩短为已连接状态下的空闲轮询时间。
+- 后续可继续增加轻量 wake/heartbeat 消息，让目标端变化可以主动唤醒源端，而不是等待 2 秒轮询。

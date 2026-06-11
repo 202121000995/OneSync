@@ -38,6 +38,7 @@ private:
 
     bool isCancelled(QString* error) const;
     bool waitBeforeRetry(QString* error) const;
+    bool waitBeforeConnectedCycle(QString* error) const;
     bool connectTls(QSslSocket* socket, const Endpoint& endpoint, int timeoutMs, QString* error);
     bool registerRelay(QSslSocket* socket, const QByteArray& token, QString* error);
     bool authenticateTarget(QSslSocket* socket, const QByteArray& token, QString* error);
