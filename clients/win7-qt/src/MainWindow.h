@@ -36,6 +36,7 @@ private slots:
     void rescanSelectedTask();
     void editSelectedTask();
     void deleteSelectedTask();
+    void showSelectedSourceLink();
     void renameSelectedDevice();
     void toggleSelectedDeviceDisabled();
     void testSelectedConnection();
@@ -124,6 +125,7 @@ private:
     QPushButton* rescanButton = nullptr;
     QPushButton* parametersButton = nullptr;
     QPushButton* deleteButton = nullptr;
+    QPushButton* linkButton = nullptr;
     QLabel* pageTitleLabel = nullptr;
     QLabel* summaryLabel = nullptr;
     QStackedWidget* pages = nullptr;

@@ -2283,3 +2283,40 @@
 剩余风险：
 
 - 已经处于失败重启循环的 Linux service，升级后如果 systemd 未自动拉起，需要执行 `sudo systemctl reset-failed onesync` 后再 `sudo onesyncctl restart`。
+
+## v1.08 Win7 查看同步链接审核
+
+审核分支：`main`
+
+审核结论：通过。
+
+审核说明：
+
+- 根版本号从 `1.07` 提升到 `1.08`，主包、Win7 Qt 包、Linux 安装/升级示例统一使用 `v1.08`。
+- Win7 Qt 同步任务工具栏新增“查看链接”按钮。
+- “查看链接”只在选中发送任务且任务已有同步链接时启用，避免目标端误点。
+- 源端同步链接弹窗文案明确说明：同步链接会保存在发送任务里，后续可反复查看和复制。
+- 原“参数”里的复制同步链接入口保留，主界面现在也可以直接查看。
+
+验证结果：
+
+- `git diff --check` 通过。
+- `sh -n clients/win7-qt/build-win7.sh` 通过。
+- `sh -n packaging/package-acceptance.sh` 通过。
+- `/Users/apple/Library/Go/sdk/go1.26.3/bin/go test ./...` 通过。
+- `sh clients/win7-qt/build-win7.sh` 成功，生成 `clients/win7-qt/dist/OneSyncWin7-win7-x86-v1.08.zip`。
+- `PATH=/Users/apple/Library/Go/sdk/go1.26.3/bin:$PATH sh packaging/package-acceptance.sh` 成功，生成主 Windows/Linux v1.08 包。
+- `unzip -t clients/win7-qt/dist/OneSyncWin7-win7-x86-v1.08.zip` 通过。
+- `strings clients/win7-qt/release-win7/OneSyncWin7.exe | rg "GetSystemTimePreciseAsFileTime|KERNEL32.dll"` 只匹配到 `KERNEL32.dll`。
+- `unzip -t dist/acceptance-packages/onesync-windows-amd64-v1.08.zip` 通过。
+- `tar -tzf dist/acceptance-packages/onesync-linux-amd64-v1.08.tar.gz` 通过。
+
+本地包路径：
+
+- `/Users/apple/Documents/同步软件/clients/win7-qt/dist/OneSyncWin7-win7-x86-v1.08.zip`
+- `/Users/apple/Documents/同步软件/dist/acceptance-packages/onesync-windows-amd64-v1.08.zip`
+- `/Users/apple/Documents/同步软件/dist/acceptance-packages/onesync-linux-amd64-v1.08.tar.gz`
+
+剩余风险：
+
+- 如果发送任务是在旧版本里创建且同步链接没有携带 Relay 自签证书，仍需要在“参数”里重新保存生成一次链接。

@@ -163,7 +163,7 @@ void applyModernDialogStyle(QDialog* dialog)
 }
 } // namespace
 
-const QString kWin7Version = QStringLiteral("1.07");
+const QString kWin7Version = QStringLiteral("1.08");
 
 MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent)
@@ -256,6 +256,7 @@ void MainWindow::buildUi()
     rescanButton = toolbarButton(QStringLiteral("重新扫描"));
     parametersButton = toolbarButton(QStringLiteral("参数"));
     deleteButton = toolbarButton(QStringLiteral("删除"));
+    linkButton = toolbarButton(QStringLiteral("查看链接"));
     auto* createButton = toolbarButton(QStringLiteral("+ 创建同步"), QStringLiteral("primaryButton"));
     auto* addButton = toolbarButton(QStringLiteral("加入同步"), QStringLiteral("secondaryButton"));
     auto* copyErrorButton = toolbarButton(QStringLiteral("复制错误详情"));
@@ -268,6 +269,7 @@ void MainWindow::buildUi()
     connect(rescanButton, &QPushButton::clicked, this, &MainWindow::rescanSelectedTask);
     connect(parametersButton, &QPushButton::clicked, this, &MainWindow::editSelectedTask);
     connect(deleteButton, &QPushButton::clicked, this, &MainWindow::deleteSelectedTask);
+    connect(linkButton, &QPushButton::clicked, this, &MainWindow::showSelectedSourceLink);
     connect(addButton, &QPushButton::clicked, this, &MainWindow::addTask);
     connect(copyErrorButton, &QPushButton::clicked, this, &MainWindow::copySelectedTaskError);
     connect(selectedDiagnosticsButton, &QPushButton::clicked, this, &MainWindow::exportSelectedTaskDiagnostics);
@@ -278,6 +280,7 @@ void MainWindow::buildUi()
     toolbar->addWidget(rescanButton);
     toolbar->addWidget(parametersButton);
     toolbar->addWidget(deleteButton);
+    toolbar->addWidget(linkButton);
     toolbar->addStretch(1);
     toolbar->addWidget(createButton);
     toolbar->addWidget(addButton);
@@ -908,6 +911,29 @@ void MainWindow::deleteSelectedTask()
     appendLog(QStringLiteral("已删除同步任务：%1").arg(name));
 }
 
+void MainWindow::showSelectedSourceLink()
+{
+    SyncTask* task = selectedTask();
+    if (task == nullptr) {
+        QMessageBox::information(this, QStringLiteral("未选择任务"), QStringLiteral("请先选中一个发送任务。"));
+        return;
+    }
+    if (!isSourceTask(*task)) {
+        QMessageBox::information(this, QStringLiteral("不是发送任务"), QStringLiteral("只有发送任务才有同步链接。接收任务请使用源端发来的链接加入。"));
+        return;
+    }
+    if (task->linkText.trimmed().isEmpty()) {
+        QMessageBox::warning(this, QStringLiteral("没有同步链接"), QStringLiteral("这个发送任务还没有同步链接，请打开“参数”重新保存并生成链接。"));
+        return;
+    }
+    QString error;
+    if (!parseTaskLink(task, &error)) {
+        QMessageBox::warning(this, QStringLiteral("同步链接无效"), error);
+        return;
+    }
+    showSourceLink(*task);
+}
+
 void MainWindow::renameSelectedDevice()
 {
     SyncTask* task = selectedTask();
@@ -1227,6 +1253,7 @@ void MainWindow::refreshButtons()
     rescanButton->setEnabled(hasSelection);
     parametersButton->setEnabled(hasSelection);
     deleteButton->setEnabled(hasSelection && !task->running);
+    linkButton->setEnabled(hasSelection && isSourceTask(*task) && !task->linkText.trimmed().isEmpty());
 }
 
 void MainWindow::refreshLogFilter()
@@ -1806,7 +1833,7 @@ void MainWindow::showSourceLink(const SyncTask& task)
     auto* layout = new QVBoxLayout(&dialog);
     layout->setContentsMargins(22, 20, 22, 18);
     layout->setSpacing(14);
-    auto* hint = new QLabel(QStringLiteral("把下面这段同步链接发给目标端，在目标端点击“加入同步”后粘贴即可。"));
+    auto* hint = new QLabel(QStringLiteral("把下面这段同步链接发给目标端，在目标端点击“加入同步”后粘贴即可。这个链接会保存在发送任务里，之后选中任务点“查看链接”可以再次打开。"));
     hint->setWordWrap(true);
     layout->addWidget(hint);
     auto* linkEdit = new QTextEdit(task.linkText);
