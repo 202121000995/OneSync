@@ -2357,3 +2357,44 @@
 剩余风险：
 
 - 如果目标端仍提示“目标端同步认证失败”，优先确认目标端粘贴的是源端当前“查看链接”里显示的最新链接；认证失败通常是源端和目标端同步令牌不一致。
+
+## v1.10 Relay 外部证书路径支持审核
+
+审核分支：`main`
+
+审核结论：通过。
+
+审核说明：
+
+- 根版本号从 `1.09` 提升到 `1.10`，主包、Win7 Qt 包、Linux 安装/升级示例统一使用 `v1.10`。
+- Relay 安装脚本支持直接传入宝塔、1Panel 或其他 ACME 工具管理的证书路径：`ONESYNC_RELAY_CERT=/path/fullchain.pem` 和 `ONESYNC_RELAY_KEY=/path/privkey.pem`。
+- `onesync-relayctl set-cert /path/fullchain.pem /path/privkey.pem` 可在安装后切换证书路径，自动重写 systemd 服务并在服务运行时重启。
+- `onesync-relayctl cert-info` / `test-cert` 可检查证书路径、证书有效期、证书和私钥是否匹配。
+- Relay 会持久记录当前证书路径，后续 `info`、`cert` 和服务重启都会使用同一组证书路径。
+- `regen-cert` 对外部证书路径默认拒绝覆盖，避免误写宝塔 / 1Panel 管理的证书文件。
+- `onesyncr` 菜单和 README/quickstart 已补充宝塔 / 1Panel 证书路径模式说明。
+
+验证结果：
+
+- `sh -n packaging/acceptance-scripts/linux/onesync-relayctl` 通过。
+- `sh -n packaging/acceptance-scripts/linux/deploy-relaytls.sh` 通过。
+- `sh -n packaging/acceptance-scripts/linux/onesyncr-menu` 通过。
+- `git diff --check` 通过。
+- `/Users/apple/Library/Go/sdk/go1.26.3/bin/go test ./...` 通过。
+- `sh clients/win7-qt/build-win7.sh` 成功，生成 `clients/win7-qt/dist/OneSyncWin7-win7-x86-v1.10.zip`。
+- `PATH=/Users/apple/Library/Go/sdk/go1.26.3/bin:$PATH sh packaging/package-acceptance.sh` 成功，生成主 Windows/Linux v1.10 包。
+- `unzip -t clients/win7-qt/dist/OneSyncWin7-win7-x86-v1.10.zip` 通过。
+- `strings clients/win7-qt/release-win7/OneSyncWin7.exe | rg "GetSystemTimePreciseAsFileTime|KERNEL32.dll"` 只匹配到 `KERNEL32.dll`。
+- `unzip -t dist/acceptance-packages/onesync-windows-amd64-v1.10.zip` 通过。
+- `tar -tzf dist/acceptance-packages/onesync-linux-amd64-v1.10.tar.gz` 通过。
+
+本地包路径：
+
+- `/Users/apple/Documents/同步软件/clients/win7-qt/dist/OneSyncWin7-win7-x86-v1.10.zip`
+- `/Users/apple/Documents/同步软件/dist/acceptance-packages/onesync-windows-amd64-v1.10.zip`
+- `/Users/apple/Documents/同步软件/dist/acceptance-packages/onesync-linux-amd64-v1.10.tar.gz`
+
+剩余风险：
+
+- Relay Web 面板尚未实现；当前先通过 `onesync-relayctl` 提供证书路径和令牌管理底座。
+- 宝塔 / 1Panel 证书续期后，如果证书文件路径不变，Relay 重启后会读取新证书；后续面板可补“检测并重载/重启”按钮。

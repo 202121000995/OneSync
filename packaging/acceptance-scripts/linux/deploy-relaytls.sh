@@ -5,7 +5,7 @@ REPO=${ONESYNC_REPO:-202121000995/OneSync}
 RELAY_PORT=${RELAY_PORT:-443}
 ACTION=${1:-install}
 GH_PROXY=${GH_PROXY:-}
-DEFAULT_RELEASE_TAG=${ONESYNC_DEFAULT_RELEASE_TAG:-v1.09}
+DEFAULT_RELEASE_TAG=${ONESYNC_DEFAULT_RELEASE_TAG:-v1.10}
 RELEASE_TAG=${ONESYNC_RELEASE_TAG:-${RELEASE_TAG:-}}
 PACKAGE_URL=${ONESYNC_LINUX_PACKAGE_URL:-${PACKAGE_URL:-}}
 
@@ -73,7 +73,8 @@ install_relay() {
 	if [ -z "${RELAY_HOSTS:-}" ]; then
 		printf 'RELAY_HOSTS is required. Example:\n' >&2
 		printf '  curl -fsSL https://raw.githubusercontent.com/%s/main/packaging/acceptance-scripts/linux/deploy-relaytls.sh | sudo env RELAY_HOSTS=relay.example.com RELAY_PORT=443 RELAY_TOKEN=your-secret sh\n' "$REPO" >&2
-		printf '  curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/%s/main/packaging/acceptance-scripts/linux/deploy-relaytls.sh | sudo env RELAY_HOSTS=relay.example.com RELAY_PORT=443 RELAY_TOKEN=your-secret RELEASE_TAG=v1.09 GH_PROXY=https://gh-proxy.org/ sh\n' "$REPO" >&2
+		printf '  curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/%s/main/packaging/acceptance-scripts/linux/deploy-relaytls.sh | sudo env RELAY_HOSTS=relay.example.com RELAY_PORT=443 RELAY_TOKEN=your-secret RELEASE_TAG=v1.10 GH_PROXY=https://gh-proxy.org/ sh\n' "$REPO" >&2
+		printf '  With BT/1Panel certificate paths: sudo env RELAY_HOSTS=relay.example.com ONESYNC_RELAY_CERT=/path/fullchain.pem ONESYNC_RELAY_KEY=/path/privkey.pem ... sh\n' >&2
 		exit 1
 	fi
 
@@ -88,7 +89,7 @@ install_relay() {
 	url=$(latest_linux_package_url)
 	if [ -z "$url" ]; then
 		printf 'Cannot find latest OneSync Linux package from GitHub repo %s.\n' "$REPO" >&2
-		printf 'If GitHub API is blocked by the proxy, retry with RELEASE_TAG=v1.09 or PACKAGE_URL=https://...tar.gz.\n' >&2
+		printf 'If GitHub API is blocked by the proxy, retry with RELEASE_TAG=v1.10 or PACKAGE_URL=https://...tar.gz.\n' >&2
 		exit 1
 	fi
 
@@ -124,6 +125,8 @@ install_relay() {
 	printf '  sudo onesync-relayctl token\n'
 	printf '  sudo onesync-relayctl rotate-token\n'
 	printf '  sudo onesync-relayctl cert\n'
+	printf '  sudo onesync-relayctl cert-info\n'
+	printf '  sudo onesync-relayctl set-cert /path/fullchain.pem /path/privkey.pem\n'
 	printf '  sudo RELAY_HOSTS=relay.example.com RELAY_PORT=%s onesync-relayctl regen-cert\n' "$RELAY_PORT"
 	printf '  sudo onesync-relayctl restart\n'
 	printf '  sudo onesync-relayctl upgrade\n'
