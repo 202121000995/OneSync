@@ -41,6 +41,7 @@ var webFiles embed.FS
 type taskManager interface {
 	Create(ctx context.Context, task task.Task) error
 	Start(ctx context.Context, taskID string) error
+	Rescan(ctx context.Context, taskID string) error
 	Stop(ctx context.Context, taskID string) error
 	Delete(ctx context.Context, taskID string) error
 	UpdateIgnoreRules(ctx context.Context, taskID string, rules []string) error
@@ -229,6 +230,7 @@ func NewServerWithOptions(manager taskManager, links *syncauth.LinkService, cred
 	mux.HandleFunc("GET /api/endpoint-suggestions", server.endpointSuggestions)
 	mux.HandleFunc("POST /api/tasks", server.createTask)
 	mux.HandleFunc("POST /api/tasks/{id}/start", server.startTask)
+	mux.HandleFunc("POST /api/tasks/{id}/rescan", server.rescanTask)
 	mux.HandleFunc("POST /api/tasks/{id}/stop", server.stopTask)
 	mux.HandleFunc("PATCH /api/tasks/{id}", server.updateTask)
 	mux.HandleFunc("PATCH /api/tasks/{id}/device", server.updateDevice)
@@ -462,6 +464,23 @@ func (s *Server) startTask(writer http.ResponseWriter, request *http.Request) {
 		return
 	}
 	writeJSON(writer, http.StatusAccepted, map[string]string{"status": "starting"})
+}
+
+func (s *Server) rescanTask(writer http.ResponseWriter, request *http.Request) {
+	taskID := request.PathValue("id")
+	if err := s.manager.Rescan(request.Context(), taskID); err != nil {
+		writeAPIError(writer, statusForTaskError(err), err)
+		return
+	}
+	if err := s.manager.Start(request.Context(), taskID); err != nil {
+		if errors.Is(err, task.ErrTaskAlreadyRunning) {
+			writeJSON(writer, http.StatusOK, map[string]string{"status": "rescanned", "task": "running"})
+			return
+		}
+		writeAPIError(writer, statusForTaskError(err), err)
+		return
+	}
+	writeJSON(writer, http.StatusAccepted, map[string]string{"status": "rescanned", "task": "starting"})
 }
 
 func (s *Server) stopTask(writer http.ResponseWriter, request *http.Request) {

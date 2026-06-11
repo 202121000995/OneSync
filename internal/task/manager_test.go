@@ -3,6 +3,7 @@ package task
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -140,6 +141,64 @@ func TestManagerRejectsNilRunner(t *testing.T) {
 	task := waitForTaskState(t, manager, "task", StateFailed)
 	if task.LastError != "runner factory returned nil runner" {
 		t.Fatalf("LastError = %q", task.LastError)
+	}
+}
+
+func TestManagerRescanUpdatesTargetLocalSizeAfterDeletion(t *testing.T) {
+	root := t.TempDir()
+	writeTestFile(t, filepath.Join(root, "keep.txt"), "keep")
+	writeTestFile(t, filepath.Join(root, "delete.txt"), "delete")
+	manager := newTestManager(t, filepath.Join(t.TempDir(), "tasks.json"), &fakeFactory{})
+	if err := manager.Create(context.Background(), Task{ID: "task", Role: RoleTarget, TargetPath: root}); err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	if err := manager.Rescan(context.Background(), "task"); err != nil {
+		t.Fatalf("Rescan() error = %v", err)
+	}
+	scanned, err := manager.Get(context.Background(), "task")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if scanned.Size.LocalFiles != 2 || scanned.Size.LocalBytes != 10 {
+		t.Fatalf("size after first rescan = %+v", scanned.Size)
+	}
+
+	if err := os.Remove(filepath.Join(root, "delete.txt")); err != nil {
+		t.Fatalf("Remove() error = %v", err)
+	}
+	if err := manager.Rescan(context.Background(), "task"); err != nil {
+		t.Fatalf("Rescan(after delete) error = %v", err)
+	}
+	scanned, err = manager.Get(context.Background(), "task")
+	if err != nil {
+		t.Fatalf("Get(after delete) error = %v", err)
+	}
+	if scanned.Size.LocalFiles != 1 || scanned.Size.LocalBytes != 4 {
+		t.Fatalf("size after deletion rescan = %+v", scanned.Size)
+	}
+	if scanned.Size.StandardFiles != 0 || scanned.Size.StandardBytes != 0 {
+		t.Fatalf("target rescan changed standard size = %+v", scanned.Size)
+	}
+}
+
+func TestManagerRescanSourceUpdatesStandardSize(t *testing.T) {
+	root := t.TempDir()
+	writeTestFile(t, filepath.Join(root, "source.txt"), "source")
+	manager := newTestManager(t, filepath.Join(t.TempDir(), "tasks.json"), &fakeFactory{})
+	if err := manager.Create(context.Background(), Task{ID: "task", Role: RoleSource, SourcePath: root}); err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	if err := manager.Rescan(context.Background(), "task"); err != nil {
+		t.Fatalf("Rescan() error = %v", err)
+	}
+	scanned, err := manager.Get(context.Background(), "task")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if scanned.Size.LocalFiles != 1 || scanned.Size.StandardFiles != 1 || scanned.Size.LocalBytes != 6 || scanned.Size.StandardBytes != 6 {
+		t.Fatalf("source size after rescan = %+v", scanned.Size)
 	}
 }
 
@@ -402,6 +461,13 @@ func createSourceTask(t *testing.T, manager *Manager, taskID string) {
 		ID: taskID, Role: RoleSource, SourcePath: t.TempDir(),
 	}); err != nil {
 		t.Fatalf("Create() error = %v", err)
+	}
+}
+
+func writeTestFile(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("WriteFile(%q) error = %v", path, err)
 	}
 }
 

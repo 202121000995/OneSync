@@ -18,7 +18,7 @@ const int kTlsTimeoutMs = 15000;
 const int kRelayWaitTimeoutMs = 120000;
 const int kRetryDelayMs = 30000;
 const int kAuthenticationTimeoutMs = 15000;
-const int kSyncMessageTimeoutMs = 30000;
+const int kSyncMessageTimeoutMs = 120000;
 const int kMaxPayload = 16 * 1024 * 1024;
 const quint64 kAuthenticationRequestID = 1;
 
@@ -426,8 +426,8 @@ bool TargetConnector::authenticate(QSslSocket* socket, const QByteArray& token, 
 bool TargetConnector::writeAll(QSslSocket* socket, const QByteArray& data, int timeoutMs, QString* error)
 {
     qint64 offset = 0;
-    QElapsedTimer timer;
-    timer.start();
+    QElapsedTimer idleTimer;
+    idleTimer.start();
     while (offset < data.size()) {
         if (isCancelled(error)) {
             return false;
@@ -439,21 +439,22 @@ bool TargetConnector::writeAll(QSslSocket* socket, const QByteArray& data, int t
             }
             return false;
         }
-        offset += written;
         if (written > 0) {
+            offset += written;
             sentBytes += quint64(written);
             emitTrafficIfChanged();
+            idleTimer.restart();
         }
-        const int remaining = timeoutMs - int(timer.elapsed());
+        const int remaining = timeoutMs - int(idleTimer.elapsed());
         if (remaining <= 0) {
             if (error != nullptr) {
-                *error = QStringLiteral("网络写入超时：%1").arg(socket->errorString());
+                *error = QStringLiteral("网络写入长时间无进展：%1").arg(socket->errorString());
             }
             return false;
         }
-        if (!socket->waitForBytesWritten(qMin(remaining, 500)) && timer.elapsed() >= timeoutMs) {
+        if (!socket->waitForBytesWritten(qMin(remaining, 500)) && idleTimer.elapsed() >= timeoutMs) {
             if (error != nullptr) {
-                *error = QStringLiteral("网络写入超时：%1").arg(socket->errorString());
+                *error = QStringLiteral("网络写入长时间无进展：%1").arg(socket->errorString());
             }
             return false;
         }
@@ -464,23 +465,23 @@ bool TargetConnector::writeAll(QSslSocket* socket, const QByteArray& data, int t
 QByteArray TargetConnector::readExact(QSslSocket* socket, int size, int timeoutMs, QString* error)
 {
     QByteArray data;
-    QElapsedTimer timer;
-    timer.start();
+    QElapsedTimer idleTimer;
+    idleTimer.start();
     while (data.size() < size) {
         if (isCancelled(error)) {
             return {};
         }
         if (socket->bytesAvailable() <= 0) {
-            const int remaining = timeoutMs - int(timer.elapsed());
+            const int remaining = timeoutMs - int(idleTimer.elapsed());
             if (remaining <= 0) {
                 if (error != nullptr) {
-                    *error = QStringLiteral("网络读取超时或失败：%1").arg(socket->errorString());
+                    *error = QStringLiteral("网络读取长时间无进展或失败：%1").arg(socket->errorString());
                 }
                 return {};
             }
-            if (!socket->waitForReadyRead(qMin(remaining, 500)) && timer.elapsed() >= timeoutMs) {
+            if (!socket->waitForReadyRead(qMin(remaining, 500)) && idleTimer.elapsed() >= timeoutMs) {
                 if (error != nullptr) {
-                    *error = QStringLiteral("网络读取超时或失败：%1").arg(socket->errorString());
+                    *error = QStringLiteral("网络读取长时间无进展或失败：%1").arg(socket->errorString());
                 }
                 return {};
             }
@@ -489,6 +490,7 @@ QByteArray TargetConnector::readExact(QSslSocket* socket, int size, int timeoutM
         if (!chunk.isEmpty()) {
             receivedBytes += quint64(chunk.size());
             emitTrafficIfChanged();
+            idleTimer.restart();
         }
         data.append(chunk);
     }

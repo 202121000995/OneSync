@@ -2946,3 +2946,39 @@
 - `unzip -t dist/acceptance-packages/onesync-windows-amd64-v1.17.zip` 通过。
 - `tar -tzf dist/acceptance-packages/onesync-linux-amd64-v1.17.tar.gz` 通过。
 - `strings clients/win7-qt/release-win7/OneSyncWin7.exe | rg "GetSystemTimePreciseAsFileTime|KERNEL32.dll"` 只匹配到 `KERNEL32.dll`。
+
+## v1.27 传输统计与重新扫描审核
+
+审核分支：`main`
+
+审核结论：本地通过，准备发布 GitHub Release。
+
+审核说明：
+
+- 根版本号从 `1.26` 提升到 `1.27`，主包、Win7 Qt 包、Linux 安装/升级示例统一使用 `v1.27`。
+- Win7 Qt 发送端流量统计改为按目标端 ACK 确认后的文件字节计数，不再把本机 TLS/Socket 缓冲区写入量当作真实发送流量。
+- Win7 Qt 源端、目标端和文件接收 ACK 等待超时从 30 秒提升到 120 秒，降低 Relay 中转大文件传输时的误超时。
+- Win7 Qt 网络读写超时改为“连续无进展超时”：只要大文件传输仍在持续读写，就不会因为总传输时间超过 120 秒而误失败。
+- Win7 Qt 发送端新增大文件进度日志，每 15 秒输出已确认进度、最近确认字节和平均速度，方便现场判断是网络慢、目标端慢还是完全卡住。
+- Win7 Qt 目标端接收临时文件从每 1 MB 强制 flush 改为每 16 MB 和文件结束时 flush，减少磁盘 flush 造成的卡顿，同时保留断点续传用的 `.part` 临时文件。
+- Linux/主客户端管理页“重新扫描”现在会真正扫描任务本地目录并刷新本地大小；目标端删除文件后，点击重新扫描会立即更新本地文件数和体积。
+- 新增后台 `/api/tasks/{id}/rescan` 接口：先刷新本地统计，再尽量启动任务；任务已运行时不再把重新扫描判定为失败。
+- 新增回归测试覆盖目标端删除文件后重新扫描，以及源端重新扫描同步更新标准大小。
+
+验证结果：
+
+- `go test ./...` 通过。
+- `go test ./internal/task ./backend ./internal/sync` 通过。
+- `sh clients/win7-qt/build-win7.sh` 成功，生成 `clients/win7-qt/dist/OneSyncWin7-win7-x86-v1.27.zip`。
+- `PATH=/Users/apple/Library/Go/sdk/go1.26.3/bin:$PATH sh packaging/package-acceptance.sh` 成功，生成主 Windows/Linux v1.27 包。
+- `unzip -t clients/win7-qt/dist/OneSyncWin7-win7-x86-v1.27.zip` 通过。
+- `unzip -t dist/acceptance-packages/onesync-windows-amd64-v1.27.zip` 通过。
+- `tar -tzf dist/acceptance-packages/onesync-linux-amd64-v1.27.tar.gz` 通过。
+- `strings clients/win7-qt/dist/OneSyncWin7-win7-x86-v1.27/OneSyncWin7.exe | rg 'GetSystemTimePreciseAsFileTime|KERNEL32\.dll|1\.27'` 只匹配到 `KERNEL32.dll`。
+- `sh -n` 检查 Linux 一键脚本和控制脚本通过。
+- `git diff --check` 通过。
+- 仓库内未检出用户测试域名、测试 IP 或测试 token。
+
+剩余风险：
+
+- Relay 中转速度仍受服务器带宽、跨网链路质量和目标端落盘速度影响；v1.27 修正统计口径和误超时，不等同于无限提升公网中转速度。

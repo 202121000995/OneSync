@@ -21,10 +21,11 @@ const int kTlsTimeoutMs = 15000;
 const int kRelayWaitTimeoutMs = 120000;
 const int kRetryDelayMs = 30000;
 const int kAuthenticationTimeoutMs = 15000;
-const int kSyncMessageTimeoutMs = 30000;
+const int kSyncMessageTimeoutMs = 120000;
 const int kMaxPayload = 16 * 1024 * 1024;
 const int kMaxChunkSize = 1024 * 1024;
 const int kPipelineChunks = 16;
+const int kProgressLogIntervalMs = 15000;
 const int kHashSize = 32;
 const quint64 kSnapshotRequestID = 1;
 const quint64 kPlanRequestID = 2;
@@ -506,6 +507,9 @@ bool SourceConnector::sendFile(QSslSocket* socket, quint64 requestID, const Snap
                         .arg(kPipelineChunks));
 
     QList<qint64> pendingOffsets;
+    qint64 confirmedOffset = offset;
+    qint64 lastLoggedOffset = confirmedOffset;
+    qint64 lastProgressLogMs = 0;
     while (offset < file.size()) {
         if (isCancelled(error)) {
             return false;
@@ -538,6 +542,18 @@ bool SourceConnector::sendFile(QSslSocket* socket, quint64 requestID, const Snap
                 }
                 return false;
             }
+            if (confirmed > confirmedOffset) {
+                sentBytes += quint64(confirmed - confirmedOffset);
+                confirmedOffset = confirmed;
+                emitTrafficIfChanged();
+                const qint64 elapsedMs = transferTimer.elapsed();
+                if (elapsedMs - lastProgressLogMs >= kProgressLogIntervalMs) {
+                    emit logMessage(QStringLiteral("发送进度：%1 / %2，最近 %3，平均速度 %4")
+                                        .arg(humanBytes(confirmedOffset), humanBytes(file.size()), humanBytes(confirmedOffset - lastLoggedOffset), humanRate(confirmedOffset, elapsedMs)));
+                    lastLoggedOffset = confirmedOffset;
+                    lastProgressLogMs = elapsedMs;
+                }
+            }
         }
     }
     while (!pendingOffsets.isEmpty()) {
@@ -551,6 +567,18 @@ bool SourceConnector::sendFile(QSslSocket* socket, quint64 requestID, const Snap
                 *error = QStringLiteral("目标端确认偏移不正确。");
             }
             return false;
+        }
+        if (confirmed > confirmedOffset) {
+            sentBytes += quint64(confirmed - confirmedOffset);
+            confirmedOffset = confirmed;
+            emitTrafficIfChanged();
+            const qint64 elapsedMs = transferTimer.elapsed();
+            if (elapsedMs - lastProgressLogMs >= kProgressLogIntervalMs && confirmedOffset < file.size()) {
+                emit logMessage(QStringLiteral("发送进度：%1 / %2，最近 %3，平均速度 %4")
+                                    .arg(humanBytes(confirmedOffset), humanBytes(file.size()), humanBytes(confirmedOffset - lastLoggedOffset), humanRate(confirmedOffset, elapsedMs)));
+                lastLoggedOffset = confirmedOffset;
+                lastProgressLogMs = elapsedMs;
+            }
         }
     }
 
@@ -568,8 +596,8 @@ bool SourceConnector::sendFile(QSslSocket* socket, quint64 requestID, const Snap
 bool SourceConnector::writeAll(QSslSocket* socket, const QByteArray& data, int timeoutMs, QString* error)
 {
     qint64 offset = 0;
-    QElapsedTimer timer;
-    timer.start();
+    QElapsedTimer idleTimer;
+    idleTimer.start();
     while (offset < data.size()) {
         if (isCancelled(error)) {
             return false;
@@ -581,21 +609,20 @@ bool SourceConnector::writeAll(QSslSocket* socket, const QByteArray& data, int t
             }
             return false;
         }
-        offset += written;
         if (written > 0) {
-            sentBytes += quint64(written);
-            emitTrafficIfChanged();
+            offset += written;
+            idleTimer.restart();
         }
-        const int remaining = timeoutMs - int(timer.elapsed());
+        const int remaining = timeoutMs - int(idleTimer.elapsed());
         if (remaining <= 0) {
             if (error != nullptr) {
-                *error = QStringLiteral("网络写入超时：%1").arg(socket->errorString());
+                *error = QStringLiteral("网络写入长时间无进展：%1").arg(socket->errorString());
             }
             return false;
         }
-        if (!socket->waitForBytesWritten(qMin(remaining, 500)) && timer.elapsed() >= timeoutMs) {
+        if (!socket->waitForBytesWritten(qMin(remaining, 500)) && idleTimer.elapsed() >= timeoutMs) {
             if (error != nullptr) {
-                *error = QStringLiteral("网络写入超时：%1").arg(socket->errorString());
+                *error = QStringLiteral("网络写入长时间无进展：%1").arg(socket->errorString());
             }
             return false;
         }
@@ -606,23 +633,23 @@ bool SourceConnector::writeAll(QSslSocket* socket, const QByteArray& data, int t
 QByteArray SourceConnector::readExact(QSslSocket* socket, int size, int timeoutMs, QString* error)
 {
     QByteArray data;
-    QElapsedTimer timer;
-    timer.start();
+    QElapsedTimer idleTimer;
+    idleTimer.start();
     while (data.size() < size) {
         if (isCancelled(error)) {
             return {};
         }
         if (socket->bytesAvailable() <= 0) {
-            const int remaining = timeoutMs - int(timer.elapsed());
+            const int remaining = timeoutMs - int(idleTimer.elapsed());
             if (remaining <= 0) {
                 if (error != nullptr) {
-                    *error = QStringLiteral("网络读取超时或失败：%1").arg(socket->errorString());
+                    *error = QStringLiteral("网络读取长时间无进展或失败：%1").arg(socket->errorString());
                 }
                 return {};
             }
-            if (!socket->waitForReadyRead(qMin(remaining, 500)) && timer.elapsed() >= timeoutMs) {
+            if (!socket->waitForReadyRead(qMin(remaining, 500)) && idleTimer.elapsed() >= timeoutMs) {
                 if (error != nullptr) {
-                    *error = QStringLiteral("网络读取超时或失败：%1").arg(socket->errorString());
+                    *error = QStringLiteral("网络读取长时间无进展或失败：%1").arg(socket->errorString());
                 }
                 return {};
             }
@@ -631,6 +658,7 @@ QByteArray SourceConnector::readExact(QSslSocket* socket, int size, int timeoutM
         if (!chunk.isEmpty()) {
             receivedBytes += quint64(chunk.size());
             emitTrafficIfChanged();
+            idleTimer.restart();
         }
         data.append(chunk);
     }
@@ -661,6 +689,9 @@ bool SourceConnector::expectAck(QSslSocket* socket, quint64 requestID, int timeo
 {
     SyncProtocol::Frame frame;
     if (!readFrame(socket, timeoutMs, &frame, error)) {
+        if (error != nullptr && !error->isEmpty()) {
+            *error = QStringLiteral("等待目标端确认失败：%1").arg(*error);
+        }
         return false;
     }
     if (frame.requestID != requestID || frame.type != SyncProtocol::MessageAck) {

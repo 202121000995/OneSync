@@ -663,8 +663,9 @@ func (m *fakeManager) Create(_ context.Context, created task.Task) error {
 	return nil
 }
 
-func (m *fakeManager) Start(context.Context, string) error { return nil }
-func (m *fakeManager) Stop(context.Context, string) error  { return nil }
+func (m *fakeManager) Start(context.Context, string) error  { return nil }
+func (m *fakeManager) Rescan(context.Context, string) error { return nil }
+func (m *fakeManager) Stop(context.Context, string) error   { return nil }
 func (m *fakeManager) Delete(_ context.Context, id string) error {
 	if _, ok := m.tasks[id]; !ok {
 		return task.ErrTaskNotFound

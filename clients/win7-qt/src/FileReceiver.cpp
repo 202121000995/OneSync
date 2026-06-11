@@ -13,9 +13,10 @@
 #include <limits>
 
 namespace {
-const int kSyncMessageTimeoutMs = 30000;
+const int kSyncMessageTimeoutMs = 120000;
 const int kMaxPayload = 16 * 1024 * 1024;
 const int kMaxChunkSize = 1024 * 1024;
+const qint64 kFlushIntervalBytes = 16 * 1024 * 1024;
 const int kHashSize = 32;
 const int kFileIDSize = 32;
 const QString kPartDirectoryName = QStringLiteral(".onesync-part");
@@ -103,6 +104,7 @@ bool FileReceiver::receive(QSslSocket* socket, const QString& root, const SyncPr
     if (!writeAck(socket, beginFrame.requestID, encodeOffset(offset), options, error)) {
         return false;
     }
+    qint64 lastFlushedOffset = offset;
 
     for (;;) {
         if (isCancelled(options, error)) {
@@ -137,14 +139,17 @@ bool FileReceiver::receive(QSslSocket* socket, const QString& root, const SyncPr
                 (void)writeError(socket, frame.requestID, options);
                 return false;
             }
-            if (!part.flush()) {
-                if (error != nullptr) {
-                    *error = QStringLiteral("刷新临时文件失败：%1").arg(part.errorString());
-                }
-                (void)writeError(socket, frame.requestID, options);
-                return false;
-            }
             offset += chunk.size();
+            if (offset - lastFlushedOffset >= kFlushIntervalBytes) {
+                if (!part.flush()) {
+                    if (error != nullptr) {
+                        *error = QStringLiteral("刷新临时文件失败：%1").arg(part.errorString());
+                    }
+                    (void)writeError(socket, frame.requestID, options);
+                    return false;
+                }
+                lastFlushedOffset = offset;
+            }
             if (!writeAck(socket, frame.requestID, encodeOffset(offset), options, error)) {
                 return false;
             }
@@ -157,6 +162,13 @@ bool FileReceiver::receive(QSslSocket* socket, const QString& root, const SyncPr
             if (!decodeEnd(frame.payload, &endSize, &endHash, error) || endSize != totalSize || endHash != expectedHash || offset != totalSize) {
                 if (error != nullptr && error->isEmpty()) {
                     *error = QStringLiteral("文件结束元数据不匹配。");
+                }
+                (void)writeError(socket, frame.requestID, options);
+                return false;
+            }
+            if (!part.flush()) {
+                if (error != nullptr) {
+                    *error = QStringLiteral("刷新临时文件失败：%1").arg(part.errorString());
                 }
                 (void)writeError(socket, frame.requestID, options);
                 return false;
@@ -477,8 +489,8 @@ bool FileReceiver::writeError(QSslSocket* socket, quint64 requestID, Options* op
 bool FileReceiver::writeAll(QSslSocket* socket, const QByteArray& data, int timeoutMs, Options* options, QString* error)
 {
     qint64 offset = 0;
-    QElapsedTimer timer;
-    timer.start();
+    QElapsedTimer idleTimer;
+    idleTimer.start();
     while (offset < data.size()) {
         if (isCancelled(options, error)) {
             return false;
@@ -490,23 +502,27 @@ bool FileReceiver::writeAll(QSslSocket* socket, const QByteArray& data, int time
             }
             return false;
         }
-        offset += written;
         if (options != nullptr && options->sentBytes != nullptr && written > 0) {
+            offset += written;
             *options->sentBytes += quint64(written);
             if (options->onTrafficChanged) {
                 options->onTrafficChanged();
             }
+            idleTimer.restart();
+        } else if (written > 0) {
+            offset += written;
+            idleTimer.restart();
         }
-        const int remaining = timeoutMs - int(timer.elapsed());
+        const int remaining = timeoutMs - int(idleTimer.elapsed());
         if (remaining <= 0) {
             if (error != nullptr) {
-                *error = QStringLiteral("网络写入超时：%1").arg(socket->errorString());
+                *error = QStringLiteral("网络写入长时间无进展：%1").arg(socket->errorString());
             }
             return false;
         }
-        if (!socket->waitForBytesWritten(qMin(remaining, 500)) && timer.elapsed() >= timeoutMs) {
+        if (!socket->waitForBytesWritten(qMin(remaining, 500)) && idleTimer.elapsed() >= timeoutMs) {
             if (error != nullptr) {
-                *error = QStringLiteral("网络写入超时：%1").arg(socket->errorString());
+                *error = QStringLiteral("网络写入长时间无进展：%1").arg(socket->errorString());
             }
             return false;
         }
@@ -517,23 +533,23 @@ bool FileReceiver::writeAll(QSslSocket* socket, const QByteArray& data, int time
 QByteArray FileReceiver::readExact(QSslSocket* socket, int size, int timeoutMs, Options* options, QString* error)
 {
     QByteArray data;
-    QElapsedTimer timer;
-    timer.start();
+    QElapsedTimer idleTimer;
+    idleTimer.start();
     while (data.size() < size) {
         if (isCancelled(options, error)) {
             return {};
         }
         if (socket->bytesAvailable() <= 0) {
-            const int remaining = timeoutMs - int(timer.elapsed());
+            const int remaining = timeoutMs - int(idleTimer.elapsed());
             if (remaining <= 0) {
                 if (error != nullptr) {
-                    *error = QStringLiteral("网络读取超时或失败：%1").arg(socket->errorString());
+                    *error = QStringLiteral("网络读取长时间无进展或失败：%1").arg(socket->errorString());
                 }
                 return {};
             }
-            if (!socket->waitForReadyRead(qMin(remaining, 500)) && timer.elapsed() >= timeoutMs) {
+            if (!socket->waitForReadyRead(qMin(remaining, 500)) && idleTimer.elapsed() >= timeoutMs) {
                 if (error != nullptr) {
-                    *error = QStringLiteral("网络读取超时或失败：%1").arg(socket->errorString());
+                    *error = QStringLiteral("网络读取长时间无进展或失败：%1").arg(socket->errorString());
                 }
                 return {};
             }
@@ -544,6 +560,9 @@ QByteArray FileReceiver::readExact(QSslSocket* socket, int size, int timeoutMs, 
             if (options->onTrafficChanged) {
                 options->onTrafficChanged();
             }
+            idleTimer.restart();
+        } else if (!chunk.isEmpty()) {
+            idleTimer.restart();
         }
         data.append(chunk);
     }

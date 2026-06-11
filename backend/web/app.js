@@ -470,7 +470,7 @@ async function rescanSelectedTask() {
     return;
   }
   try {
-    await restartTask(task.id);
+    await runTaskAction(task.id, "rescan");
     notify("已重新扫描并启动同步");
     setTimeout(loadTasks, 300);
   } catch (error) { notify(error.message); }

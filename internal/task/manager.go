@@ -10,9 +10,11 @@ import (
 	"time"
 
 	"github.com/202121000995/OneSync/internal/progress"
+	"github.com/202121000995/OneSync/internal/scanner"
 )
 
 var ErrTaskNotFound = errors.New("task not found")
+var ErrTaskAlreadyRunning = errors.New("task is already running")
 
 // Runner performs one task synchronization cycle.
 type Runner interface {
@@ -145,7 +147,7 @@ func (m *Manager) Start(ctx context.Context, taskID string) error {
 	}
 	if _, running := m.runtimes[taskID]; running {
 		m.mu.Unlock()
-		return fmt.Errorf("task %q is already running", taskID)
+		return fmt.Errorf("%w: %q", ErrTaskAlreadyRunning, taskID)
 	}
 	if task.DeviceDisabled {
 		m.mu.Unlock()
@@ -175,6 +177,57 @@ func (m *Manager) Start(ctx context.Context, taskID string) error {
 	m.mu.Unlock()
 
 	go m.run(runCtx, task, runtime)
+	return nil
+}
+
+// Rescan refreshes the task's local folder size without waiting for a sync cycle.
+func (m *Manager) Rescan(ctx context.Context, taskID string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	m.mu.RLock()
+	task, exists := m.tasks[taskID]
+	m.mu.RUnlock()
+	if !exists {
+		return ErrTaskNotFound
+	}
+
+	rootPath := task.SourcePath
+	if task.Role == RoleTarget {
+		rootPath = task.TargetPath
+	}
+	snapshot, err := scanner.New(scanner.Options{IgnoreRules: task.IgnoreRules}).Scan(ctx, rootPath)
+	if err != nil {
+		_ = m.addLog(taskID, "error", "重新扫描失败："+err.Error())
+		return err
+	}
+	files, bytes := snapshotFolderSize(snapshot)
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	task, exists = m.tasks[taskID]
+	if !exists {
+		return ErrTaskNotFound
+	}
+	previous := task
+	task.Size.LocalBytes = bytes
+	task.Size.LocalFiles = files
+	if task.Role == RoleSource {
+		task.Size.StandardBytes = bytes
+		task.Size.StandardFiles = files
+	}
+	task.Logs = appendLogEntry(task.Logs, LogEntry{
+		Time:    m.now().UTC(),
+		Level:   "info",
+		Message: fmt.Sprintf("重新扫描完成：%d 个文件，%s", files, humanBytes(bytes)),
+	})
+	task.UpdatedAt = m.now().UTC()
+	m.tasks[taskID] = task
+	if err := m.store.save(m.tasks); err != nil {
+		m.tasks[taskID] = previous
+		return err
+	}
 	return nil
 }
 
@@ -796,4 +849,33 @@ func interruptedRunHadProgress(task Task) bool {
 		return true
 	}
 	return task.Traffic.ReceivedBytes > 0 || task.Traffic.SentBytes > 0 || task.Size.LocalBytes > 0 || task.Size.StandardBytes > 0
+}
+
+func snapshotFolderSize(snapshot scanner.Snapshot) (uint64, uint64) {
+	files := uint64(len(snapshot.Files))
+	var bytes uint64
+	for _, entry := range snapshot.Files {
+		if entry.Size > 0 {
+			bytes += uint64(entry.Size)
+		}
+	}
+	return files, bytes
+}
+
+func humanBytes(bytes uint64) string {
+	const unit = 1024
+	if bytes < unit {
+		return fmt.Sprintf("%d B", bytes)
+	}
+	value := float64(bytes)
+	units := []string{"B", "KB", "MB", "GB", "TB", "PB"}
+	unitIndex := 0
+	for value >= unit && unitIndex < len(units)-1 {
+		value /= unit
+		unitIndex++
+	}
+	if value < 10 {
+		return fmt.Sprintf("%.2f %s", value, units[unitIndex])
+	}
+	return fmt.Sprintf("%.1f %s", value, units[unitIndex])
 }
