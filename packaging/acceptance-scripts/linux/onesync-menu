@@ -20,7 +20,7 @@ if [ "$client_installed" = true ]; then
   sudo onesyncctl start     启动客户端服务
   sudo onesyncctl stop      停止客户端服务
   sudo onesyncctl restart   重启客户端服务
-  sudo onesyncctl upgrade   更新客户端到 GitHub 最新版本
+  sudo onesyncctl upgrade   更新客户端到当前发布版本，默认不依赖 GitHub API
   sudo onesyncctl uninstall 卸载客户端服务，保留数据和日志
 EOF
 else
@@ -32,7 +32,7 @@ else
   curl -fsSL https://raw.githubusercontent.com/202121000995/OneSync/main/packaging/acceptance-scripts/linux/deploy-onesync.sh | sudo sh
 
   中国大陆服务器可用代理：
-  curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/202121000995/OneSync/main/packaging/acceptance-scripts/linux/deploy-onesync.sh | sudo env RELEASE_TAG=v1.05 GH_PROXY=https://gh-proxy.org/ sh
+  curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/202121000995/OneSync/main/packaging/acceptance-scripts/linux/deploy-onesync.sh | sudo env RELEASE_TAG=v1.06 GH_PROXY=https://gh-proxy.org/ sh
 EOF
 fi
 

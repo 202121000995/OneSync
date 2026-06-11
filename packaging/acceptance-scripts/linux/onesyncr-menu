@@ -19,13 +19,15 @@ if [ "$relay_installed" = true ]; then
   sudo onesync-relayctl logs      查看 Relay 最近日志
   sudo onesync-relayctl info      一次性输出创建同步需要填写的地址、令牌和证书
   sudo onesync-relayctl token     查看生成链接时填写的 Relay 令牌
+  sudo onesync-relayctl rotate-token
+                                轮换 Relay 令牌并重启 Relay，旧链接会失效
   sudo onesync-relayctl cert      查看生成链接时可粘贴的 Relay 证书文本
   sudo RELAY_HOSTS=你的域名或IP RELAY_PORT=7443 onesync-relayctl regen-cert
                                 重新生成匹配域名或 IP 的 Relay 证书
   sudo onesync-relayctl start     启动 Relay 服务
   sudo onesync-relayctl stop      停止 Relay 服务
   sudo onesync-relayctl restart   重启 Relay 服务
-  sudo onesync-relayctl upgrade   更新 Relay 到 GitHub 最新版本
+  sudo onesync-relayctl upgrade   更新 Relay 到当前发布版本，默认不依赖 GitHub API
   sudo onesync-relayctl uninstall 卸载 Relay 服务，保留证书和日志
 EOF
 else
@@ -34,7 +36,7 @@ else
   curl -fsSL https://raw.githubusercontent.com/202121000995/OneSync/main/packaging/acceptance-scripts/linux/deploy-relaytls.sh | sudo env RELAY_HOSTS=你的域名或IP RELAY_PORT=7443 RELAY_TOKEN=自定义令牌 sh
 
   中国大陆服务器可用代理：
-  curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/202121000995/OneSync/main/packaging/acceptance-scripts/linux/deploy-relaytls.sh | sudo env RELAY_HOSTS=你的域名或IP RELAY_PORT=7443 RELAY_TOKEN=自定义令牌 RELEASE_TAG=v1.05 GH_PROXY=https://gh-proxy.org/ sh
+  curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/202121000995/OneSync/main/packaging/acceptance-scripts/linux/deploy-relaytls.sh | sudo env RELAY_HOSTS=你的域名或IP RELAY_PORT=7443 RELAY_TOKEN=自定义令牌 RELEASE_TAG=v1.06 GH_PROXY=https://gh-proxy.org/ sh
 EOF
 fi
 

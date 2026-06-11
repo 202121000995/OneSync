@@ -4,6 +4,7 @@ set -eu
 REPO=${ONESYNC_REPO:-202121000995/OneSync}
 ACTION=${1:-install}
 GH_PROXY=${GH_PROXY:-}
+DEFAULT_RELEASE_TAG=${ONESYNC_DEFAULT_RELEASE_TAG:-v1.06}
 RELEASE_TAG=${ONESYNC_RELEASE_TAG:-${RELEASE_TAG:-}}
 PACKAGE_URL=${ONESYNC_LINUX_PACKAGE_URL:-${PACKAGE_URL:-}}
 
@@ -48,6 +49,7 @@ latest_linux_package_url() {
 		printf '%s\n' "$PACKAGE_URL"
 		return
 	fi
+	RELEASE_TAG=${RELEASE_TAG:-$DEFAULT_RELEASE_TAG}
 	if [ -n "$RELEASE_TAG" ]; then
 		case "$RELEASE_TAG" in
 			acceptance-*)
@@ -78,7 +80,7 @@ install_client() {
 	url=$(latest_linux_package_url)
 	if [ -z "$url" ]; then
 		printf 'Cannot find latest OneSync Linux package from GitHub repo %s.\n' "$REPO" >&2
-		printf 'If GitHub API is blocked by the proxy, retry with RELEASE_TAG=v1.05 or PACKAGE_URL=https://...tar.gz.\n' >&2
+		printf 'If GitHub API is blocked by the proxy, retry with RELEASE_TAG=v1.06 or PACKAGE_URL=https://...tar.gz.\n' >&2
 		exit 1
 	fi
 

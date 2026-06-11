@@ -41,6 +41,7 @@ private slots:
     void testSelectedConnection();
     void exportDiagnostics();
     void exportSelectedTaskDiagnostics();
+    void copySelectedTaskError();
     void showFromTray();
     void quitFromTray();
 
@@ -95,6 +96,7 @@ private:
     void setTaskStatus(const QString& taskID, const QString& status, const QString& detail = QString());
     bool parseTaskLink(SyncTask* task, QString* error);
     QString roleLabel(const SyncTask& task) const;
+    QString statusLabel(const SyncTask& task) const;
     bool isSourceTask(const SyncTask& task) const;
     bool runTaskDialog(SyncTask* task, bool editing);
     bool runSourceTaskDialog(SyncTask* task, bool editing);

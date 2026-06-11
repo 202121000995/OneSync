@@ -118,10 +118,13 @@ func NewBroker(config Config) (*Broker, error) {
 // Handle registers one TLS connection, waits for its peer, and relays bytes.
 func (b *Broker) Handle(ctx context.Context, connection net.Conn) error {
 	defer connection.Close()
+	remote := connection.RemoteAddr().String()
 	if !b.acquireConnection() {
+		b.logger.Warn("Relay connection rejected: connection limit reached", "remote", remote)
 		return errors.New("Relay connection limit reached")
 	}
 	defer b.releaseConnection()
+	b.logger.Info("Relay connection accepted", "remote", remote)
 
 	registrationContext, cancelRegistration := context.WithTimeout(ctx, b.waitTimeout)
 	stopDeadline := applyDeadline(registrationContext, connection)
@@ -130,17 +133,23 @@ func (b *Broker) Handle(ctx context.Context, connection net.Conn) error {
 	stopDeadline()
 	cancelRegistration()
 	if err != nil {
+		b.logger.Warn("Relay registration failed", "remote", remote, "error", err)
 		if registrationContextErr != nil {
 			return registrationContextErr
 		}
 		return err
 	}
+	sessionLabel := sessionDigest(registration.sessionID)
+	role := relayRoleLabel(registration.role)
 	if !b.authorize(registration) {
+		b.logger.Warn("Relay access token rejected", "remote", remote, "session", sessionLabel, "role", role)
 		return errors.New("Relay access token is invalid")
 	}
+	b.logger.Info("Relay registration accepted", "remote", remote, "session", sessionLabel, "role", role, "token_present", registration.accessTokenPresent)
 
 	outcome, err := b.pair(ctx, connection, registration)
 	if err != nil {
+		b.logger.Warn("Relay pairing failed", "remote", remote, "session", sessionLabel, "role", role, "error", err)
 		return err
 	}
 	if !outcome.owner {
@@ -171,6 +180,8 @@ func (b *Broker) authorize(registration registration) bool {
 }
 
 func (b *Broker) pair(ctx context.Context, connection net.Conn, registration registration) (pairOutcome, error) {
+	sessionLabel := sessionDigest(registration.sessionID)
+	role := relayRoleLabel(registration.role)
 	b.mu.Lock()
 	if waiting, exists := b.waiting[registration.sessionID]; exists {
 		if waiting.registration.role == registration.role {
@@ -188,6 +199,7 @@ func (b *Broker) pair(ctx context.Context, connection net.Conn, registration reg
 		delete(b.waiting, registration.sessionID)
 		b.active++
 		b.mu.Unlock()
+		b.logger.Info("Relay peer matched", "session", sessionLabel, "role", role)
 		waiting.ready <- pairResult{peer: connection}
 		close(waiting.ready)
 		return pairOutcome{owner: false, done: waiting.done}, nil
@@ -204,6 +216,7 @@ func (b *Broker) pair(ctx context.Context, connection net.Conn, registration reg
 	}
 	b.waiting[registration.sessionID] = waiting
 	b.mu.Unlock()
+	b.logger.Info("Relay peer waiting", "session", sessionLabel, "role", role, "timeout", b.waitTimeout.String())
 
 	timer := time.NewTimer(b.waitTimeout)
 	defer timer.Stop()
@@ -213,6 +226,7 @@ func (b *Broker) pair(ctx context.Context, connection net.Conn, registration reg
 		return pairOutcome{}, ctx.Err()
 	case <-timer.C:
 		b.removeWaiting(registration.sessionID, waiting)
+		b.logger.Warn("Relay pairing timed out", "session", sessionLabel, "role", role)
 		return pairOutcome{}, errors.New("Relay pairing timed out")
 	case result := <-waiting.ready:
 		return pairOutcome{peer: result.peer, owner: true, done: waiting.done}, result.err
@@ -303,4 +317,15 @@ func (b *Broker) forward(ctx context.Context, left, right net.Conn, sessionID st
 func sessionDigest(sessionID string) string {
 	sum := sha256.Sum256([]byte(sessionID))
 	return hex.EncodeToString(sum[:6])
+}
+
+func relayRoleLabel(role byte) string {
+	switch role {
+	case roleSource:
+		return "source"
+	case roleTarget:
+		return "target"
+	default:
+		return "unknown"
+	}
 }

@@ -2208,3 +2208,42 @@
 剩余风险：
 
 - 创建发送任务后会立刻进入等待目标端状态；如果用户只是想先保存任务不启动，后续需要再补“仅保存”选项。
+
+## v1.06 Win7 体验、Relay 诊断和 Linux 升级审核
+
+审核分支：`main`
+
+审核结论：通过。
+
+审核说明：
+
+- 根版本号从 `1.05` 提升到 `1.06`，主包、Win7 Qt 包、Linux 安装/升级示例统一使用 `v1.06`。
+- Win7 Qt 同步任务状态改为更贴近使用场景的文案：发送端显示等待目标端，接收端显示连接源端，停止状态不再一直显示运行等待。
+- Win7 Qt 新增“复制错误详情”，可直接复制选中任务的诊断信息和任务日志，方便测试时粘贴给开发排查。
+- Win7 Qt 参数页新增忽略规则默认模板和规则测试，可先验证某个文件或目录是否会被忽略。
+- Relay 服务端日志增加连接接入、登记、令牌认证、配对、等待和超时细节，便于定位目标端连不上、令牌不对、源端未等待等问题。
+- Relay 控制脚本新增 `rotate-token`，可轮换 Relay 令牌并重启服务；旧同步链接会失效，需要重新生成。
+- Linux 客户端和 Relay 的安装/升级脚本默认使用当前固定发布版本包，减少 GitHub API 被代理拦截导致升级失败的概率；仍保留 `RELEASE_TAG` 和 `PACKAGE_URL` 覆盖。
+
+验证结果：
+
+- `git diff --check` 通过。
+- Linux 客户端和 Relay 脚本 `sh -n` 全部通过。
+- `/Users/apple/Library/Go/sdk/go1.26.3/bin/go test ./...` 通过。
+- `sh clients/win7-qt/build-win7.sh` 成功，生成 `clients/win7-qt/dist/OneSyncWin7-win7-x86-v1.06.zip`。
+- `PATH=/Users/apple/Library/Go/sdk/go1.26.3/bin:$PATH sh packaging/package-acceptance.sh` 成功，生成主 Windows/Linux v1.06 包。
+- `unzip -t clients/win7-qt/dist/OneSyncWin7-win7-x86-v1.06.zip` 通过。
+- `strings clients/win7-qt/release-win7/OneSyncWin7.exe | rg "GetSystemTimePreciseAsFileTime|KERNEL32.dll"` 只匹配到 `KERNEL32.dll`，未匹配到 Win7 不支持的入口。
+- `unzip -t dist/acceptance-packages/onesync-windows-amd64-v1.06.zip` 通过。
+- `tar -tzf dist/acceptance-packages/onesync-linux-amd64-v1.06.tar.gz` 通过。
+
+本地包路径：
+
+- `/Users/apple/Documents/同步软件/clients/win7-qt/dist/OneSyncWin7-win7-x86-v1.06.zip`
+- `/Users/apple/Documents/同步软件/dist/acceptance-packages/onesync-windows-amd64-v1.06.zip`
+- `/Users/apple/Documents/同步软件/dist/acceptance-packages/onesync-linux-amd64-v1.06.tar.gz`
+
+剩余风险：
+
+- Relay 令牌轮换后，旧任务链接不会自动更新；需要在源端重新生成链接并让目标端重新加入。
+- Win7 Qt 的忽略规则测试是本地规则匹配测试，不等于真实同步链路验收；真实多设备场景仍需要继续实测。

@@ -13,6 +13,7 @@ KEY=${ONESYNC_RELAY_KEY:-$CONFIG_DIR/relay.key}
 TOKEN_FILE=${ONESYNC_RELAY_TOKEN_FILE:-$CONFIG_DIR/relay.token}
 ADDRESS_FILE=${ONESYNC_RELAY_ADDRESS_FILE:-$CONFIG_DIR/relay.address}
 REPO=${ONESYNC_REPO:-202121000995/OneSync}
+DEFAULT_RELEASE_TAG=${ONESYNC_DEFAULT_RELEASE_TAG:-v1.06}
 GH_PROXY=${GH_PROXY:-}
 RELEASE_TAG=${ONESYNC_RELEASE_TAG:-${RELEASE_TAG:-}}
 PACKAGE_URL=${ONESYNC_LINUX_PACKAGE_URL:-${PACKAGE_URL:-}}
@@ -74,6 +75,7 @@ latest_linux_package_url() {
 		printf '%s\n' "$PACKAGE_URL"
 		return
 	fi
+	RELEASE_TAG=${RELEASE_TAG:-$DEFAULT_RELEASE_TAG}
 	if [ -n "$RELEASE_TAG" ]; then
 		case "$RELEASE_TAG" in
 			acceptance-*)
@@ -191,6 +193,22 @@ print_info() {
 	printf '\n'
 }
 
+rotate_token() {
+	need_root
+	if [ -f "$TOKEN_FILE" ]; then
+		cp "$TOKEN_FILE" "$TOKEN_FILE.bak.$(date +%Y%m%d%H%M%S)"
+	fi
+	generate_token > "$TOKEN_FILE"
+	printf '\n' >> "$TOKEN_FILE"
+	chmod 0600 "$TOKEN_FILE"
+	printf 'Relay access token rotated.\n'
+	if systemctl is-active --quiet "$SERVICE"; then
+		systemctl restart "$SERVICE"
+		printf 'Relay service restarted.\n'
+	fi
+	print_info
+}
+
 regenerate_cert() {
 	need_root
 	if [ -z "${RELAY_HOSTS:-}" ]; then
@@ -275,7 +293,7 @@ EOF
 	printf 'OneSync Relay installed on %s.\n' "$LISTEN"
 	print_info
 	printf 'Menu command: onesyncr\n'
-	printf 'Use: onesync-relayctl start|stop|restart|status|logs|info|token|cert|regen-cert|upgrade|uninstall\n'
+	printf 'Use: onesync-relayctl start|stop|restart|status|logs|info|token|rotate-token|cert|regen-cert|upgrade|uninstall\n'
 }
 
 upgrade_service() {
@@ -290,7 +308,7 @@ upgrade_service() {
 	url=$(latest_linux_package_url)
 	if [ -z "$url" ]; then
 		printf 'Cannot find latest Linux package from GitHub repo %s.\n' "$REPO" >&2
-		printf 'Retry with RELEASE_TAG=v1.05 or PACKAGE_URL=https://...tar.gz.\n' >&2
+		printf 'Retry with RELEASE_TAG=v1.06 or PACKAGE_URL=https://...tar.gz.\n' >&2
 		exit 1
 	fi
 	curl -fL "$(proxy_url "$url")" -o "$tmp/onesync-linux.tar.gz"
@@ -358,6 +376,9 @@ case "${1:-status}" in
 	token)
 		print_token
 		;;
+	rotate-token)
+		rotate_token
+		;;
 	cert|certificate)
 		print_cert
 		;;
@@ -374,7 +395,7 @@ case "${1:-status}" in
 		uninstall_service
 		;;
 	*)
-		printf 'Usage: onesync-relayctl install|start|run|stop|restart|status|logs|info|token|cert|regen-cert|upgrade|uninstall\n' >&2
+		printf 'Usage: onesync-relayctl install|start|run|stop|restart|status|logs|info|token|rotate-token|cert|regen-cert|upgrade|uninstall\n' >&2
 		printf 'Install options: RELAY_HOSTS=domain-or-ip RELAY_PORT=7443 RELAY_TOKEN=secret ONESYNC_RELAY_CERT=/path/cert ONESYNC_RELAY_KEY=/path/key\n' >&2
 		exit 2
 		;;

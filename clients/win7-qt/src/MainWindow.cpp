@@ -1,6 +1,7 @@
 #include "MainWindow.h"
 
 #include "Endpoint.h"
+#include "IgnoreMatcher.h"
 #include "SnapshotScanner.h"
 #include "SourceConnector.h"
 #include "TargetConnector.h"
@@ -162,7 +163,7 @@ void applyModernDialogStyle(QDialog* dialog)
 }
 } // namespace
 
-const QString kWin7Version = QStringLiteral("1.05");
+const QString kWin7Version = QStringLiteral("1.06");
 
 MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent)
@@ -257,6 +258,7 @@ void MainWindow::buildUi()
     deleteButton = toolbarButton(QStringLiteral("删除"));
     auto* createButton = toolbarButton(QStringLiteral("+ 创建同步"), QStringLiteral("primaryButton"));
     auto* addButton = toolbarButton(QStringLiteral("加入同步"), QStringLiteral("secondaryButton"));
+    auto* copyErrorButton = toolbarButton(QStringLiteral("复制错误详情"));
     auto* selectedDiagnosticsButton = toolbarButton(QStringLiteral("导出选中任务"));
     auto* diagnosticsButton = toolbarButton(QStringLiteral("导出诊断"));
 
@@ -267,6 +269,7 @@ void MainWindow::buildUi()
     connect(parametersButton, &QPushButton::clicked, this, &MainWindow::editSelectedTask);
     connect(deleteButton, &QPushButton::clicked, this, &MainWindow::deleteSelectedTask);
     connect(addButton, &QPushButton::clicked, this, &MainWindow::addTask);
+    connect(copyErrorButton, &QPushButton::clicked, this, &MainWindow::copySelectedTaskError);
     connect(selectedDiagnosticsButton, &QPushButton::clicked, this, &MainWindow::exportSelectedTaskDiagnostics);
     connect(diagnosticsButton, &QPushButton::clicked, this, &MainWindow::exportDiagnostics);
 
@@ -278,6 +281,7 @@ void MainWindow::buildUi()
     toolbar->addStretch(1);
     toolbar->addWidget(createButton);
     toolbar->addWidget(addButton);
+    toolbar->addWidget(copyErrorButton);
     toolbar->addWidget(selectedDiagnosticsButton);
     toolbar->addWidget(diagnosticsButton);
     syncLayout->addLayout(toolbar);
@@ -1029,6 +1033,25 @@ void MainWindow::exportSelectedTaskDiagnostics()
     appendTaskLog(task->id, QStringLiteral("选中任务诊断日志已保存：%1").arg(fileName));
 }
 
+void MainWindow::copySelectedTaskError()
+{
+    const SyncTask* task = selectedTask();
+    if (task == nullptr) {
+        QMessageBox::information(this, QStringLiteral("未选择任务"), QStringLiteral("请先选中一个同步任务。"));
+        return;
+    }
+    QString text;
+    text += QStringLiteral("OneSync Win7 Qt 错误详情\n");
+    text += QStringLiteral("生成时间: %1\n\n").arg(QDateTime::currentDateTimeUtc().toString(Qt::ISODate));
+    text += taskDiagnosticsText(*task);
+    text += QStringLiteral("任务日志:\n");
+    text += taskLogs.value(task->id).join(QStringLiteral("\n"));
+    text += QStringLiteral("\n");
+    QApplication::clipboard()->setText(text);
+    appendTaskLog(task->id, QStringLiteral("已复制错误详情。"));
+    QMessageBox::information(this, QStringLiteral("已复制"), QStringLiteral("选中任务的错误详情和任务日志已复制。"));
+}
+
 void MainWindow::showFromTray()
 {
     showNormal();
@@ -1165,7 +1188,7 @@ void MainWindow::refreshTaskTable()
         const QStringList values = {
             roleLabel(task),
             task.name,
-            task.deviceDisabled ? QStringLiteral("已禁用") : task.status,
+            statusLabel(task),
             devices,
             task.localBytes > 0 ? formatBytes(task.localBytes) : QStringLiteral("-"),
             task.globalBytes > 0 ? formatBytes(task.globalBytes) : QStringLiteral("-"),
@@ -1297,7 +1320,7 @@ void MainWindow::refreshSecondaryPages()
                 roleLabel(task),
                 task.deviceAlias.isEmpty() ? QStringLiteral("-") : task.deviceAlias,
                 device,
-                task.deviceDisabled ? QStringLiteral("已禁用") : (task.running ? QStringLiteral("在线") : QStringLiteral("未连接")),
+                statusLabel(task),
                 task.targetFolder,
                 task.detail
             };
@@ -1325,7 +1348,7 @@ void MainWindow::refreshSecondaryPages()
                 connection,
                 task.linkReady ? task.link.endpoint : QStringLiteral("-"),
                 task.linkReady && task.link.hasRelay() ? task.link.relayEndpoint : QStringLiteral("-"),
-                task.deviceDisabled ? QStringLiteral("已禁用") : task.status,
+                statusLabel(task),
                 task.detail
             };
             for (int column = 0; column < values.size(); ++column) {
@@ -1451,6 +1474,38 @@ bool MainWindow::parseTaskLink(SyncTask* task, QString* error)
 QString MainWindow::roleLabel(const SyncTask& task) const
 {
     return task.role == SyncTask::Source ? QStringLiteral("发送") : QStringLiteral("接收");
+}
+
+QString MainWindow::statusLabel(const SyncTask& task) const
+{
+    if (task.deviceDisabled) {
+        return QStringLiteral("已禁用");
+    }
+    if (!task.running) {
+        if (task.status == QStringLiteral("运行-本轮完成")) {
+            return QStringLiteral("同步完成");
+        }
+        if (task.status == QStringLiteral("失败") || task.status == QStringLiteral("扫描失败") || task.status == QStringLiteral("链接无效")) {
+            return task.status;
+        }
+        if (task.status == QStringLiteral("停止中")) {
+            return QStringLiteral("停止中");
+        }
+        return QStringLiteral("停止");
+    }
+    if (task.status == QStringLiteral("运行-连接中")) {
+        return isSourceTask(task) ? QStringLiteral("运行-等待目标端") : QStringLiteral("运行-连接源端");
+    }
+    if (task.status == QStringLiteral("运行-已连接源端")) {
+        return QStringLiteral("运行-已连接源端");
+    }
+    if (task.status == QStringLiteral("运行-已连接目标端")) {
+        return QStringLiteral("运行-已连接目标端");
+    }
+    if (task.status.contains(QStringLiteral("计划")) || task.detail.contains(QStringLiteral("同步计划"))) {
+        return QStringLiteral("运行-同步中");
+    }
+    return task.status.isEmpty() ? QStringLiteral("运行中") : task.status;
 }
 
 bool MainWindow::isSourceTask(const SyncTask& task) const
@@ -1814,6 +1869,60 @@ void MainWindow::showTaskParameters(SyncTask* task)
     ignoreEdit->setAcceptRichText(false);
     ignoreEdit->setPlaceholderText(QStringLiteral("例如：\n*.tmp\n.cache/\nnode_modules/"));
     layout->addWidget(ignoreEdit, 1);
+
+    auto* templateRow = new QHBoxLayout();
+    auto* templateCombo = new QComboBox();
+    templateCombo->addItem(QStringLiteral("常见临时文件"), QStringLiteral("*.tmp\n*.temp\n*.bak\n~$*"));
+    templateCombo->addItem(QStringLiteral("开发目录"), QStringLiteral("node_modules/\ndist/\nbuild/\n.git/\n.cache/"));
+    templateCombo->addItem(QStringLiteral("系统隐藏文件"), QStringLiteral(".DS_Store\nThumbs.db\ndesktop.ini"));
+    auto* applyTemplateButton = new QPushButton(QStringLiteral("追加模板"));
+    templateRow->addWidget(new QLabel(QStringLiteral("默认模板")));
+    templateRow->addWidget(templateCombo, 1);
+    templateRow->addWidget(applyTemplateButton);
+    layout->addLayout(templateRow);
+    connect(applyTemplateButton, &QPushButton::clicked, &dialog, [templateCombo, ignoreEdit]() {
+        const QString addition = templateCombo->currentData().toString();
+        QString current = ignoreEdit->toPlainText().trimmed();
+        if (!current.isEmpty()) {
+            current += QStringLiteral("\n");
+        }
+        ignoreEdit->setPlainText(current + addition);
+    });
+
+    auto* testRow = new QHBoxLayout();
+    auto* samplePathEdit = new QLineEdit();
+    samplePathEdit->setPlaceholderText(QStringLiteral("测试路径，例如 cache/a.tmp 或 logs/debug.txt"));
+    auto* sampleDirectoryCombo = new QComboBox();
+    sampleDirectoryCombo->addItem(QStringLiteral("文件"), false);
+    sampleDirectoryCombo->addItem(QStringLiteral("目录"), true);
+    auto* testButton = new QPushButton(QStringLiteral("测试规则"));
+    testRow->addWidget(samplePathEdit, 1);
+    testRow->addWidget(sampleDirectoryCombo);
+    testRow->addWidget(testButton);
+    layout->addLayout(testRow);
+    auto* testResult = new QLabel(QStringLiteral("输入路径后可测试是否会被忽略。"));
+    testResult->setWordWrap(true);
+    layout->addWidget(testResult);
+    connect(testButton, &QPushButton::clicked, &dialog, [ignoreEdit, samplePathEdit, sampleDirectoryCombo, testResult]() {
+        QStringList rules;
+        const QStringList lines = ignoreEdit->toPlainText().split(QRegExp(QStringLiteral("[\r\n]+")), QString::SkipEmptyParts);
+        for (const QString& line : lines) {
+            const QString rule = line.trimmed();
+            if (!rule.isEmpty()) {
+                rules.append(rule);
+            }
+        }
+        const QString sample = samplePathEdit->text().trimmed();
+        if (sample.isEmpty()) {
+            testResult->setText(QStringLiteral("请先输入要测试的相对路径。"));
+            return;
+        }
+        IgnoreMatcher matcher(rules);
+        const bool directory = sampleDirectoryCombo->currentData().toBool();
+        testResult->setText(matcher.matches(sample, directory)
+            ? QStringLiteral("会被忽略：%1").arg(sample)
+            : QStringLiteral("不会被忽略：%1").arg(sample));
+    });
 
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
     buttons->button(QDialogButtonBox::Ok)->setText(QStringLiteral("保存"));
