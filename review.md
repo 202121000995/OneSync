@@ -2320,3 +2320,40 @@
 剩余风险：
 
 - 如果发送任务是在旧版本里创建且同步链接没有携带 Relay 自签证书，仍需要在“参数”里重新保存生成一次链接。
+
+## v1.09 Win7 Relay 自签证书指纹校验审核
+
+审核分支：`main`
+
+审核结论：通过。
+
+审核说明：
+
+- 根版本号从 `1.08` 提升到 `1.09`，主包、Win7 Qt 包、Linux 安装/升级示例统一使用 `v1.09`。
+- Win7 Qt 源端和目标端连接 Relay 时，如果同步链接携带 Relay 证书，不再依赖 Windows 证书库信任该自签证书。
+- 新逻辑会校验 Relay 实际返回证书的 SHA256 指纹是否等于同步链接内置证书；一致则允许 TLS 连接，不一致则拒绝。
+- Win7 Qt 的“测试连接”也使用同一套指纹校验，避免主流程和测试结果不一致。
+- 这样自建 Relay 的自签证书不需要用户手动导入系统证书，也不会因为系统不信任而失败。
+
+验证结果：
+
+- `git diff --check` 通过。
+- `sh -n clients/win7-qt/build-win7.sh` 通过。
+- `sh -n packaging/package-acceptance.sh` 通过。
+- `/Users/apple/Library/Go/sdk/go1.26.3/bin/go test ./...` 通过。
+- `sh clients/win7-qt/build-win7.sh` 成功，生成 `clients/win7-qt/dist/OneSyncWin7-win7-x86-v1.09.zip`。
+- `PATH=/Users/apple/Library/Go/sdk/go1.26.3/bin:$PATH sh packaging/package-acceptance.sh` 成功，生成主 Windows/Linux v1.09 包。
+- `unzip -t clients/win7-qt/dist/OneSyncWin7-win7-x86-v1.09.zip` 通过。
+- `strings clients/win7-qt/release-win7/OneSyncWin7.exe | rg "GetSystemTimePreciseAsFileTime|KERNEL32.dll"` 只匹配到 `KERNEL32.dll`。
+- `unzip -t dist/acceptance-packages/onesync-windows-amd64-v1.09.zip` 通过。
+- `tar -tzf dist/acceptance-packages/onesync-linux-amd64-v1.09.tar.gz` 通过。
+
+本地包路径：
+
+- `/Users/apple/Documents/同步软件/clients/win7-qt/dist/OneSyncWin7-win7-x86-v1.09.zip`
+- `/Users/apple/Documents/同步软件/dist/acceptance-packages/onesync-windows-amd64-v1.09.zip`
+- `/Users/apple/Documents/同步软件/dist/acceptance-packages/onesync-linux-amd64-v1.09.tar.gz`
+
+剩余风险：
+
+- 如果目标端仍提示“目标端同步认证失败”，优先确认目标端粘贴的是源端当前“查看链接”里显示的最新链接；认证失败通常是源端和目标端同步令牌不一致。

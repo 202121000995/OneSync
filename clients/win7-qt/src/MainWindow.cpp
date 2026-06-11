@@ -109,6 +109,25 @@ QString base64Url(const QByteArray& data)
     return QString::fromLatin1(data.toBase64(QByteArray::Base64UrlEncoding | QByteArray::OmitTrailingEquals));
 }
 
+QByteArray certificateFingerprint(const QSslCertificate& certificate)
+{
+    return certificate.digest(QCryptographicHash::Sha256).toHex();
+}
+
+bool certificateMatchesPinned(const QSslCertificate& certificate, const QList<QSslCertificate>& pinnedCertificates)
+{
+    if (certificate.isNull()) {
+        return false;
+    }
+    const QByteArray fingerprint = certificateFingerprint(certificate);
+    for (const QSslCertificate& pinned : pinnedCertificates) {
+        if (certificateFingerprint(pinned) == fingerprint) {
+            return true;
+        }
+    }
+    return false;
+}
+
 QPushButton* toolbarButton(const QString& text, const QString& objectName = QString())
 {
     auto* button = new QPushButton(text);
@@ -163,7 +182,7 @@ void applyModernDialogStyle(QDialog* dialog)
 }
 } // namespace
 
-const QString kWin7Version = QStringLiteral("1.08");
+const QString kWin7Version = QStringLiteral("1.09");
 
 MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent)
@@ -1640,8 +1659,10 @@ bool MainWindow::testTaskConnection(const SyncTask& task, QString* detail) const
     const QList<QSslCertificate> certificates = QSslCertificate::fromData(link.caCertificatePem.toUtf8(), QSsl::Pem);
     if (!certificates.isEmpty()) {
         socket.setCaCertificates(certificates);
+        socket.setPeerVerifyMode(QSslSocket::QueryPeer);
+    } else {
+        socket.setPeerVerifyMode(QSslSocket::VerifyPeer);
     }
-    socket.setPeerVerifyMode(QSslSocket::VerifyPeer);
     socket.setPeerVerifyName(endpoint.host);
     socket.connectToHostEncrypted(endpoint.host, endpoint.port);
     if (!socket.waitForEncrypted(8000)) {
@@ -1653,11 +1674,21 @@ bool MainWindow::testTaskConnection(const SyncTask& task, QString* detail) const
         }
         return false;
     }
+    if (!certificates.isEmpty() && !certificateMatchesPinned(socket.peerCertificate(), certificates)) {
+        if (detail != nullptr) {
+            *detail = QStringLiteral("连接测试失败：Relay 返回的证书和同步链接里的 Relay 证书不一致。地址：%1").arg(endpoint.display());
+        }
+        return false;
+    }
     socket.disconnectFromHost();
     if (detail != nullptr) {
-        *detail = QStringLiteral("连接测试通过：%1 握手成功。地址：%2")
-            .arg(link.hasRelay() ? QStringLiteral("Relay TLS") : QStringLiteral("直连 TLS"),
-                endpoint.display());
+        *detail = certificates.isEmpty()
+            ? QStringLiteral("连接测试通过：%1 握手成功。地址：%2")
+                .arg(link.hasRelay() ? QStringLiteral("Relay TLS") : QStringLiteral("直连 TLS"),
+                    endpoint.display())
+            : QStringLiteral("连接测试通过：%1 握手成功，证书指纹已匹配。地址：%2")
+                .arg(link.hasRelay() ? QStringLiteral("Relay TLS") : QStringLiteral("直连 TLS"),
+                    endpoint.display());
     }
     return true;
 }

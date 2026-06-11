@@ -4,6 +4,7 @@
 #include "PeerIdentity.h"
 #include "SnapshotScanner.h"
 
+#include <QCryptographicHash>
 #include <QElapsedTimer>
 #include <QFileInfo>
 #include <QJsonDocument>
@@ -25,6 +26,25 @@ QString shortPeerID(const QString& peerID)
         return peerID;
     }
     return peerID.left(8) + QStringLiteral("...");
+}
+
+QByteArray certificateFingerprint(const QSslCertificate& certificate)
+{
+    return certificate.digest(QCryptographicHash::Sha256).toHex();
+}
+
+bool certificateMatchesPinned(const QSslCertificate& certificate, const QList<QSslCertificate>& pinnedCertificates)
+{
+    if (certificate.isNull()) {
+        return false;
+    }
+    const QByteArray fingerprint = certificateFingerprint(certificate);
+    for (const QSslCertificate& pinned : pinnedCertificates) {
+        if (certificateFingerprint(pinned) == fingerprint) {
+            return true;
+        }
+    }
+    return false;
 }
 } // namespace
 
@@ -122,8 +142,10 @@ bool TargetConnector::connectTls(QSslSocket* socket, const Endpoint& endpoint, i
     const QList<QSslCertificate> certificates = QSslCertificate::fromData(link.caCertificatePem.toUtf8(), QSsl::Pem);
     if (!certificates.isEmpty()) {
         socket->setCaCertificates(certificates);
+        socket->setPeerVerifyMode(QSslSocket::QueryPeer);
+    } else {
+        socket->setPeerVerifyMode(QSslSocket::VerifyPeer);
     }
-    socket->setPeerVerifyMode(QSslSocket::VerifyPeer);
     socket->setPeerVerifyName(endpoint.host);
 
     emit logMessage(QStringLiteral("正在建立 TLS 连接：%1").arg(endpoint.display()));
@@ -139,6 +161,16 @@ bool TargetConnector::connectTls(QSslSocket* socket, const Endpoint& endpoint, i
             }
         }
         return false;
+    }
+    if (!certificates.isEmpty()) {
+        const QSslCertificate peerCertificate = socket->peerCertificate();
+        if (!certificateMatchesPinned(peerCertificate, certificates)) {
+            if (error != nullptr) {
+                *error = QStringLiteral("TLS 连接失败：Relay 返回的证书和同步链接里的 Relay 证书不一致。请让源端重新生成链接，或在 Relay 服务器执行 onesync-relayctl info 后核对证书。");
+            }
+            return false;
+        }
+        emit logMessage(QStringLiteral("Relay TLS 证书指纹已匹配。"));
     }
     return true;
 }
