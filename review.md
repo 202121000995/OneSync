@@ -2172,7 +2172,7 @@
 
 剩余风险：
 
-- 如果 Relay 证书本身域名错误，例如证书只包含 `zz.31pk.top`，但链接填写 `r.31pk.top`，目标端仍会因为主机名不匹配失败；需要先在 Relay 服务器执行 `regen-cert` 生成匹配地址的证书。
+- 如果 Relay 证书本身域名错误，例如证书只包含旧域名，但链接填写新域名，目标端仍会因为主机名不匹配失败；需要先在 Relay 服务器执行 `regen-cert` 生成匹配地址的证书。
 - 自动读取 Relay 证书需要源端能访问 Relay TLS 端口；如果源端网络无法连接 Relay，仍需要手动粘贴 `onesync-relayctl info` 输出的证书文本。
 
 ## v1.05 Win7 创建/加入后自动启动审核
@@ -2398,3 +2398,47 @@
 
 - Relay Web 面板尚未实现；当前先通过 `onesync-relayctl` 提供证书路径和令牌管理底座。
 - 宝塔 / 1Panel 证书续期后，如果证书文件路径不变，Relay 重启后会读取新证书；后续面板可补“检测并重载/重启”按钮。
+
+## v1.11 Relay 管理面板审核
+
+审核分支：`main`
+
+审核结论：通过。
+
+审核说明：
+
+- 根版本号从 `1.10` 提升到 `1.11`，主包、Win7 Qt 包、Linux 安装/升级示例统一使用 `v1.11`。
+- Relay 新增轻量管理面板，默认监听 `0.0.0.0:8766`，首次访问需要设置管理账号和密码。
+- Relay 面板可查看当前监听地址、令牌文件、证书路径、证书主题、签发者、有效期和 DNS/IP 名称。
+- Relay 面板支持轮换 Relay 访问令牌，令牌写入 `/etc/onesync/relay.token` 后，Relay 新连接会动态读取新令牌。
+- Relay 面板支持设置宝塔 / 1Panel / ACME 证书路径，保存前会校验证书和私钥是否匹配。
+- Relay TLS 服务改为通过动态证书提供器读取证书路径文件；宝塔 / 1Panel 续期后，只要路径不变，新 TLS 握手会读取更新后的证书。
+- `onesync-relayctl install` 写入 systemd 服务时新增 `-cert-path-file`、`-admin-listen`、`-admin-auth-file` 参数。
+- Linux Relay 一键脚本和 `onesyncr` 菜单会提示 Relay 管理面板地址。
+- README 和 quickstart 已补充 Relay 管理面板、宝塔 / 1Panel 证书路径、升级命令说明。
+
+验证结果：
+
+- `git diff --check` 通过。
+- `sh -n packaging/acceptance-scripts/linux/onesync-relayctl` 通过。
+- `sh -n packaging/acceptance-scripts/linux/deploy-relaytls.sh` 通过。
+- `sh -n packaging/acceptance-scripts/linux/onesyncr-menu` 通过。
+- `/Users/apple/Library/Go/sdk/go1.26.3/bin/go test ./...` 通过。
+- `sh clients/win7-qt/build-win7.sh` 成功，生成 `clients/win7-qt/dist/OneSyncWin7-win7-x86-v1.11.zip`。
+- `PATH=/Users/apple/Library/Go/sdk/go1.26.3/bin:$PATH sh packaging/package-acceptance.sh` 成功，生成主 Windows/Linux v1.11 包。
+- `unzip -t clients/win7-qt/dist/OneSyncWin7-win7-x86-v1.11.zip` 通过。
+- `strings clients/win7-qt/release-win7/OneSyncWin7.exe | rg "GetSystemTimePreciseAsFileTime|KERNEL32.dll"` 只匹配到 `KERNEL32.dll`。
+- `unzip -t dist/acceptance-packages/onesync-windows-amd64-v1.11.zip` 通过。
+- `tar -tzf dist/acceptance-packages/onesync-linux-amd64-v1.11.tar.gz` 通过。
+
+本地包路径：
+
+- `/Users/apple/Documents/同步软件/clients/win7-qt/dist/OneSyncWin7-win7-x86-v1.11.zip`
+- `/Users/apple/Documents/同步软件/dist/acceptance-packages/onesync-windows-amd64-v1.11.zip`
+- `/Users/apple/Documents/同步软件/dist/acceptance-packages/onesync-linux-amd64-v1.11.tar.gz`
+
+剩余风险：
+
+- Relay 面板目前是基础管理页，先覆盖账号登录、令牌、证书路径和状态查看；后续可以继续做更完整的连接列表、流量统计和审计日志。
+- 轮换 Relay 令牌后，旧同步链接里的令牌会失效，需要源端重新生成链接给目标端。
+- 如果服务器安全组或防火墙未开放 `8766`，外部访问不到 Relay 面板；也可以用宝塔 / Nginx 反代到 `127.0.0.1:8766`。

@@ -18,7 +18,7 @@ type Server struct {
 
 // Listen starts a TLS 1.3 Relay listener.
 func Listen(address string, tlsConfig *tls.Config, broker *Broker) (*Server, error) {
-	if tlsConfig == nil || len(tlsConfig.Certificates) == 0 {
+	if tlsConfig == nil || (len(tlsConfig.Certificates) == 0 && tlsConfig.GetCertificate == nil) {
 		return nil, errors.New("Relay TLS certificate is required")
 	}
 	if broker == nil {

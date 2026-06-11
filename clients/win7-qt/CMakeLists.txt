@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 
-project(OneSyncWin7Qt VERSION 1.10 LANGUAGES CXX)
+project(OneSyncWin7Qt VERSION 1.11 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

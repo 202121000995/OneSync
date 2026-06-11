@@ -41,13 +41,14 @@ type pairOutcome struct {
 
 // Config controls Relay resource limits.
 type Config struct {
-	WaitTimeout time.Duration
-	IdleTimeout time.Duration
-	MaxWaiting  int
-	MaxActive   int
-	MaxBytes    int64
-	AccessToken string
-	Logger      *slog.Logger
+	WaitTimeout         time.Duration
+	IdleTimeout         time.Duration
+	MaxWaiting          int
+	MaxActive           int
+	MaxBytes            int64
+	AccessToken         string
+	AccessTokenProvider func() string
+	Logger              *slog.Logger
 }
 
 // Broker pairs source and target connections and transparently forwards bytes.
@@ -64,6 +65,7 @@ type Broker struct {
 	maxBytes            int64
 	accessTokenHash     [sha256.Size]byte
 	accessTokenRequired bool
+	accessTokenProvider func() string
 	logger              *slog.Logger
 }
 
@@ -96,9 +98,9 @@ func NewBroker(config Config) (*Broker, error) {
 	if len(config.AccessToken) > maxAccessTokenLength {
 		return nil, errors.New("Relay access token is too large")
 	}
-	accessTokenRequired := config.AccessToken != ""
+	accessTokenRequired := config.AccessToken != "" || config.AccessTokenProvider != nil
 	accessTokenHash := [sha256.Size]byte{}
-	if accessTokenRequired {
+	if config.AccessToken != "" {
 		accessTokenHash = sha256.Sum256([]byte(config.AccessToken))
 	}
 	return &Broker{
@@ -111,6 +113,7 @@ func NewBroker(config Config) (*Broker, error) {
 		maxBytes:            config.MaxBytes,
 		accessTokenHash:     accessTokenHash,
 		accessTokenRequired: accessTokenRequired,
+		accessTokenProvider: config.AccessTokenProvider,
 		logger:              config.Logger,
 	}, nil
 }
@@ -175,6 +178,13 @@ func (b *Broker) Handle(ctx context.Context, connection net.Conn) error {
 func (b *Broker) authorize(registration registration) bool {
 	if !b.accessTokenRequired {
 		return true
+	}
+	if b.accessTokenProvider != nil {
+		token := b.accessTokenProvider()
+		if token == "" || len(token) > maxAccessTokenLength {
+			return false
+		}
+		return registration.accessTokenPresent && sameToken(sha256.Sum256([]byte(token)), registration.accessTokenHash)
 	}
 	return registration.accessTokenPresent && sameToken(b.accessTokenHash, registration.accessTokenHash)
 }
