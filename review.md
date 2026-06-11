@@ -2272,6 +2272,38 @@
 - `unzip -t clients/win7-qt/dist/OneSyncWin7-win7-x86-v1.07.zip` 通过。
 - `strings clients/win7-qt/release-win7/OneSyncWin7.exe | rg "GetSystemTimePreciseAsFileTime|KERNEL32.dll"` 只匹配到 `KERNEL32.dll`。
 
+## v1.24 Win7 设备与日志产品化审核
+
+审核分支：`main`
+
+审核结论：本地通过，暂未发布 GitHub Release。
+
+审核说明：
+
+- 根版本号从 `1.23` 提升到 `1.24`，主包、Win7 Qt 包、Linux 安装/升级示例统一使用 `v1.24`。
+- Win7 Qt 同步任务页的日志区域新增“复制日志”和“清空日志”，支持按当前筛选范围操作。
+- Win7 Qt 左侧“日志”页面新增“复制日志”和“清空日志”，便于测试时直接复制完整诊断内容。
+- Win7 Qt 设备管理新增“踢出/重置”操作：发送任务保留同步链接并清空设备状态，接收任务清除已保存的同步链接并要求重新加入。
+- Win7 Qt 设备管理文案明确当前按“一个任务对应一个接收端”管理，多台目标机需要创建多个任务；真正一源多目标仍需后续同步凭据和传输模型升级。
+- Win7 Qt 关于页能力说明补充设备管理，版本号修正为 `1.24`。
+- README 补充 Win7 日志复制/清空能力，以及当前多设备管理边界。
+
+验证结果：
+
+- `sh clients/win7-qt/build-win7.sh` 成功，生成 `clients/win7-qt/dist/OneSyncWin7-win7-x86-v1.24.zip`。
+- `PATH=/Users/apple/Library/Go/sdk/go1.26.3/bin:$PATH sh packaging/package-acceptance.sh` 成功，生成主 Windows/Linux v1.24 包。
+- `unzip -t clients/win7-qt/dist/OneSyncWin7-win7-x86-v1.24.zip` 通过。
+- `unzip -t dist/acceptance-packages/onesync-windows-amd64-v1.24.zip` 通过。
+- `tar -tzf dist/acceptance-packages/onesync-linux-amd64-v1.24.tar.gz` 通过。
+- `strings clients/win7-qt/dist/OneSyncWin7-win7-x86-v1.24/OneSyncWin7.exe | rg 'GetSystemTimePreciseAsFileTime|KERNEL32\.dll|1\.24'` 只匹配到 `KERNEL32.dll`。
+- `sh -n` 检查 Linux 一键脚本和控制脚本通过。
+- `git diff --check` 通过。
+- 仓库内未检出用户测试域名、测试 IP 或测试 token。
+
+剩余风险：
+
+- 本轮没有实现 Syncthing 式真正一源多目标同步内核；当前只是把 Win7 端的多任务设备管理体验做完整并明确边界。
+
 ## v1.21 流水线 ACK 提速审核
 
 审核分支：`main`

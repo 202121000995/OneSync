@@ -8,7 +8,7 @@ ZIG=${ZIG:-"$TOOLS_ROOT/zig-macos-aarch64-0.11.0/zig"}
 QT_WIN=${QT_WIN:-"$TOOLS_ROOT/Qt/5.12.12/mingw73_32"}
 QT_HOST=${QT_HOST:-/Users/apple/Qt5.12.12/5.12.12/clang_64}
 OPENSSL_WIN=${OPENSSL_WIN:-/Users/apple/Documents/建站和证书申请软件/qt/runtime/win32}
-VERSION=${ONESYNC_WIN7_VERSION:-1.23}
+VERSION=${ONESYNC_WIN7_VERSION:-1.24}
 WIN_TARGET=${WIN_TARGET:-x86-windows-gnu}
 
 BUILD="$ROOT/.build-win7"

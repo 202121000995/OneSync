@@ -182,7 +182,7 @@ void applyModernDialogStyle(QDialog* dialog)
 }
 } // namespace
 
-const QString kWin7Version = QStringLiteral("1.21");
+const QString kWin7Version = QStringLiteral("1.24");
 
 MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent)
@@ -362,7 +362,13 @@ void MainWindow::buildUi()
     logFilterCombo = new QComboBox();
     connect(logFilterCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &MainWindow::rebuildLogView);
     logFilterRow->addWidget(logFilterCombo);
+    auto* copyLogsButton = toolbarButton(QStringLiteral("复制日志"));
+    auto* clearLogsButton = toolbarButton(QStringLiteral("清空日志"));
+    connect(copyLogsButton, &QPushButton::clicked, this, &MainWindow::copyVisibleLogs);
+    connect(clearLogsButton, &QPushButton::clicked, this, &MainWindow::clearVisibleLogs);
     logTitleRow->addLayout(logFilterRow);
+    logTitleRow->addWidget(copyLogsButton);
+    logTitleRow->addWidget(clearLogsButton);
     logLayout->addLayout(logTitleRow);
     logEdit = new QPlainTextEdit();
     logEdit->setObjectName(QStringLiteral("logEdit"));
@@ -378,15 +384,18 @@ void MainWindow::buildUi()
     auto* deviceLayout = new QVBoxLayout(devicePage);
     deviceLayout->setContentsMargins(18, 16, 18, 18);
     auto* deviceToolbar = new QHBoxLayout();
-    auto* deviceHint = new QLabel(QStringLiteral("这里汇总每个同步任务已知的设备状态。当前可重命名设备、禁用/启用设备。"));
+    auto* deviceHint = new QLabel(QStringLiteral("这里汇总每个同步任务已知的设备状态。Win7 版当前按“一个任务对应一个接收端”管理；多台目标机请创建多个接收任务。"));
     deviceHint->setWordWrap(true);
     auto* renameDeviceButton = toolbarButton(QStringLiteral("重命名设备"));
     auto* disableDeviceButton = toolbarButton(QStringLiteral("禁用/启用设备"));
+    auto* kickDeviceButton = toolbarButton(QStringLiteral("踢出/重置"));
     connect(renameDeviceButton, &QPushButton::clicked, this, &MainWindow::renameSelectedDevice);
     connect(disableDeviceButton, &QPushButton::clicked, this, &MainWindow::toggleSelectedDeviceDisabled);
+    connect(kickDeviceButton, &QPushButton::clicked, this, &MainWindow::kickSelectedDevice);
     deviceToolbar->addWidget(deviceHint, 1);
     deviceToolbar->addWidget(renameDeviceButton);
     deviceToolbar->addWidget(disableDeviceButton);
+    deviceToolbar->addWidget(kickDeviceButton);
     deviceLayout->addLayout(deviceToolbar);
     deviceTable = new QTableWidget(0, 7, this);
     deviceTable->setObjectName(QStringLiteral("taskTable"));
@@ -454,10 +463,16 @@ void MainWindow::buildUi()
     auto* logsToolbar = new QHBoxLayout();
     auto* logsHint = new QLabel(QStringLiteral("完整运行日志"));
     logsHint->setObjectName(QStringLiteral("cardTitle"));
+    auto* copyPageLogsButton = toolbarButton(QStringLiteral("复制日志"));
+    auto* clearPageLogsButton = toolbarButton(QStringLiteral("清空日志"));
     auto* exportLogsButton = toolbarButton(QStringLiteral("导出诊断"));
+    connect(copyPageLogsButton, &QPushButton::clicked, this, &MainWindow::copyVisibleLogs);
+    connect(clearPageLogsButton, &QPushButton::clicked, this, &MainWindow::clearVisibleLogs);
     connect(exportLogsButton, &QPushButton::clicked, this, &MainWindow::exportDiagnostics);
     logsToolbar->addWidget(logsHint);
     logsToolbar->addStretch(1);
+    logsToolbar->addWidget(copyPageLogsButton);
+    logsToolbar->addWidget(clearPageLogsButton);
     logsToolbar->addWidget(exportLogsButton);
     logsLayout->addLayout(logsToolbar);
     pageLogEdit = new QPlainTextEdit();
@@ -476,7 +491,7 @@ void MainWindow::buildUi()
     auto* aboutText = new QLabel(QStringLiteral(
         "版本：%1\n"
         "定位：Windows 7 兼容客户端\n"
-        "能力：创建同步、加入同步、Relay TLS、任务日志、诊断导出、托盘运行\n"
+        "能力：创建同步、加入同步、Relay TLS、设备管理、任务日志、诊断导出、托盘运行\n"
         "说明：Win7 源端当前优先使用 Relay；直连监听会在后续版本继续完善。").arg(kWin7Version));
     aboutText->setWordWrap(true);
     aboutLayout->addWidget(aboutTitle);
@@ -1005,6 +1020,46 @@ void MainWindow::toggleSelectedDeviceDisabled()
     appendTaskLog(task->id, task->deviceDisabled ? QStringLiteral("设备已禁用。") : QStringLiteral("设备已启用。"));
 }
 
+void MainWindow::kickSelectedDevice()
+{
+    SyncTask* task = selectedTask();
+    if (task == nullptr) {
+        QMessageBox::information(this, QStringLiteral("未选择任务"), QStringLiteral("请先在设备管理中选择一个任务。"));
+        return;
+    }
+    if (task->running) {
+        QMessageBox::information(this, QStringLiteral("任务正在运行"), QStringLiteral("请先暂停任务，再踢出或重置设备。"));
+        return;
+    }
+    const bool source = isSourceTask(*task);
+    const QString prompt = source
+        ? QStringLiteral("将清除这个发送任务当前记录的设备状态。同步链接会保留，目标端需要重新加入或重新启动。")
+        : QStringLiteral("将清除这个接收任务保存的同步链接和设备状态。之后需要重新粘贴源端链接加入。");
+    if (QMessageBox::question(this, QStringLiteral("踢出/重置设备"), prompt) != QMessageBox::Yes) {
+        return;
+    }
+
+    task->connectedDevices = 0;
+    task->deviceAlias.clear();
+    task->deviceDisabled = false;
+    task->status = QStringLiteral("停止");
+    if (source) {
+        task->detail = QStringLiteral("已重置设备状态，等待目标端重新加入。");
+    } else {
+        task->linkText.clear();
+        task->link = SyncLink();
+        task->linkReady = false;
+        task->detail = QStringLiteral("已清除同步链接，请重新加入。");
+    }
+
+    saveTasks();
+    refreshLogFilter();
+    refreshTaskTable();
+    appendTaskLog(task->id, source
+        ? QStringLiteral("已重置设备状态，同步链接已保留。")
+        : QStringLiteral("已踢出设备并清除接收端同步链接。"));
+}
+
 void MainWindow::testSelectedConnection()
 {
     SyncTask* task = selectedTask();
@@ -1095,6 +1150,68 @@ void MainWindow::copySelectedTaskError()
     QApplication::clipboard()->setText(text);
     appendTaskLog(task->id, QStringLiteral("已复制错误详情。"));
     QMessageBox::information(this, QStringLiteral("已复制"), QStringLiteral("选中任务的错误详情和任务日志已复制。"));
+}
+
+void MainWindow::copyVisibleLogs()
+{
+    QString text;
+    if (pages != nullptr && pages->currentIndex() == 3) {
+        text = globalLogs.join(QStringLiteral("\n"));
+    } else if (logEdit != nullptr) {
+        text = logEdit->toPlainText();
+    }
+    if (text.trimmed().isEmpty()) {
+        QMessageBox::information(this, QStringLiteral("暂无日志"), QStringLiteral("当前范围没有可复制的日志。"));
+        return;
+    }
+    QApplication::clipboard()->setText(text);
+    QMessageBox::information(this, QStringLiteral("已复制"), QStringLiteral("当前显示的日志已复制。"));
+}
+
+void MainWindow::clearVisibleLogs()
+{
+    if (pages != nullptr && pages->currentIndex() == 3) {
+        if (QMessageBox::question(this, QStringLiteral("清空日志"), QStringLiteral("确定清空全部运行日志吗？")) != QMessageBox::Yes) {
+            return;
+        }
+        globalLogs.clear();
+        taskLogs.clear();
+        rebuildLogView();
+        return;
+    }
+
+    if (logFilterCombo == nullptr) {
+        return;
+    }
+    const QString filter = logFilterCombo->currentData().toString();
+    if (filter == QStringLiteral("__all__")) {
+        if (QMessageBox::question(this, QStringLiteral("清空日志"), QStringLiteral("确定清空全部运行日志吗？")) != QMessageBox::Yes) {
+            return;
+        }
+        globalLogs.clear();
+        taskLogs.clear();
+    } else {
+        QString taskID = filter;
+        if (filter == QStringLiteral("__selected__")) {
+            const SyncTask* task = selectedTask();
+            if (task == nullptr) {
+                QMessageBox::information(this, QStringLiteral("未选择任务"), QStringLiteral("请先选中一个同步任务。"));
+                return;
+            }
+            taskID = task->id;
+        }
+        const SyncTask* task = taskByID(taskID);
+        const QString taskName = task != nullptr ? task->name : taskID;
+        if (QMessageBox::question(this, QStringLiteral("清空日志"), QStringLiteral("确定清空“%1”的任务日志吗？").arg(taskName)) != QMessageBox::Yes) {
+            return;
+        }
+        const QStringList lines = taskLogs.value(taskID);
+        for (const QString& line : lines) {
+            globalLogs.removeAll(line);
+        }
+        taskLogs.remove(taskID);
+    }
+    rebuildLogView();
 }
 
 void MainWindow::showFromTray()

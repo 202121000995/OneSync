@@ -43,6 +43,9 @@ private slots:
     void exportDiagnostics();
     void exportSelectedTaskDiagnostics();
     void copySelectedTaskError();
+    void copyVisibleLogs();
+    void clearVisibleLogs();
+    void kickSelectedDevice();
     void showFromTray();
     void quitFromTray();
 
