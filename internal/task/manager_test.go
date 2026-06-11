@@ -336,6 +336,38 @@ func TestManagerRecoversInterruptedTaskAsFailed(t *testing.T) {
 	}
 }
 
+func TestManagerRecoversInterruptedTaskWithProgressAsStopped(t *testing.T) {
+	storePath := filepath.Join(t.TempDir(), "tasks.json")
+	taskStore, err := newStore(storePath)
+	if err != nil {
+		t.Fatalf("newStore() error = %v", err)
+	}
+	now := time.Now().UTC()
+	if err := taskStore.save(map[string]Task{
+		"task": {
+			ID: "task", Role: RoleTarget, TargetPath: t.TempDir(),
+			State: StateSyncing, CreatedAt: now, UpdatedAt: now,
+			Progress: &progress.Snapshot{TotalFiles: 2, CompletedFiles: 2},
+			Traffic:  TrafficStats{ReceivedBytes: 89 * 1024 * 1024},
+			Devices:  DeviceStats{Connected: 1, Total: 1, LastSeen: now},
+		},
+	}); err != nil {
+		t.Fatalf("save() error = %v", err)
+	}
+
+	manager := newTestManager(t, storePath, &fakeFactory{})
+	task, err := manager.Get(context.Background(), "task")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if task.State != StateStopped || task.LastError != "" {
+		t.Fatalf("recovered task = %+v, want stopped without error", task)
+	}
+	if task.Devices.Connected != 0 || len(task.Logs) == 0 {
+		t.Fatalf("recovered task device/logs = %+v / %+v", task.Devices, task.Logs)
+	}
+}
+
 func TestManagerConcurrentReads(t *testing.T) {
 	manager := newTestManager(t, filepath.Join(t.TempDir(), "tasks.json"), &fakeFactory{})
 	for index := 0; index < 20; index++ {

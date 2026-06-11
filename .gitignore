@@ -3,6 +3,7 @@
 /dist/
 *.test
 *.out
+/.cache/
 
 # Win7 Qt local build output
 /clients/win7-qt/.build-win7/

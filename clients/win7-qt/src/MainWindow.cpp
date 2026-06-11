@@ -182,7 +182,7 @@ void applyModernDialogStyle(QDialog* dialog)
 }
 } // namespace
 
-const QString kWin7Version = QStringLiteral("1.24");
+const QString kWin7Version = QStringLiteral("1.25");
 
 MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent)

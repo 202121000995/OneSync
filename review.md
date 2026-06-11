@@ -2304,6 +2304,45 @@
 
 - 本轮没有实现 Syncthing 式真正一源多目标同步内核；当前只是把 Win7 端的多任务设备管理体验做完整并明确边界。
 
+## v1.25 Linux 升级后任务恢复审核
+
+审核分支：`main`
+
+审核结论：本地通过，暂未发布 GitHub Release。
+
+现场现象：
+
+- Relay 日志显示同一会话曾正常完成 source/target 配对，随后 Relay 会话关闭。
+- Linux 接收端日志显示已经通过 Relay 连接成功并累计接收约 89 MB，但管理页状态显示 `previous run was interrupted`。
+- 后续 Relay 日志只有源端进入等待，目标端没有继续注册，说明接收端任务在服务升级或重启后被恢复为失败状态，没有继续常驻重连。
+
+修复说明：
+
+- `recoverInterrupted` 不再把所有 `connecting/syncing` 旧状态一律恢复为失败。
+- 如果旧任务已有设备连接记录、同步进度、流量或目录大小，说明它已经实际进入过同步流程；服务升级或重启后恢复为 `stopped`，清空当前连接数，并写入 warning 日志，用户可直接重新启动。
+- 没有任何进度的旧连接/同步状态仍恢复为失败，并保留 `previous run was interrupted`，用于提示真正异常中断。
+- 新增单元测试覆盖“无进度中断仍失败”和“有进度中断恢复为停止可重启”两个分支。
+- `.gitignore` 新增 `/.cache/`，避免本地 Go 测试缓存进入状态列表。
+- 根版本号从 `1.24` 提升到 `1.25`，主包、Win7 Qt 包、Linux 安装/升级示例统一使用 `v1.25`。
+
+验证结果：
+
+- `GOCACHE=/Users/apple/Documents/同步软件/.cache/go-build go test ./internal/task` 通过。
+- `GOCACHE=/Users/apple/Documents/同步软件/.cache/go-build go test ./...` 非沙盒运行通过；沙盒内因本地端口监听权限失败，非代码问题。
+- `sh clients/win7-qt/build-win7.sh` 成功，生成 `clients/win7-qt/dist/OneSyncWin7-win7-x86-v1.25.zip`。
+- `PATH=/Users/apple/Library/Go/sdk/go1.26.3/bin:$PATH sh packaging/package-acceptance.sh` 成功，生成主 Windows/Linux v1.25 包。
+- `unzip -t clients/win7-qt/dist/OneSyncWin7-win7-x86-v1.25.zip` 通过。
+- `unzip -t dist/acceptance-packages/onesync-windows-amd64-v1.25.zip` 通过。
+- `tar -tzf dist/acceptance-packages/onesync-linux-amd64-v1.25.tar.gz` 通过。
+- `strings clients/win7-qt/dist/OneSyncWin7-win7-x86-v1.25/OneSyncWin7.exe | rg 'GetSystemTimePreciseAsFileTime|KERNEL32\.dll|1\.25'` 只匹配到 `KERNEL32.dll`。
+- `sh -n` 检查 Linux 一键脚本和控制脚本通过。
+- `git diff --check` 通过。
+- 仓库内未检出用户测试域名、测试 IP 或测试 token。
+
+剩余风险：
+
+- 这个修复解决的是“升级/重启后旧运行态被误恢复为失败”的问题；如果源端和目标端使用不同 session/token 的同步链接，仍然需要重新从源端复制最新链接加入。
+
 ## v1.21 流水线 ACK 提速审核
 
 审核分支：`main`

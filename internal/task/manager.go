@@ -767,8 +767,16 @@ func (m *Manager) recoverInterrupted() error {
 	now := m.now().UTC()
 	for id, task := range m.tasks {
 		if task.State == StateConnecting || task.State == StateSyncing {
-			task.State = StateFailed
-			task.LastError = "previous run was interrupted"
+			if interruptedRunHadProgress(task) {
+				task.State = StateStopped
+				task.LastError = ""
+				task.Devices.Connected = 0
+				task.Logs = appendLogEntry(task.Logs, LogEntry{Time: now, Level: "warning", Message: "上次运行在服务升级或重启时中断，任务已恢复为可重新启动。"})
+			} else {
+				task.State = StateFailed
+				task.LastError = "previous run was interrupted"
+				task.Logs = appendLogEntry(task.Logs, LogEntry{Time: now, Level: "error", Message: task.LastError})
+			}
 			task.UpdatedAt = now
 			m.tasks[id] = task
 			changed = true
@@ -778,4 +786,14 @@ func (m *Manager) recoverInterrupted() error {
 		return m.store.save(m.tasks)
 	}
 	return nil
+}
+
+func interruptedRunHadProgress(task Task) bool {
+	if task.Devices.Connected > 0 || !task.Devices.LastSeen.IsZero() {
+		return true
+	}
+	if task.Progress != nil && (task.Progress.TotalFiles > 0 || task.Progress.CompletedFiles > 0) {
+		return true
+	}
+	return task.Traffic.ReceivedBytes > 0 || task.Traffic.SentBytes > 0 || task.Size.LocalBytes > 0 || task.Size.StandardBytes > 0
 }
