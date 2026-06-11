@@ -43,6 +43,30 @@ func TestAdminManagedCertPathsUseConfigDirectory(t *testing.T) {
 	}
 }
 
+func TestPortHelpers(t *testing.T) {
+	tests := map[string]string{
+		":17443":          "17443",
+		"0.0.0.0:8766":    "8766",
+		"127.0.0.1:18766": "18766",
+		"8766":            "8766",
+	}
+	for listen, want := range tests {
+		if got := portFromListen(listen); got != want {
+			t.Fatalf("portFromListen(%q) = %q, want %q", listen, got, want)
+		}
+	}
+	for _, value := range []string{"1", "443", "65535"} {
+		if err := validatePort(value); err != nil {
+			t.Fatalf("validatePort(%q) error = %v", value, err)
+		}
+	}
+	for _, value := range []string{"", "0", "65536", "abc"} {
+		if err := validatePort(value); err == nil {
+			t.Fatalf("validatePort(%q) accepted invalid port", value)
+		}
+	}
+}
+
 func testRelayCertificatePair(t *testing.T, host string) (string, string) {
 	t.Helper()
 	dir := t.TempDir()

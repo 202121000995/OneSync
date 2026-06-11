@@ -27,11 +27,13 @@ if [ "$relay_installed" = true ]; then
   sudo onesync-relayctl cert-info 检查当前证书路径、有效期和私钥是否匹配
   sudo onesync-relayctl set-cert /path/fullchain.pem /path/privkey.pem
                                 使用宝塔/1Panel/已有证书路径并重启 Relay
+  sudo onesync-relayctl set-ports 17443 8766
+                                修改 Relay 端口和管理面板端口并重启
   sudo RELAY_HOSTS=你的域名或IP RELAY_PORT=7443 onesync-relayctl regen-cert
                                 重新生成匹配域名或 IP 的 Relay 证书
   sudo onesync-relayctl start     启动 Relay 服务
   sudo onesync-relayctl stop      停止 Relay 服务
-  sudo onesync-relayctl restart   重启 Relay 服务
+  sudo onesync-relayctl restart   重启 Relay 和管理面板
   sudo onesync-relayctl upgrade   更新 Relay 到当前发布版本，默认不依赖 GitHub API
   sudo onesync-relayctl uninstall 卸载 Relay 服务，保留证书和日志
 EOF
@@ -41,7 +43,7 @@ else
   curl -fsSL https://raw.githubusercontent.com/202121000995/OneSync/main/packaging/acceptance-scripts/linux/deploy-relaytls.sh | sudo env RELAY_HOSTS=你的域名或IP RELAY_PORT=7443 RELAY_TOKEN=自定义令牌 sh
 
   中国大陆服务器可用代理：
-  curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/202121000995/OneSync/main/packaging/acceptance-scripts/linux/deploy-relaytls.sh | sudo env RELAY_HOSTS=你的域名或IP RELAY_PORT=7443 RELAY_TOKEN=自定义令牌 RELEASE_TAG=v1.14 GH_PROXY=https://gh-proxy.org/ sh
+  curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/202121000995/OneSync/main/packaging/acceptance-scripts/linux/deploy-relaytls.sh | sudo env RELAY_HOSTS=你的域名或IP RELAY_PORT=7443 RELAY_TOKEN=自定义令牌 RELEASE_TAG=v1.15 GH_PROXY=https://gh-proxy.org/ sh
 EOF
 fi
 

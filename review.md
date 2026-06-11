@@ -2552,3 +2552,39 @@
 - 面板重启 Relay 依赖 systemd，非 systemd 环境会失败；正式 Linux 一键安装是 systemd 服务模式。
 - 当前连接列表展示的是 Relay 会话级别，不等同于 OneSync 客户端设备名；设备友好名称需要客户端协议继续上报。
 - 流量统计是 Relay 层转发字节，不等同于最终文件有效数据量。
+
+## v1.15 Relay 面板配置审核
+
+审核分支：`main`
+
+审核结论：本地通过，尚未上传 GitHub Release。
+
+审核说明：
+
+- 根版本号从 `1.14` 提升到 `1.15`，主包、Win7 Qt 包、Linux 安装/升级示例统一使用 `v1.15`。
+- Relay 主程序在未显式传入 `-access-keys-file` 时，会根据 `-cert-path-file` 或 `-access-token-file` 自动使用同目录下的 `relay.keys.json`，兼容旧服务升级后的多客户令牌面板。
+- Relay 面板新增端口设置，可修改 Relay TLS 端口和管理面板端口，保存后通过 `onesync-relayctl set-ports` 重写 systemd 并重启服务。
+- Relay 面板新增管理密码修改，需验证当前账号密码，成功后清空当前登录会话。
+- Relay 面板的服务操作文案改为“重启 Relay/面板”，明确二者在同一个 systemd 服务内。
+- `onesync-relayctl` 新增 `set-ports RELAY_PORT PANEL_PORT`，并在 README、quickstart、onesyncr 菜单和部署脚本输出中补充说明。
+
+验证结果：
+
+- `go test ./...` 通过。
+- `go test ./cmd/relay ./internal/webauth` 通过。
+- `sh -n` 检查 Linux 一键脚本和菜单脚本通过。
+- `git diff --check` 通过。
+- 本地临时 Relay 面板验证通过：不传 `-access-keys-file` 时，面板显示自动补出的 `relay.keys.json`，并能成功创建客户 Relay 令牌。
+- 本地临时 Relay 面板验证通过：管理密码修改后会退出登录。
+- `sh clients/win7-qt/build-win7.sh` 成功，生成 `clients/win7-qt/dist/OneSyncWin7-win7-x86-v1.15.zip`。
+- `PATH=/Users/apple/Library/Go/sdk/go1.26.3/bin:$PATH sh packaging/package-acceptance.sh` 成功，生成主 Windows/Linux v1.15 包。
+- `unzip -t clients/win7-qt/dist/OneSyncWin7-win7-x86-v1.15.zip` 通过。
+- `unzip -t dist/acceptance-packages/onesync-windows-amd64-v1.15.zip` 通过。
+- `tar -tzf dist/acceptance-packages/onesync-linux-amd64-v1.15.tar.gz` 通过。
+- 从 Linux 包内读取 `onesync-relayctl`，确认包含 `DEFAULT_RELEASE_TAG=v1.15`、`-access-keys-file` 和 `set-ports`。
+
+关于用户现场看到的 `:443` 报错：
+
+- 这类日志一般来自旧服务配置或历史启动失败记录，当时 systemd 里 Relay 监听端口仍是 `:443`，而服务器 443 已被 nginx、宝塔、1Panel 或其他服务占用。
+- v1.15 面板会显示当前 Relay 监听和面板监听；日志区域提示日志可能包含历史端口报错。
+- 升级到 v1.15 后，可在面板里改端口，或执行 `sudo onesync-relayctl set-ports 17443 8766` 重写服务配置并重启。

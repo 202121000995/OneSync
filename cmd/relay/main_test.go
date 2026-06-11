@@ -52,3 +52,36 @@ func TestLoadAccessTokenFromFile(t *testing.T) {
 		t.Fatal("loadAccessToken() accepted both value and file")
 	}
 }
+
+func TestDefaultAccessKeysFile(t *testing.T) {
+	tests := []struct {
+		name                string
+		certificatePathFile string
+		accessTokenFile     string
+		want                string
+	}{
+		{
+			name:                "uses cert path directory first",
+			certificatePathFile: filepath.Join("etc", "onesync", "relay.cert-paths"),
+			accessTokenFile:     filepath.Join("other", "relay.token"),
+			want:                filepath.Join("etc", "onesync", "relay.keys.json"),
+		},
+		{
+			name:            "falls back to token directory",
+			accessTokenFile: filepath.Join("etc", "onesync", "relay.token"),
+			want:            filepath.Join("etc", "onesync", "relay.keys.json"),
+		},
+		{
+			name: "empty when no persistent paths",
+			want: "",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got := defaultAccessKeysFile(test.certificatePathFile, test.accessTokenFile)
+			if got != test.want {
+				t.Fatalf("defaultAccessKeysFile() = %q, want %q", got, test.want)
+			}
+		})
+	}
+}

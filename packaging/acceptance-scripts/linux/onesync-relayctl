@@ -23,7 +23,7 @@ CERT_PATH_FILE=${ONESYNC_RELAY_CERT_PATH_FILE:-$CONFIG_DIR/relay.cert-paths}
 ADMIN_LISTEN=${ONESYNC_RELAY_ADMIN_LISTEN:-0.0.0.0:${ONESYNC_RELAY_ADMIN_PORT:-8766}}
 ADMIN_AUTH_FILE=${ONESYNC_RELAY_ADMIN_AUTH_FILE:-$CONFIG_DIR/relay-admin-auth.json}
 REPO=${ONESYNC_REPO:-202121000995/OneSync}
-DEFAULT_RELEASE_TAG=${ONESYNC_DEFAULT_RELEASE_TAG:-v1.14}
+DEFAULT_RELEASE_TAG=${ONESYNC_DEFAULT_RELEASE_TAG:-v1.15}
 GH_PROXY=${GH_PROXY:-}
 RELEASE_TAG=${ONESYNC_RELEASE_TAG:-${RELEASE_TAG:-}}
 PACKAGE_URL=${ONESYNC_LINUX_PACKAGE_URL:-${PACKAGE_URL:-}}
@@ -167,6 +167,39 @@ first_host() {
 
 listen_port() {
 	printf '%s' "$LISTEN" | sed 's/.*://'
+}
+
+admin_port() {
+	printf '%s' "$ADMIN_LISTEN" | sed 's/.*://'
+}
+
+validate_port() {
+	name=$1
+	value=$2
+	case "$value" in
+		''|*[!0-9]*)
+			printf '%s must be a number between 1 and 65535.\n' "$name" >&2
+			exit 2
+			;;
+	esac
+	if [ "$value" -lt 1 ] || [ "$value" -gt 65535 ]; then
+		printf '%s must be between 1 and 65535.\n' "$name" >&2
+		exit 2
+	fi
+}
+
+listen_with_port() {
+	listen=$1
+	port=$2
+	case "$listen" in
+		*:*)
+			host=${listen%:*}
+			printf '%s:%s' "$host" "$port"
+			;;
+		*)
+			printf ':%s' "$port"
+			;;
+	esac
 }
 
 save_cert_paths() {
@@ -357,6 +390,32 @@ set_cert_paths() {
 	print_info
 }
 
+set_ports() {
+	need_root
+	if [ $# -lt 2 ]; then
+		printf 'Usage: sudo onesync-relayctl set-ports RELAY_PORT PANEL_PORT\n' >&2
+		printf 'Example: sudo onesync-relayctl set-ports 17443 8766\n' >&2
+		exit 2
+	fi
+	relay_port=$1
+	panel_port=$2
+	validate_port "RELAY_PORT" "$relay_port"
+	validate_port "PANEL_PORT" "$panel_port"
+	preserve_current_service_options
+	LISTEN=$(listen_with_port "$LISTEN" "$relay_port")
+	ADMIN_LISTEN=$(listen_with_port "$ADMIN_LISTEN" "$panel_port")
+	save_cert_paths
+	write_service_unit
+	systemctl daemon-reload
+	printf 'Relay port saved: %s\n' "$LISTEN"
+	printf 'Relay admin panel port saved: %s\n' "$ADMIN_LISTEN"
+	if systemctl is-active --quiet "$SERVICE"; then
+		systemctl restart "$SERVICE"
+		printf 'Relay service restarted.\n'
+	fi
+	print_info
+}
+
 rotate_token() {
 	need_root
 	if [ -f "$TOKEN_FILE" ]; then
@@ -450,7 +509,7 @@ install_service() {
 	print_info
 	printf 'Menu command: onesyncr\n'
 	printf 'Relay admin panel: http://<server-ip>:%s\n' "$(printf '%s' "$ADMIN_LISTEN" | sed 's/.*://')"
-	printf 'Use: onesync-relayctl start|stop|restart|status|logs|info|token|rotate-token|cert|cert-info|test-cert|set-cert|regen-cert|upgrade|uninstall\n'
+	printf 'Use: onesync-relayctl start|stop|restart|status|logs|info|token|rotate-token|cert|cert-info|test-cert|set-cert|set-ports|regen-cert|upgrade|uninstall\n'
 }
 
 upgrade_service() {
@@ -465,7 +524,7 @@ upgrade_service() {
 	url=$(latest_linux_package_url)
 	if [ -z "$url" ]; then
 		printf 'Cannot find latest Linux package from GitHub repo %s.\n' "$REPO" >&2
-		printf 'Retry with RELEASE_TAG=v1.14 or PACKAGE_URL=https://...tar.gz.\n' >&2
+		printf 'Retry with RELEASE_TAG=v1.15 or PACKAGE_URL=https://...tar.gz.\n' >&2
 		exit 1
 	fi
 	curl -fL "$(proxy_url "$url")" -o "$tmp/onesync-linux.tar.gz"
@@ -551,6 +610,10 @@ case "${1:-status}" in
 		shift
 		set_cert_paths "$@"
 		;;
+	set-ports)
+		shift
+		set_ports "$@"
+		;;
 	info|link|link-info)
 		print_info
 		;;
@@ -564,7 +627,7 @@ case "${1:-status}" in
 		uninstall_service
 		;;
 	*)
-		printf 'Usage: onesync-relayctl install|start|run|stop|restart|status|logs|info|token|rotate-token|cert|cert-info|test-cert|set-cert|regen-cert|upgrade|uninstall\n' >&2
+		printf 'Usage: onesync-relayctl install|start|run|stop|restart|status|logs|info|token|rotate-token|cert|cert-info|test-cert|set-cert|set-ports|regen-cert|upgrade|uninstall\n' >&2
 		printf 'Install options: RELAY_HOSTS=domain-or-ip RELAY_PORT=7443 RELAY_TOKEN=secret ONESYNC_RELAY_CERT=/path/fullchain.pem ONESYNC_RELAY_KEY=/path/privkey.pem\n' >&2
 		exit 2
 		;;

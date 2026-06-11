@@ -76,8 +76,8 @@ sudo onesyncctl uninstall
 To upgrade a Linux client without relying on GitHub API auto-discovery, pass a fixed release tag or a direct Linux package URL:
 
 ```sh
-sudo env RELEASE_TAG=v1.14 GH_PROXY=https://gh-proxy.org onesyncctl upgrade
-sudo env PACKAGE_URL=https://gh-proxy.org/https://github.com/202121000995/OneSync/releases/download/v1.14/onesync-linux-amd64-v1.14.tar.gz onesyncctl upgrade
+sudo env RELEASE_TAG=v1.15 GH_PROXY=https://gh-proxy.org onesyncctl upgrade
+sudo env PACKAGE_URL=https://gh-proxy.org/https://github.com/202121000995/OneSync/releases/download/v1.15/onesync-linux-amd64-v1.15.tar.gz onesyncctl upgrade
 ```
 
 The Linux service listens on `0.0.0.0:8765` by default and requires a management account. Open `http://server-ip:8765`, then set the account and password on first access. To keep it local-only instead, install with `sudo ONESYNC_WEB_BIND=127.0.0.1 ./onesyncctl install`.
@@ -91,13 +91,13 @@ curl -fsSL https://raw.githubusercontent.com/202121000995/OneSync/main/packaging
 If the server cannot reach GitHub directly, use a GitHub proxy. The proxy is used both to download the deployment script and to download the latest Linux package inside the script:
 
 ```sh
-curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/202121000995/OneSync/main/packaging/acceptance-scripts/linux/deploy-onesync.sh | sudo env RELEASE_TAG=v1.14 GH_PROXY=https://gh-proxy.org/ sh
+curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/202121000995/OneSync/main/packaging/acceptance-scripts/linux/deploy-onesync.sh | sudo env RELEASE_TAG=v1.15 GH_PROXY=https://gh-proxy.org/ sh
 ```
 
 If the GitHub API or raw script cache is blocked, pass the Linux package URL directly:
 
 ```sh
-curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/202121000995/OneSync/main/packaging/acceptance-scripts/linux/deploy-onesync.sh | sudo env PACKAGE_URL=https://gh-proxy.org/https://github.com/202121000995/OneSync/releases/download/v1.14/onesync-linux-amd64-v1.14.tar.gz sh
+curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/202121000995/OneSync/main/packaging/acceptance-scripts/linux/deploy-onesync.sh | sudo env PACKAGE_URL=https://gh-proxy.org/https://github.com/202121000995/OneSync/releases/download/v1.15/onesync-linux-amd64-v1.15.tar.gz sh
 ```
 
 After installing the Linux client, run `onesync` to show the Chinese client command menu with common status, log, restart, upgrade, and uninstall commands.
@@ -113,19 +113,19 @@ curl -fsSL https://raw.githubusercontent.com/202121000995/OneSync/main/packaging
 If the server cannot reach GitHub directly, use a GitHub proxy. The proxy is used both to download the deployment script and to download the latest Linux package inside the script:
 
 ```sh
-curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/202121000995/OneSync/main/packaging/acceptance-scripts/linux/deploy-relaytls.sh | sudo env RELAY_HOSTS=relay.example.com RELAY_PORT=443 RELAY_TOKEN=your-secret RELEASE_TAG=v1.14 GH_PROXY=https://gh-proxy.org/ sh
+curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/202121000995/OneSync/main/packaging/acceptance-scripts/linux/deploy-relaytls.sh | sudo env RELAY_HOSTS=relay.example.com RELAY_PORT=443 RELAY_TOKEN=your-secret RELEASE_TAG=v1.15 GH_PROXY=https://gh-proxy.org/ sh
 ```
 
 If the GitHub API or raw script cache is blocked, pass the Linux package URL directly:
 
 ```sh
-curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/202121000995/OneSync/main/packaging/acceptance-scripts/linux/deploy-relaytls.sh | sudo env RELAY_HOSTS=relay.example.com RELAY_PORT=443 RELAY_TOKEN=your-secret PACKAGE_URL=https://gh-proxy.org/https://github.com/202121000995/OneSync/releases/download/v1.14/onesync-linux-amd64-v1.14.tar.gz sh
+curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/202121000995/OneSync/main/packaging/acceptance-scripts/linux/deploy-relaytls.sh | sudo env RELAY_HOSTS=relay.example.com RELAY_PORT=443 RELAY_TOKEN=your-secret PACKAGE_URL=https://gh-proxy.org/https://github.com/202121000995/OneSync/releases/download/v1.15/onesync-linux-amd64-v1.15.tar.gz sh
 ```
 
 If BT Panel or 1Panel already manages the domain certificate and renewal, pass the existing certificate paths instead of letting OneSync generate a self-signed certificate:
 
 ```sh
-curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/202121000995/OneSync/main/packaging/acceptance-scripts/linux/deploy-relaytls.sh | sudo env RELAY_HOSTS=relay.example.com RELAY_PORT=443 RELAY_TOKEN=your-secret ONESYNC_RELAY_CERT=/path/fullchain.pem ONESYNC_RELAY_KEY=/path/privkey.pem RELEASE_TAG=v1.14 GH_PROXY=https://gh-proxy.org/ sh
+curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/202121000995/OneSync/main/packaging/acceptance-scripts/linux/deploy-relaytls.sh | sudo env RELAY_HOSTS=relay.example.com RELAY_PORT=443 RELAY_TOKEN=your-secret ONESYNC_RELAY_CERT=/path/fullchain.pem ONESYNC_RELAY_KEY=/path/privkey.pem RELEASE_TAG=v1.15 GH_PROXY=https://gh-proxy.org/ sh
 ```
 
 After Relay deployment, use `onesyncr` to view the Chinese Relay command menu.
@@ -158,6 +158,7 @@ sudo onesync-relayctl logs
 sudo onesync-relayctl token
 sudo onesync-relayctl cert-info
 sudo onesync-relayctl set-cert /path/fullchain.pem /path/privkey.pem
+sudo onesync-relayctl set-ports 17443 8766
 sudo onesync-relayctl stop
 sudo onesync-relayctl restart
 sudo onesync-relayctl upgrade
@@ -167,15 +168,15 @@ sudo onesync-relayctl uninstall
 To upgrade Relay without relying on GitHub API auto-discovery, pass a fixed release tag or a direct Linux package URL:
 
 ```sh
-sudo env RELEASE_TAG=v1.14 GH_PROXY=https://gh-proxy.org onesync-relayctl upgrade
-sudo env PACKAGE_URL=https://gh-proxy.org/https://github.com/202121000995/OneSync/releases/download/v1.14/onesync-linux-amd64-v1.14.tar.gz onesync-relayctl upgrade
+sudo env RELEASE_TAG=v1.15 GH_PROXY=https://gh-proxy.org onesync-relayctl upgrade
+sudo env PACKAGE_URL=https://gh-proxy.org/https://github.com/202121000995/OneSync/releases/download/v1.15/onesync-linux-amd64-v1.15.tar.gz onesync-relayctl upgrade
 ```
 
 `RELAY_HOSTS` is written into the Relay TLS certificate. It should contain the Relay domain or public IP, without the port. `RELAY_PORT` controls the listening port. `RELAY_TOKEN` controls who can use the Relay server. When creating a synchronization link, enter the Relay TLS address as `host:port`, for example `relay.example.com:443`, and enter the Relay token shown by `sudo onesync-relayctl token`.
 
 By default, `onesync-relayctl install` generates a private self-signed Relay TLS certificate under `/etc/onesync/relay.crt` and `/etc/onesync/relay.key`, and a Relay access token under `/etc/onesync/relay.token`. To use your own certificate, install with `ONESYNC_RELAY_CERT=/path/fullchain.crt ONESYNC_RELAY_KEY=/path/private.key`.
 
-Run `sudo onesync-relayctl cert-info` to check the current certificate path, validity dates, and whether the private key matches the certificate. Run `sudo onesync-relayctl set-cert /path/fullchain.pem /path/privkey.pem` to switch Relay to a certificate managed by BT Panel, 1Panel, or another ACME client.
+Run `sudo onesync-relayctl cert-info` to check the current certificate path, validity dates, and whether the private key matches the certificate. Run `sudo onesync-relayctl set-cert /path/fullchain.pem /path/privkey.pem` to switch Relay to a certificate managed by BT Panel, 1Panel, or another ACME client. Run `sudo onesync-relayctl set-ports 17443 8766` to change the Relay port and admin panel port.
 
 Run `sudo onesync-relayctl info` to print all text needed by the source link form: Relay address, Relay token, and Relay certificate PEM. If the Relay domain or IP changes, regenerate the certificate with `sudo RELAY_HOSTS=relay.example.com RELAY_PORT=443 onesync-relayctl regen-cert`.
 Run `sudo onesync-relayctl rotate-token` to rotate the Relay access token and restart Relay. Existing links that carry the old Relay token must be regenerated.

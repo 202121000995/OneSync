@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -47,9 +48,13 @@ type adminServer struct {
 type adminPageData struct {
 	Configured     bool
 	Authenticated  bool
+	AdminUsername  string
 	Message        string
 	Error          string
 	RelayListen    string
+	RelayPort      string
+	AdminListen    string
+	AdminPort      string
 	TokenFile      string
 	Token          string
 	AccessKeysFile string
@@ -94,6 +99,8 @@ func startAdminServer(ctx context.Context, config adminConfig) error {
 	mux.HandleFunc("/delete-key", server.deleteKey)
 	mux.HandleFunc("/set-cert", server.setCert)
 	mux.HandleFunc("/paste-cert", server.pasteCert)
+	mux.HandleFunc("/set-ports", server.setPorts)
+	mux.HandleFunc("/change-password", server.changePassword)
 	mux.HandleFunc("/download-log", server.downloadLog)
 	mux.HandleFunc("/restart", server.restart)
 	server.httpServer = &http.Server{
@@ -338,6 +345,52 @@ func (s *adminServer) pasteCert(writer http.ResponseWriter, request *http.Reques
 	s.render(writer, request, adminPageData{Message: "证书文本已保存并启用，新建 TLS 连接会读取新的证书。"})
 }
 
+func (s *adminServer) setPorts(writer http.ResponseWriter, request *http.Request) {
+	if request.Method != http.MethodPost || !s.authenticated(request) {
+		http.Redirect(writer, request, "/", http.StatusSeeOther)
+		return
+	}
+	if err := request.ParseForm(); err != nil {
+		s.render(writer, request, adminPageData{Error: "表单格式不正确。"})
+		return
+	}
+	relayPort := strings.TrimSpace(request.FormValue("relay_port"))
+	adminPort := strings.TrimSpace(request.FormValue("admin_port"))
+	if err := validatePort(relayPort); err != nil {
+		s.render(writer, request, adminPageData{Error: "Relay 端口不正确: " + err.Error()})
+		return
+	}
+	if err := validatePort(adminPort); err != nil {
+		s.render(writer, request, adminPageData{Error: "面板端口不正确: " + err.Error()})
+		return
+	}
+	go func() {
+		time.Sleep(500 * time.Millisecond)
+		output, err := exec.Command(relayControlCommand(), "set-ports", relayPort, adminPort).CombinedOutput()
+		if err != nil {
+			log.Printf("set Relay ports from admin panel: %v: %s", err, strings.TrimSpace(string(output)))
+		}
+	}()
+	s.render(writer, request, adminPageData{Message: "已发送端口修改命令，Relay 和面板会短暂重启。新面板地址请使用新端口访问。"})
+}
+
+func (s *adminServer) changePassword(writer http.ResponseWriter, request *http.Request) {
+	if request.Method != http.MethodPost || !s.authenticated(request) {
+		http.Redirect(writer, request, "/", http.StatusSeeOther)
+		return
+	}
+	if err := request.ParseForm(); err != nil {
+		s.render(writer, request, adminPageData{Error: "表单格式不正确。"})
+		return
+	}
+	if err := s.auth.ChangePassword(request.FormValue("username"), request.FormValue("current_password"), request.FormValue("new_password")); err != nil {
+		s.render(writer, request, adminPageData{Error: err.Error()})
+		return
+	}
+	s.clearSessions(writer)
+	s.render(writer, request, adminPageData{Message: "管理密码已修改，请用新密码重新登录。"})
+}
+
 func (s *adminServer) downloadLog(writer http.ResponseWriter, request *http.Request) {
 	if !s.authenticated(request) {
 		http.Redirect(writer, request, "/", http.StatusSeeOther)
@@ -374,7 +427,11 @@ func (s *adminServer) restart(writer http.ResponseWriter, request *http.Request)
 func (s *adminServer) render(writer http.ResponseWriter, request *http.Request, data adminPageData) {
 	data.Configured = s.auth.Configured()
 	data.Authenticated = s.authenticated(request)
+	data.AdminUsername = s.auth.Username()
 	data.RelayListen = s.config.RelayListen
+	data.RelayPort = portFromListen(s.config.RelayListen)
+	data.AdminListen = s.config.Listen
+	data.AdminPort = portFromListen(s.config.Listen)
 	data.TokenFile = s.config.TokenFile
 	data.AccessKeysFile = s.config.AccessKeysFile
 	data.LogPath = s.config.LogPath
@@ -445,6 +502,20 @@ func (s *adminServer) setSession(writer http.ResponseWriter) {
 	})
 }
 
+func (s *adminServer) clearSessions(writer http.ResponseWriter) {
+	s.sessionMu.Lock()
+	s.sessions = make(map[string]time.Time)
+	s.sessionMu.Unlock()
+	http.SetCookie(writer, &http.Cookie{
+		Name:     "onesync_relay_admin",
+		Value:    "",
+		Path:     "/",
+		MaxAge:   -1,
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+	})
+}
+
 func (s *adminServer) currentCertPaths() (string, string) {
 	if s.config.CertPathFile != "" {
 		data, err := os.ReadFile(s.config.CertPathFile)
@@ -464,6 +535,41 @@ func (s *adminServer) managedCertPaths() (string, string) {
 		return filepath.Join(dir, "relay.crt"), filepath.Join(dir, "relay.key")
 	}
 	return s.config.DefaultCert, s.config.DefaultKey
+}
+
+func portFromListen(listen string) string {
+	listen = strings.TrimSpace(listen)
+	if listen == "" {
+		return ""
+	}
+	if _, port, err := net.SplitHostPort(listen); err == nil {
+		return port
+	}
+	index := strings.LastIndex(listen, ":")
+	if index >= 0 && index+1 < len(listen) {
+		return listen[index+1:]
+	}
+	return listen
+}
+
+func validatePort(value string) error {
+	port, err := strconv.Atoi(strings.TrimSpace(value))
+	if err != nil || port < 1 || port > 65535 {
+		return fmt.Errorf("端口必须是 1-65535")
+	}
+	return nil
+}
+
+func relayControlCommand() string {
+	if path, err := exec.LookPath("onesync-relayctl"); err == nil {
+		return path
+	}
+	for _, candidate := range []string{"/usr/local/bin/onesync-relayctl", "/usr/bin/onesync-relayctl"} {
+		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+			return candidate
+		}
+	}
+	return "onesync-relayctl"
 }
 
 func randomRelayToken() (string, error) {
@@ -603,7 +709,7 @@ code,pre{background:#0f172a;color:#dbeafe;border-radius:10px;padding:10px;white-
 {{else if not .Authenticated}}
 <div class="card"><h2>登录</h2>
 <form method="post" action="/login">
-<label>账号</label><input name="username" value="admin" required>
+<label>账号</label><input name="username" value="{{.AdminUsername}}" required>
 <label>密码</label><input name="password" type="password" required>
 <button type="submit">登录</button>
 </form></div>
@@ -612,12 +718,22 @@ code,pre{background:#0f172a;color:#dbeafe;border-radius:10px;padding:10px;white-
 <div class="card"><h2>Relay 状态</h2>
 <div class="kv">
 <b>Relay 监听</b><span>{{.RelayListen}}</span>
+<b>面板监听</b><span>{{.AdminListen}}</span>
 <b>令牌文件</b><span>{{.TokenFile}}</span>
 <b>多令牌文件</b><span>{{.AccessKeysFile}}</span>
 <b>日志文件</b><span>{{.LogPath}}</span>
 <b>证书路径</b><span>{{.CertPath}}</span>
 <b>私钥路径</b><span>{{.KeyPath}}</span>
 </div></div>
+<div class="card"><h2>端口设置</h2>
+<p class="hint">修改后会重写服务配置并重启 Relay/面板。Relay 端口用于客户端中转连接；面板端口用于浏览器访问管理页。</p>
+<form method="post" action="/set-ports">
+<div class="row">
+<div><label>Relay 端口</label><input name="relay_port" value="{{.RelayPort}}" inputmode="numeric" required></div>
+<div><label>面板端口</label><input name="admin_port" value="{{.AdminPort}}" inputmode="numeric" required></div>
+</div>
+<button type="submit">保存端口并重启</button>
+</form></div>
 <div class="card"><h2>连接和流量</h2>
 <div class="stats">
 <div class="stat">当前连接<b>{{.Runtime.Connections}}</b></div>
@@ -687,14 +803,22 @@ code,pre{background:#0f172a;color:#dbeafe;border-radius:10px;padding:10px;white-
 </div>
 <button type="submit">保存并启用证书</button>
 </form></div>
+<div class="card"><h2>管理密码</h2>
+<p class="hint">修改后当前登录会退出，需要用新密码重新登录。</p>
+<form method="post" action="/change-password">
+<label>账号</label><input name="username" value="admin" required>
+<label>当前密码</label><input name="current_password" type="password" required>
+<label>新密码</label><input name="new_password" type="password" minlength="8" required>
+<button type="submit">修改面板密码</button>
+</form></div>
 <div class="card"><h2>Relay 日志</h2>
-<p class="hint">显示最近 120 行 Relay 日志。遇到连接问题时，可以下载日志发给我排查。</p>
+<p class="hint">显示最近 120 行 Relay 日志。日志可能包含旧版本或旧端口的历史报错；遇到连接问题时，可以下载日志发给我排查。</p>
 <pre>{{.LogTail}}</pre>
 <a href="/download-log"><button type="button">下载日志</button></a>
 </div>
 <div class="card"><h2>服务操作</h2>
-<p class="hint">重启会短暂断开 Relay 和管理面板。几秒后刷新页面即可。</p>
-<form method="post" action="/restart"><button class="danger" type="submit">重启 Relay</button></form>
+<p class="hint">Relay 和管理面板运行在同一个服务里，重启会短暂断开连接。几秒后刷新页面即可。</p>
+<form method="post" action="/restart"><button class="danger" type="submit">重启 Relay/面板</button></form>
 </div>
 {{end}}
 </div></body></html>`))

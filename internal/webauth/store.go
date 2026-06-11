@@ -50,6 +50,17 @@ func (s *Store) Configured() bool {
 	return err == nil
 }
 
+// Username returns the configured management username when available.
+func (s *Store) Username() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	config, err := s.loadLocked()
+	if err != nil {
+		return ""
+	}
+	return config.Username
+}
+
 // Setup writes the first management account.
 func (s *Store) Setup(username, password string) error {
 	username = strings.TrimSpace(username)
@@ -86,15 +97,34 @@ func (s *Store) Verify(username, password string) bool {
 	if err != nil {
 		return false
 	}
-	if subtle.ConstantTimeCompare([]byte(username), []byte(config.Username)) != 1 {
-		return false
+	return verifyConfig(config, username, password)
+}
+
+// ChangePassword changes the management password after checking the existing credentials.
+func (s *Store) ChangePassword(username, currentPassword, newPassword string) error {
+	username = strings.TrimSpace(username)
+	if err := validateUsername(username); err != nil {
+		return err
 	}
-	salt, err := base64.RawURLEncoding.DecodeString(config.Salt)
+	if err := validatePassword(newPassword); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	config, err := s.loadLocked()
 	if err != nil {
-		return false
+		return err
 	}
-	actual := passwordHash(salt, password)
-	return subtle.ConstantTimeCompare([]byte(actual), []byte(config.PasswordHash)) == 1
+	if !verifyConfig(config, username, currentPassword) {
+		return errors.New("current username or password is incorrect")
+	}
+	salt := make([]byte, 32)
+	if _, err := rand.Read(salt); err != nil {
+		return fmt.Errorf("generate password salt: %w", err)
+	}
+	config.Salt = base64.RawURLEncoding.EncodeToString(salt)
+	config.PasswordHash = passwordHash(salt, newPassword)
+	return s.saveLocked(config)
 }
 
 func (s *Store) loadLocked() (Config, error) {
@@ -171,6 +201,18 @@ func validateConfig(config Config) error {
 		return errors.New("web auth password hash is invalid")
 	}
 	return nil
+}
+
+func verifyConfig(config Config, username, password string) bool {
+	if subtle.ConstantTimeCompare([]byte(username), []byte(config.Username)) != 1 {
+		return false
+	}
+	salt, err := base64.RawURLEncoding.DecodeString(config.Salt)
+	if err != nil {
+		return false
+	}
+	actual := passwordHash(salt, password)
+	return subtle.ConstantTimeCompare([]byte(actual), []byte(config.PasswordHash)) == 1
 }
 
 func validateUsername(username string) error {

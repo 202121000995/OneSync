@@ -9,6 +9,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -46,6 +47,10 @@ func main() {
 	if *certificatePath == "" || *privateKeyPath == "" {
 		log.Fatal("-cert and -key are required")
 	}
+	resolvedAccessKeysFile := strings.TrimSpace(*accessKeysFile)
+	if resolvedAccessKeysFile == "" {
+		resolvedAccessKeysFile = defaultAccessKeysFile(*certificatePathFile, *accessTokenFile)
+	}
 	relayAccessToken, err := loadAccessToken(*accessToken, *accessTokenFile)
 	if err != nil {
 		log.Fatal(err)
@@ -63,7 +68,7 @@ func main() {
 		MaxActive:           *maxActive,
 		MaxBytes:            *maxBytes,
 		AccessToken:         relayAccessToken,
-		AccessTokenProvider: accessTokenProvider(*accessToken, *accessTokenFile, *accessKeysFile),
+		AccessTokenProvider: accessTokenProvider(*accessToken, *accessTokenFile, resolvedAccessKeysFile),
 		Logger:              logger.NewText(logWriter),
 	})
 	if err != nil {
@@ -88,7 +93,7 @@ func main() {
 			Listen:         *adminListen,
 			AuthPath:       authPath,
 			TokenFile:      *accessTokenFile,
-			AccessKeysFile: *accessKeysFile,
+			AccessKeysFile: resolvedAccessKeysFile,
 			CertPathFile:   *certificatePathFile,
 			DefaultCert:    *certificatePath,
 			DefaultKey:     *privateKeyPath,
@@ -108,6 +113,18 @@ func main() {
 	if err := server.Serve(ctx); err != nil {
 		log.Fatal(err)
 	}
+}
+
+func defaultAccessKeysFile(certificatePathFile, accessTokenFile string) string {
+	certificatePathFile = strings.TrimSpace(certificatePathFile)
+	if certificatePathFile != "" {
+		return filepath.Join(filepath.Dir(certificatePathFile), "relay.keys.json")
+	}
+	accessTokenFile = strings.TrimSpace(accessTokenFile)
+	if accessTokenFile != "" {
+		return filepath.Join(filepath.Dir(accessTokenFile), "relay.keys.json")
+	}
+	return ""
 }
 
 func loadAccessToken(value, path string) (string, error) {
