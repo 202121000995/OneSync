@@ -2247,3 +2247,39 @@
 
 - Relay 令牌轮换后，旧任务链接不会自动更新；需要在源端重新生成链接并让目标端重新加入。
 - Win7 Qt 的忽略规则测试是本地规则匹配测试，不等于真实同步链路验收；真实多设备场景仍需要继续实测。
+
+## v1.07 Linux service 启动修复审核
+
+审核分支：`main`
+
+审核结论：通过。
+
+审核说明：
+
+- 根版本号从 `1.06` 提升到 `1.07`，主包、Win7 Qt 包、Linux 安装/升级示例统一使用 `v1.07`。
+- 修复 Linux service 模式下，程序在解析 `-data-dir` 参数前先计算用户默认配置目录，可能因 systemd 环境缺少用户目录而直接退出的问题。
+- `onesyncctl status` 改为显示完整 systemd 状态行，后续排查服务失败不再默认省略关键错误。
+- Linux tar 打包时禁用 macOS 扩展属性，减少服务器解包时出现 `LIBARCHIVE.xattr.com.apple.provenance` 提示。
+
+验证结果：
+
+- `git diff --check` 通过。
+- `sh -n packaging/package-acceptance.sh` 通过。
+- Linux 客户端脚本 `sh -n` 通过。
+- `/Users/apple/Library/Go/sdk/go1.26.3/bin/go test ./...` 通过。
+- `sh clients/win7-qt/build-win7.sh` 成功，生成 `clients/win7-qt/dist/OneSyncWin7-win7-x86-v1.07.zip`。
+- `PATH=/Users/apple/Library/Go/sdk/go1.26.3/bin:$PATH sh packaging/package-acceptance.sh` 成功，生成主 Windows/Linux v1.07 包。
+- `unzip -t clients/win7-qt/dist/OneSyncWin7-win7-x86-v1.07.zip` 通过。
+- `strings clients/win7-qt/release-win7/OneSyncWin7.exe | rg "GetSystemTimePreciseAsFileTime|KERNEL32.dll"` 只匹配到 `KERNEL32.dll`。
+- `unzip -t dist/acceptance-packages/onesync-windows-amd64-v1.07.zip` 通过。
+- `tar -tzf dist/acceptance-packages/onesync-linux-amd64-v1.07.tar.gz` 通过。
+
+本地包路径：
+
+- `/Users/apple/Documents/同步软件/clients/win7-qt/dist/OneSyncWin7-win7-x86-v1.07.zip`
+- `/Users/apple/Documents/同步软件/dist/acceptance-packages/onesync-windows-amd64-v1.07.zip`
+- `/Users/apple/Documents/同步软件/dist/acceptance-packages/onesync-linux-amd64-v1.07.tar.gz`
+
+剩余风险：
+
+- 已经处于失败重启循环的 Linux service，升级后如果 systemd 未自动拉起，需要执行 `sudo systemctl reset-failed onesync` 后再 `sudo onesyncctl restart`。

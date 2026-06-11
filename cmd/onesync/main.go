@@ -31,15 +31,11 @@ import (
 var version = "dev"
 
 func main() {
-	defaultDataDir, err := config.DefaultDataDir()
-	if err != nil {
-		log.Fatal(err)
-	}
 	port := flag.Int("port", 8765, "local management port")
 	webBind := flag.String("web-bind", "127.0.0.1", "management web bind address")
 	webAuthEnabled := flag.Bool("web-auth", false, "require a management account for the web UI")
 	syncPort := flag.Int("sync-port", backend.DefaultSyncPort, "default TLS synchronization port suggested by the management page")
-	dataDir := flag.String("data-dir", defaultDataDir, "OneSync data directory")
+	dataDir := flag.String("data-dir", defaultDataDirFlagValue(), "OneSync data directory")
 	certificatePath := flag.String("cert", "", "optional custom TLS certificate file for source tasks")
 	privateKeyPath := flag.String("key", "", "optional custom TLS private key file for source tasks")
 	caPath := flag.String("ca", "", "optional trusted CA certificate file")
@@ -132,6 +128,14 @@ func main() {
 	if err := server.ListenAndServeOn(ctx, *webBind, *port); err != nil {
 		log.Fatal(err)
 	}
+}
+
+func defaultDataDirFlagValue() string {
+	defaultDataDir, err := config.DefaultDataDir()
+	if err == nil {
+		return defaultDataDir
+	}
+	return "data"
 }
 
 func webAuthStore(paths config.Paths, webBind string, enabled bool) (*webauth.Store, error) {

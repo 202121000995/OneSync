@@ -43,6 +43,14 @@ func TestConfigureLoggingWritesPrivateFile(t *testing.T) {
 	}
 }
 
+func TestDefaultDataDirFlagValueDoesNotBlockServiceStartup(t *testing.T) {
+	t.Setenv("HOME", "")
+	t.Setenv("XDG_CONFIG_HOME", "")
+	if got := defaultDataDirFlagValue(); got == "" {
+		t.Fatal("defaultDataDirFlagValue returned an empty fallback")
+	}
+}
+
 func TestServerCertificateHosts(t *testing.T) {
 	root := t.TempDir()
 	certPath := filepath.Join(root, "source.crt")
