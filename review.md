@@ -2474,3 +2474,40 @@
 剩余风险：
 
 - 如果旧 systemd 服务文件里路径包含空格，当前 shell 参数解析不支持；Linux 常见安装路径不包含空格，正式安装脚本生成的路径也不包含空格。
+
+## v1.13 Relay 面板粘贴证书审核
+
+审核分支：`main`
+
+审核结论：本地通过，尚未上传 GitHub Release。
+
+审核说明：
+
+- 根版本号从 `1.12` 提升到 `1.13`，主包、Win7 Qt 包、Linux 安装/升级示例统一使用 `v1.13`。
+- Relay 管理面板新增“粘贴证书文本”区域，支持直接粘贴私钥 KEY 和证书 PEM。
+- 保存前会校验证书 PEM 和私钥 KEY 是否有效且互相匹配，不匹配会拒绝保存。
+- 粘贴保存的证书会写入 OneSync 自己管理的证书文件，默认是 `/etc/onesync/relay.crt` 和 `/etc/onesync/relay.key`。
+- 保存后会更新证书路径记录文件，新建 TLS 连接会读取新的证书。
+- 继续保留原来的“设置证书路径”方式，适合宝塔 / 1Panel 自动续期路径。
+
+验证结果：
+
+- `git diff --check` 通过。
+- `sh -n packaging/acceptance-scripts/linux/onesync-relayctl` 通过。
+- 仓库内未检出测试域名和测试令牌。
+- `/Users/apple/Library/Go/sdk/go1.26.3/bin/go test ./...` 通过。
+- 本地启动 Relay 管理面板，首次设置临时管理账号成功。
+- 管理面板显示“粘贴证书文本”区域。
+- 管理面板粘贴临时证书 PEM 和私钥 KEY 后，返回“证书文本已保存并启用，新建 TLS 连接会读取新的证书。”。
+- 粘贴保存后，证书路径记录文件写入目标证书和私钥路径。
+- 粘贴保存后，证书文件权限为 `0644`，私钥文件权限为 `0600`。
+- `sh clients/win7-qt/build-win7.sh` 成功，生成 `clients/win7-qt/dist/OneSyncWin7-win7-x86-v1.13.zip`。
+- `PATH=/Users/apple/Library/Go/sdk/go1.26.3/bin:$PATH sh packaging/package-acceptance.sh` 成功，生成主 Windows/Linux v1.13 包。
+- `unzip -t clients/win7-qt/dist/OneSyncWin7-win7-x86-v1.13.zip` 通过。
+- `strings clients/win7-qt/release-win7/OneSyncWin7.exe | rg "GetSystemTimePreciseAsFileTime|KERNEL32.dll"` 只匹配到 `KERNEL32.dll`。
+- `unzip -t dist/acceptance-packages/onesync-windows-amd64-v1.13.zip` 通过。
+- `tar -tzf dist/acceptance-packages/onesync-linux-amd64-v1.13.tar.gz` 通过。
+
+剩余风险：
+
+- 粘贴证书不会替用户申请和续期证书；证书过期后仍需要在宝塔 / 1Panel / 证书服务商续期后重新粘贴，或改用证书路径方式。

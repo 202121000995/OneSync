@@ -77,6 +77,7 @@ func startAdminServer(ctx context.Context, config adminConfig) error {
 	mux.HandleFunc("/logout", server.logout)
 	mux.HandleFunc("/rotate-token", server.rotateToken)
 	mux.HandleFunc("/set-cert", server.setCert)
+	mux.HandleFunc("/paste-cert", server.pasteCert)
 	server.httpServer = &http.Server{
 		Addr:              config.Listen,
 		Handler:           mux,
@@ -215,6 +216,45 @@ func (s *adminServer) setCert(writer http.ResponseWriter, request *http.Request)
 	s.render(writer, request, adminPageData{Message: "证书路径已保存，新建 TLS 连接会读取新的证书路径。"})
 }
 
+func (s *adminServer) pasteCert(writer http.ResponseWriter, request *http.Request) {
+	if request.Method != http.MethodPost || !s.authenticated(request) {
+		http.Redirect(writer, request, "/", http.StatusSeeOther)
+		return
+	}
+	if s.config.CertPathFile == "" {
+		s.render(writer, request, adminPageData{Error: "当前 Relay 没有配置证书路径记录文件，不能通过面板保存证书文本。"})
+		return
+	}
+	if err := request.ParseForm(); err != nil {
+		s.render(writer, request, adminPageData{Error: "表单格式不正确。"})
+		return
+	}
+	certPEM := strings.TrimSpace(request.FormValue("cert_pem"))
+	keyPEM := strings.TrimSpace(request.FormValue("key_pem"))
+	if _, err := loadCertificateInfoFromPEM(certPEM, keyPEM); err != nil {
+		s.render(writer, request, adminPageData{Error: err.Error()})
+		return
+	}
+	certPath, keyPath := s.managedCertPaths()
+	if err := writePublicFile(certPath, certPEM+"\n"); err != nil {
+		s.render(writer, request, adminPageData{Error: err.Error()})
+		return
+	}
+	if err := writePrivateFile(keyPath, keyPEM+"\n"); err != nil {
+		s.render(writer, request, adminPageData{Error: err.Error()})
+		return
+	}
+	if err := os.MkdirAll(filepath.Dir(s.config.CertPathFile), 0o700); err != nil {
+		s.render(writer, request, adminPageData{Error: err.Error()})
+		return
+	}
+	if err := os.WriteFile(s.config.CertPathFile, []byte(certPath+"\n"+keyPath+"\n"), 0o644); err != nil {
+		s.render(writer, request, adminPageData{Error: err.Error()})
+		return
+	}
+	s.render(writer, request, adminPageData{Message: "证书文本已保存并启用，新建 TLS 连接会读取新的证书。"})
+}
+
 func (s *adminServer) render(writer http.ResponseWriter, request *http.Request, data adminPageData) {
 	data.Configured = s.auth.Configured()
 	data.Authenticated = s.authenticated(request)
@@ -295,6 +335,14 @@ func (s *adminServer) currentCertPaths() (string, string) {
 	return s.config.DefaultCert, s.config.DefaultKey
 }
 
+func (s *adminServer) managedCertPaths() (string, string) {
+	if s.config.CertPathFile != "" {
+		dir := filepath.Dir(s.config.CertPathFile)
+		return filepath.Join(dir, "relay.crt"), filepath.Join(dir, "relay.key")
+	}
+	return s.config.DefaultCert, s.config.DefaultKey
+}
+
 func randomRelayToken() (string, error) {
 	data := make([]byte, 32)
 	if _, err := rand.Read(data); err != nil {
@@ -311,6 +359,16 @@ func writePrivateFile(path, content string) error {
 		return err
 	}
 	return os.WriteFile(path, []byte(content), 0o600)
+}
+
+func writePublicFile(path, content string) error {
+	if strings.TrimSpace(path) == "" {
+		return fmt.Errorf("file path is required")
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	return os.WriteFile(path, []byte(content), 0o644)
 }
 
 func readOptionalTrimmed(path string) string {
@@ -344,6 +402,26 @@ func loadCertificateInfo(certPath, keyPath string) (*x509.Certificate, error) {
 	return certificate, nil
 }
 
+func loadCertificateInfoFromPEM(certPEM, keyPEM string) (*x509.Certificate, error) {
+	certPEM = strings.TrimSpace(certPEM)
+	keyPEM = strings.TrimSpace(keyPEM)
+	if certPEM == "" || keyPEM == "" {
+		return nil, fmt.Errorf("证书 PEM 和私钥 KEY 不能为空")
+	}
+	pair, err := tls.X509KeyPair([]byte(certPEM), []byte(keyPEM))
+	if err != nil {
+		return nil, fmt.Errorf("证书 PEM 或私钥 KEY 无效，或二者不匹配: %w", err)
+	}
+	if len(pair.Certificate) == 0 {
+		return nil, fmt.Errorf("证书 PEM 没有包含证书")
+	}
+	certificate, err := x509.ParseCertificate(pair.Certificate[0])
+	if err != nil {
+		return nil, fmt.Errorf("解析证书失败: %w", err)
+	}
+	return certificate, nil
+}
+
 var adminTemplate = template.Must(template.New("relay-admin").Parse(`<!doctype html>
 <html lang="zh-CN">
 <head>
@@ -356,7 +434,8 @@ body{margin:0;background:#f4f7fb;color:#172033;font-family:-apple-system,BlinkMa
 .card{background:white;border:1px solid #dbe4f0;border-radius:18px;box-shadow:0 8px 30px rgba(15,23,42,.06);padding:24px;margin-bottom:18px}
 h1{font-size:30px;margin:0 0 18px}h2{font-size:20px;margin:0 0 14px}
 label{display:block;font-weight:700;margin:12px 0 6px}
-input{width:100%;box-sizing:border-box;border:1px solid #cfd9e8;border-radius:10px;padding:10px 12px;font-size:15px}
+input,textarea{width:100%;box-sizing:border-box;border:1px solid #cfd9e8;border-radius:10px;padding:10px 12px;font-size:15px}
+textarea{min-height:220px;font-family:ui-monospace,SFMono-Regular,Consolas,"Liberation Mono",monospace;resize:vertical}
 button{border:0;border-radius:10px;background:#2563eb;color:white;font-weight:800;padding:10px 18px;margin-top:14px;cursor:pointer}
 button.secondary{background:#eef4ff;color:#1d4ed8}
 .row{display:grid;grid-template-columns:1fr 1fr;gap:16px}
@@ -416,6 +495,15 @@ code,pre{background:#0f172a;color:#dbeafe;border-radius:10px;padding:10px;white-
 <label>证书文件 fullchain.pem</label><input name="cert_path" value="{{.CertPath}}" required>
 <label>私钥文件 privkey.pem</label><input name="key_path" value="{{.KeyPath}}" required>
 <button type="submit">保存证书路径</button>
+</form></div>
+<div class="card"><h2>粘贴证书文本</h2>
+<p class="hint">适合从宝塔 / 1Panel / 证书服务商复制出来的证书内容。左边粘贴私钥 KEY，右边粘贴证书 PEM。保存前会校验证书和私钥是否匹配。</p>
+<form method="post" action="/paste-cert">
+<div class="row">
+<div><label>私钥 KEY</label><textarea name="key_pem" placeholder="-----BEGIN PRIVATE KEY-----&#10;...&#10;-----END PRIVATE KEY-----" required></textarea></div>
+<div><label>证书 PEM 格式</label><textarea name="cert_pem" placeholder="-----BEGIN CERTIFICATE-----&#10;...&#10;-----END CERTIFICATE-----" required></textarea></div>
+</div>
+<button type="submit">保存并启用证书</button>
 </form></div>
 {{end}}
 </div></body></html>`))
