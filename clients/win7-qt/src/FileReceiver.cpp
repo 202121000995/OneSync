@@ -15,7 +15,7 @@
 namespace {
 const int kSyncMessageTimeoutMs = 30000;
 const int kMaxPayload = 16 * 1024 * 1024;
-const int kMaxChunkSize = 256 * 1024;
+const int kMaxChunkSize = 1024 * 1024;
 const int kHashSize = 32;
 const int kFileIDSize = 32;
 const QString kPartDirectoryName = QStringLiteral(".onesync-part");

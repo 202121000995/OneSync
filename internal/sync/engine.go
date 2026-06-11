@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/202121000995/OneSync/internal/network"
 	"github.com/202121000995/OneSync/internal/progress"
@@ -38,6 +39,11 @@ type SizeReporter interface {
 	SetSizes(ctx context.Context, localBytes, standardBytes, localFiles, standardFiles uint64) error
 }
 
+// LogReporter receives task-level synchronization diagnostics.
+type LogReporter interface {
+	AddLog(ctx context.Context, level, message string) error
+}
+
 // Engine runs one source or target synchronization cycle.
 type Engine struct {
 	role             string
@@ -63,6 +69,10 @@ type Config struct {
 	Sender   fileSender
 	Receiver fileReceiver
 	Progress ProgressReporter
+}
+
+type transferDescriber interface {
+	TransferDescription() string
 }
 
 // NewEngine validates and creates a synchronization engine.
@@ -153,6 +163,15 @@ func (e *Engine) runSource(ctx context.Context) error {
 	if err := e.reportProgress(ctx, progress.Snapshot{TotalFiles: len(operations)}); err != nil {
 		return err
 	}
+	if len(operations) > 0 {
+		description := "默认参数"
+		if describer, ok := e.sender.(transferDescriber); ok {
+			description = describer.TransferDescription()
+		}
+		e.reportLog(ctx, "info", fmt.Sprintf("本轮同步计划：%d 个文件，源端大小 %s，传输参数：%s", len(operations), humanBytes(sourceBytes), description))
+	} else {
+		e.reportLog(ctx, "info", fmt.Sprintf("本轮同步无需传输文件，源端大小 %s", humanBytes(sourceBytes)))
+	}
 
 	const planRequestID uint64 = 2
 	if err := sendPlan(ctx, e.session, planRequestID, planPayload{
@@ -179,9 +198,13 @@ func (e *Engine) runSource(ctx context.Context) error {
 		}); err != nil {
 			return err
 		}
+		startedAt := time.Now()
 		if err := e.sender.SendFile(ctx, e.session, requestID, sourcePath, operation.Entry.Path); err != nil {
+			e.reportLog(ctx, "error", fmt.Sprintf("文件发送失败：%s，错误：%v", operation.Entry.Path, err))
 			return fmt.Errorf("transfer %q: %w", operation.Entry.Path, err)
 		}
+		elapsed := time.Since(startedAt)
+		e.reportLog(ctx, "info", fmt.Sprintf("文件发送完成：%s，大小 %s，耗时 %s，平均速度 %s/s", operation.Entry.Path, humanBytes(uint64(operation.Entry.Size)), humanDuration(elapsed), humanBytesPerSecond(uint64(operation.Entry.Size), elapsed)))
 		if err := e.reportProgress(ctx, progress.Snapshot{
 			TotalFiles:     len(operations),
 			CompletedFiles: index + 1,
@@ -245,6 +268,7 @@ func (e *Engine) runTarget(ctx context.Context) error {
 	if err := e.reportProgress(ctx, progress.Snapshot{TotalFiles: plan.OperationCount}); err != nil {
 		return err
 	}
+	e.reportLog(ctx, "info", fmt.Sprintf("收到同步计划：%d 个文件，标准大小 %s", plan.OperationCount, humanBytes(plan.StandardBytes)))
 	if err := e.session.Send(ctx, network.Message{
 		Type: network.MessageAck, RequestID: planMessage.RequestID,
 	}); err != nil {
@@ -298,6 +322,14 @@ func (e *Engine) reportSizes(ctx context.Context, localBytes, standardBytes, loc
 	return reporter.SetSizes(ctx, localBytes, standardBytes, localFiles, standardFiles)
 }
 
+func (e *Engine) reportLog(ctx context.Context, level, message string) {
+	reporter, ok := e.progressReporter.(LogReporter)
+	if !ok {
+		return
+	}
+	_ = reporter.AddLog(ctx, level, message)
+}
+
 func snapshotSize(snapshot scanner.Snapshot) (uint64, uint64) {
 	var files uint64
 	var bytes uint64
@@ -308,6 +340,35 @@ func snapshotSize(snapshot scanner.Snapshot) (uint64, uint64) {
 		}
 	}
 	return files, bytes
+}
+
+func humanBytes(bytes uint64) string {
+	const unit = 1024
+	if bytes < unit {
+		return fmt.Sprintf("%d B", bytes)
+	}
+	value := float64(bytes)
+	for _, suffix := range []string{"KB", "MB", "GB", "TB"} {
+		value /= unit
+		if value < unit {
+			return strings.TrimSuffix(strings.TrimSuffix(fmt.Sprintf("%.1f", value), "0"), ".") + " " + suffix
+		}
+	}
+	return fmt.Sprintf("%d B", bytes)
+}
+
+func humanBytesPerSecond(bytes uint64, elapsed time.Duration) string {
+	if elapsed <= 0 {
+		return humanBytes(bytes)
+	}
+	return humanBytes(uint64(float64(bytes) / elapsed.Seconds()))
+}
+
+func humanDuration(elapsed time.Duration) string {
+	if elapsed < time.Second {
+		return elapsed.Round(time.Millisecond).String()
+	}
+	return elapsed.Round(100 * time.Millisecond).String()
 }
 
 type cycleCall struct {
@@ -356,6 +417,11 @@ func DefaultSourceEngine(root string, session network.Session, reporters ...Prog
 
 // DefaultSourceEngineWithOptions creates a source engine with custom scanner options.
 func DefaultSourceEngineWithOptions(root string, session network.Session, options scanner.Options, reporters ...ProgressReporter) (*Engine, error) {
+	return DefaultSourceEngineWithTransferOptions(root, session, options, transfer.Sender{}, reporters...)
+}
+
+// DefaultSourceEngineWithTransferOptions creates a source engine with custom scanner and transfer options.
+func DefaultSourceEngineWithTransferOptions(root string, session network.Session, options scanner.Options, sender transfer.Sender, reporters ...ProgressReporter) (*Engine, error) {
 	options.ComputeHash = true
 	return NewEngine(Config{
 		Role:     RoleSource,
@@ -363,7 +429,7 @@ func DefaultSourceEngineWithOptions(root string, session network.Session, option
 		Session:  session,
 		Scanner:  scanner.New(options),
 		Differ:   NewDiffer(),
-		Sender:   transfer.Sender{},
+		Sender:   sender,
 		Progress: firstProgressReporter(reporters),
 	})
 }

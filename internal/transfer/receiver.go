@@ -88,9 +88,6 @@ func (r Receiver) ReceiveFile(ctx context.Context, session network.Session) erro
 			if _, err := part.Write(data); err != nil {
 				return fmt.Errorf("write temporary file: %w", err)
 			}
-			if err := part.Sync(); err != nil {
-				return fmt.Errorf("sync temporary file: %w", err)
-			}
 			offset += int64(len(data))
 			if err := sendOffsetAck(ctx, session, message.RequestID, offset); err != nil {
 				return err
@@ -100,6 +97,9 @@ func (r Receiver) ReceiveFile(ctx context.Context, session network.Session) erro
 			endSize, endHash, err := decodeEnd(message.Payload)
 			if err != nil || endSize != begin.Size || endHash != begin.Hash || offset != begin.Size {
 				return r.reject(ctx, session, message.RequestID, errors.New("file end metadata does not match transfer"))
+			}
+			if err := part.Sync(); err != nil {
+				return fmt.Errorf("sync temporary file: %w", err)
 			}
 			if err := part.Close(); err != nil {
 				return fmt.Errorf("close temporary file: %w", err)

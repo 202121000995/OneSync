@@ -2272,6 +2272,130 @@
 - `unzip -t clients/win7-qt/dist/OneSyncWin7-win7-x86-v1.07.zip` 通过。
 - `strings clients/win7-qt/release-win7/OneSyncWin7.exe | rg "GetSystemTimePreciseAsFileTime|KERNEL32.dll"` 只匹配到 `KERNEL32.dll`。
 
+## v1.21 流水线 ACK 提速审核
+
+审核分支：`main`
+
+审核结论：本地通过，尚未提交和上传。
+
+审核说明：
+
+- 根版本号从 `1.20` 提升到 `1.21`，主包、Win7 Qt 包、Linux 安装/升级示例统一使用 `v1.21`。
+- Go/Linux 发送端新增文件块流水线确认，默认窗口为 4 个块。
+- Win7 Qt 发送端新增文件块流水线确认，默认窗口为 4 个块。
+- Win7 Qt 接收端最大块大小同步提升到 1 MiB，与 Go/Linux 接收端保持一致。
+- 仍保持单文件串行传输；这版解决的是“每个块都等一次 ACK”导致的 Relay 延迟限速。
+
+产品结论：
+
+- 单文件大文件经 Relay 传输时，最多可连续发送约 4 MiB 数据再等待确认，理论上比逐块等待明显更抗延迟。
+- 小文件很多时仍会受单文件串行影响，后续还需要多文件并发。
+- Win7 与 Linux 客户端都需要升级到 v1.21 才能完整获得 1 MiB + 流水线效果；Relay 服务器不需要升级。
+
+验证结果：
+
+- `go test ./...` 通过。
+- `sh -n` 检查 Linux 一键脚本和控制脚本通过。
+- `git diff --check` 通过。
+- `sh clients/win7-qt/build-win7.sh` 成功，生成 `clients/win7-qt/dist/OneSyncWin7-win7-x86-v1.21.zip`。
+- `PATH=/Users/apple/Library/Go/sdk/go1.26.3/bin:$PATH sh packaging/package-acceptance.sh` 成功，生成主 Windows/Linux v1.21 包。
+- `unzip -t clients/win7-qt/dist/OneSyncWin7-win7-x86-v1.21.zip` 通过。
+- `unzip -t dist/acceptance-packages/onesync-windows-amd64-v1.21.zip` 通过。
+- `tar -tzf dist/acceptance-packages/onesync-linux-amd64-v1.21.tar.gz` 通过。
+
+## v1.22 传输诊断与可调流水线审核
+
+审核结论：通过。
+
+变更内容：
+
+- Go/Linux 客户端新增 `-transfer-pipeline` 启动参数，Linux service 可通过 `ONESYNC_TRANSFER_PIPELINE` 配置传输流水线窗口。
+- 源端任务日志新增本轮同步计划、传输参数、单文件发送耗时和平均速度，便于判断慢速来自程序、网络、Relay 或磁盘。
+- Win7 Qt 源端新增单文件发送开始/完成日志，显示分块大小、流水线窗口、耗时和平均速度。
+- Go 传输器补齐异常路径清理，避免中途读取源文件或编码失败时 ACK 读取协程残留。
+- 根版本号从 `1.21` 提升到 `1.22`，主包、Win7 Qt 包、Linux 安装/升级示例统一使用 `v1.22`。
+
+验证结果：
+
+- `go test ./...` 通过。
+- `sh -n packaging/acceptance-scripts/linux/deploy-onesync.sh packaging/acceptance-scripts/linux/onesyncctl` 通过。
+- `git diff --check` 通过。
+- `sh clients/win7-qt/build-win7.sh` 成功，生成 `clients/win7-qt/dist/OneSyncWin7-win7-x86-v1.22.zip`。
+- `PATH=/Users/apple/Library/Go/sdk/go1.26.3/bin:$PATH sh packaging/package-acceptance.sh` 成功，生成主 Windows/Linux v1.22 包。
+- `unzip -t clients/win7-qt/dist/OneSyncWin7-win7-x86-v1.22.zip` 通过。
+- `unzip -t dist/acceptance-packages/onesync-windows-amd64-v1.22.zip` 通过。
+- `tar -tzf dist/acceptance-packages/onesync-linux-amd64-v1.22.tar.gz` 通过。
+- `strings clients/win7-qt/release-win7/OneSyncWin7.exe | rg "GetSystemTimePreciseAsFileTime|KERNEL32.dll"` 仅显示 `KERNEL32.dll`。
+
+剩余说明：
+
+- 当前仍是源端推送模型，已通过 1 MiB 分块和流水线 ACK 降低延迟影响；完整 Syncthing 式“接收端按块请求、多块并发、块复用”仍属于下一阶段大改。
+- `strings clients/win7-qt/release-win7/OneSyncWin7.exe | rg "GetSystemTimePreciseAsFileTime|KERNEL32.dll"` 只匹配到 `KERNEL32.dll`。
+
+## v1.20 Relay 传输提速审核
+
+审核分支：`main`
+
+审核结论：本地通过，尚未提交和上传。
+
+审核说明：
+
+- 根版本号从 `1.19` 提升到 `1.20`，主包、Win7 Qt 包、Linux 安装/升级示例统一使用 `v1.20`。
+- 文件分块大小从 256 KiB 提升到 1 MiB，降低 Relay 场景下“每块等待 ACK”的往返延迟损耗。
+- Win7 Qt 源端分块大小同步提升到 1 MiB。
+- Linux/Go 接收端不再每个分块都执行磁盘同步，改为文件完整接收后、校验和替换前同步一次临时文件。
+
+产品结论：
+
+- 当前仍是单连接、单文件串行传输，不是最终的多线程并发模型。
+- 这版是低风险提速：减少确认次数和磁盘同步次数，适合先验证 Relay 速度是否明显改善。
+- Win7 源端发送到 Linux 目标端时，Win7 和 Linux 客户端都需要升级到 v1.20；Relay 服务器不需要升级。
+- 后续真正高速模式应继续做多文件并发、流水线 ACK、动态分块和限速设置。
+
+验证结果：
+
+- `go test ./...` 通过。
+- `sh -n` 检查 Linux 一键脚本和控制脚本通过。
+- `git diff --check` 通过。
+- `sh clients/win7-qt/build-win7.sh` 成功，生成 `clients/win7-qt/dist/OneSyncWin7-win7-x86-v1.20.zip`。
+- `PATH=/Users/apple/Library/Go/sdk/go1.26.3/bin:$PATH sh packaging/package-acceptance.sh` 成功，生成主 Windows/Linux v1.20 包。
+- `unzip -t clients/win7-qt/dist/OneSyncWin7-win7-x86-v1.20.zip` 通过。
+- `unzip -t dist/acceptance-packages/onesync-windows-amd64-v1.20.zip` 通过。
+- `tar -tzf dist/acceptance-packages/onesync-linux-amd64-v1.20.tar.gz` 通过。
+- `strings clients/win7-qt/release-win7/OneSyncWin7.exe | rg "GetSystemTimePreciseAsFileTime|KERNEL32.dll"` 只匹配到 `KERNEL32.dll`。
+
+## v1.19 Win7 与 Linux 同步认证兼容审核
+
+审核分支：`main`
+
+审核结论：本地通过，尚未提交和上传。
+
+审核说明：
+
+- 根版本号从 `1.18` 提升到 `1.19`，主包、Win7 Qt 包、Linux 安装/升级示例统一使用 `v1.19`。
+- 修复 Win7 Qt 与 Linux/Go 客户端通过 Relay 配对后，同步认证 token 格式不一致的问题。
+- Relay 登记阶段继续使用同步链接 token 解码后的 32 字节值，保持 Relay 配对安全逻辑不变。
+- 同步认证阶段改用同步链接里的 token 文本，与 Linux/Go 客户端 `AuthenticatePeerClient/Server` 保持一致。
+
+现场结论：
+
+- Relay 日志显示源端和 Linux 目标端已经成功配对。
+- Win7 源端日志显示失败点是 `目标端同步认证失败`。
+- Linux 目标端日志显示 `authenticate through Relay: read frame header: EOF`，这是源端认证失败后关闭连接导致的表现。
+- 根因是 Win7 源端校验 32 字节解码 token，而 Linux 目标端发送 base64 文本 token。
+
+验证结果：
+
+- `go test ./...` 通过。
+- `sh -n` 检查 Linux 一键脚本和控制脚本通过。
+- `git diff --check` 通过。
+- `sh clients/win7-qt/build-win7.sh` 成功，生成 `clients/win7-qt/dist/OneSyncWin7-win7-x86-v1.19.zip`。
+- `PATH=/Users/apple/Library/Go/sdk/go1.26.3/bin:$PATH sh packaging/package-acceptance.sh` 成功，生成主 Windows/Linux v1.19 包。
+- `unzip -t clients/win7-qt/dist/OneSyncWin7-win7-x86-v1.19.zip` 通过。
+- `unzip -t dist/acceptance-packages/onesync-windows-amd64-v1.19.zip` 通过。
+- `tar -tzf dist/acceptance-packages/onesync-linux-amd64-v1.19.tar.gz` 通过。
+- `strings clients/win7-qt/release-win7/OneSyncWin7.exe | rg "GetSystemTimePreciseAsFileTime|KERNEL32.dll"` 只匹配到 `KERNEL32.dll`。
+
 ## v1.18 Win7 长期等待审核
 
 审核分支：`main`

@@ -81,6 +81,11 @@ void TargetConnector::run()
         emit finished(false, QStringLiteral("同步令牌不正确。"));
         return;
     }
+    const QByteArray authenticationToken = link.token.toUtf8();
+    if (authenticationToken.size() < 32) {
+        emit finished(false, QStringLiteral("同步认证令牌不正确。"));
+        return;
+    }
 
     const QString peerID = PeerIdentityStore::peerIDForSession(link.sessionId);
     emit logMessage(QStringLiteral("本机目标端身份：%1").arg(shortPeerID(peerID)));
@@ -127,7 +132,7 @@ void TargetConnector::run()
             emit logMessage(QStringLiteral("已直连源端 TLS：%1").arg(endpoint.display()));
         }
 
-        if (!authenticate(&socket, token, peerID, &cycleError)) {
+        if (!authenticate(&socket, authenticationToken, peerID, &cycleError)) {
             emit logMessage(QStringLiteral("本轮同步认证失败：%1").arg(cycleError));
             socket.disconnectFromHost();
             if (!waitBeforeRetry(&error)) {

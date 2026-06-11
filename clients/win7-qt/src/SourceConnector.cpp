@@ -23,7 +23,8 @@ const int kRetryDelayMs = 30000;
 const int kAuthenticationTimeoutMs = 15000;
 const int kSyncMessageTimeoutMs = 30000;
 const int kMaxPayload = 16 * 1024 * 1024;
-const int kMaxChunkSize = 256 * 1024;
+const int kMaxChunkSize = 1024 * 1024;
+const int kPipelineChunks = 4;
 const int kHashSize = 32;
 const quint64 kSnapshotRequestID = 1;
 const quint64 kPlanRequestID = 2;
@@ -36,6 +37,44 @@ QString shortPeerID(const QString& peerID)
         return peerID;
     }
     return peerID.left(8) + QStringLiteral("...");
+}
+
+QString humanBytes(qint64 bytes)
+{
+    const double unit = 1024.0;
+    if (bytes < 1024) {
+        return QStringLiteral("%1 B").arg(bytes);
+    }
+    double value = double(bytes);
+    const QStringList suffixes = {QStringLiteral("KB"), QStringLiteral("MB"), QStringLiteral("GB"), QStringLiteral("TB")};
+    for (const QString& suffix : suffixes) {
+        value /= unit;
+        if (value < unit) {
+            QString text = QString::number(value, 'f', 1);
+            if (text.endsWith(QStringLiteral(".0"))) {
+                text.chop(2);
+            }
+            return text + QStringLiteral(" ") + suffix;
+        }
+    }
+    return QStringLiteral("%1 B").arg(bytes);
+}
+
+QString humanDuration(qint64 elapsedMs)
+{
+    if (elapsedMs < 1000) {
+        return QStringLiteral("%1 ms").arg(elapsedMs);
+    }
+    return QStringLiteral("%1 秒").arg(QString::number(double(elapsedMs) / 1000.0, 'f', 1));
+}
+
+QString humanRate(qint64 bytes, qint64 elapsedMs)
+{
+    if (elapsedMs <= 0) {
+        return humanBytes(bytes) + QStringLiteral("/s");
+    }
+    const qint64 bytesPerSecond = qint64(double(bytes) * 1000.0 / double(elapsedMs));
+    return humanBytes(bytesPerSecond) + QStringLiteral("/s");
 }
 
 QByteArray certificateFingerprint(const QSslCertificate& certificate)
@@ -93,6 +132,11 @@ void SourceConnector::run()
         emit finished(false, QStringLiteral("同步令牌不正确。"));
         return;
     }
+    const QByteArray authenticationToken = link.token.toUtf8();
+    if (authenticationToken.size() < 32) {
+        emit finished(false, QStringLiteral("同步认证令牌不正确。"));
+        return;
+    }
 
     Endpoint endpoint;
     if (!EndpointParser::parse(link.relayEndpoint, &endpoint, &error)) {
@@ -131,7 +175,7 @@ void SourceConnector::run()
         }
         emit logMessage(QStringLiteral("Relay 已配对，等待目标端认证。"));
 
-        if (!authenticateTarget(&socket, token, &cycleError)) {
+        if (!authenticateTarget(&socket, authenticationToken, &cycleError)) {
             emit logMessage(QStringLiteral("本轮目标端认证失败：%1").arg(cycleError));
             socket.disconnectFromHost();
             if (!waitBeforeRetry(&error)) {
@@ -455,6 +499,13 @@ bool SourceConnector::sendFile(QSslSocket* socket, quint64 requestID, const Snap
         return false;
     }
 
+    QElapsedTimer transferTimer;
+    transferTimer.start();
+    emit logMessage(QStringLiteral("开始发送文件：%1，大小 %2，传输参数：分块=%3，流水线窗口=%4")
+                        .arg(entry.path, humanBytes(file.size()), humanBytes(kMaxChunkSize))
+                        .arg(kPipelineChunks));
+
+    QList<qint64> pendingOffsets;
     while (offset < file.size()) {
         if (isCancelled(error)) {
             return false;
@@ -474,11 +525,28 @@ bool SourceConnector::sendFile(QSslSocket* socket, quint64 requestID, const Snap
             return false;
         }
         offset += chunk.size();
+        pendingOffsets.append(offset);
+        if (pendingOffsets.size() >= kPipelineChunks) {
+            if (!expectAck(socket, requestID, kSyncMessageTimeoutMs, &ackPayload, error)) {
+                return false;
+            }
+            const qint64 confirmed = decodeOffset(ackPayload, error);
+            const qint64 expected = pendingOffsets.takeFirst();
+            if (confirmed != expected) {
+                if (error != nullptr) {
+                    *error = QStringLiteral("目标端确认偏移不正确。");
+                }
+                return false;
+            }
+        }
+    }
+    while (!pendingOffsets.isEmpty()) {
         if (!expectAck(socket, requestID, kSyncMessageTimeoutMs, &ackPayload, error)) {
             return false;
         }
         const qint64 confirmed = decodeOffset(ackPayload, error);
-        if (confirmed != offset) {
+        const qint64 expected = pendingOffsets.takeFirst();
+        if (confirmed != expected) {
             if (error != nullptr) {
                 *error = QStringLiteral("目标端确认偏移不正确。");
             }
@@ -489,7 +557,12 @@ bool SourceConnector::sendFile(QSslSocket* socket, quint64 requestID, const Snap
     if (!writeAll(socket, SyncProtocol::buildFrame(SyncProtocol::MessageFileEnd, requestID, encodeFileEnd(file.size(), hash)), kSyncMessageTimeoutMs, error)) {
         return false;
     }
-    return expectAck(socket, requestID, kSyncMessageTimeoutMs, &ackPayload, error);
+    if (!expectAck(socket, requestID, kSyncMessageTimeoutMs, &ackPayload, error)) {
+        return false;
+    }
+    emit logMessage(QStringLiteral("文件发送完成：%1，大小 %2，耗时 %3，平均速度 %4")
+                        .arg(entry.path, humanBytes(file.size()), humanDuration(transferTimer.elapsed()), humanRate(file.size(), transferTimer.elapsed())));
+    return true;
 }
 
 bool SourceConnector::writeAll(QSslSocket* socket, const QByteArray& data, int timeoutMs, QString* error)

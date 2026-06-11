@@ -18,6 +18,7 @@ import (
 	"github.com/202121000995/OneSync/internal/scanner"
 	"github.com/202121000995/OneSync/internal/sync"
 	"github.com/202121000995/OneSync/internal/task"
+	"github.com/202121000995/OneSync/internal/transfer"
 )
 
 const DefaultSyncInterval = 30 * time.Second
@@ -29,15 +30,18 @@ type Config struct {
 	ClientTLS    *tls.Config
 	MaxPayload   uint32
 	SyncInterval time.Duration
+	// TransferPipelineChunks controls how many file chunks may be in flight before waiting for acknowledgements.
+	TransferPipelineChunks int
 }
 
 // Factory creates authenticated synchronization runners.
 type Factory struct {
-	credentials  *auth.CredentialStore
-	serverTLS    *tls.Config
-	clientTLS    *tls.Config
-	maxPayload   uint32
-	syncInterval time.Duration
+	credentials            *auth.CredentialStore
+	serverTLS              *tls.Config
+	clientTLS              *tls.Config
+	maxPayload             uint32
+	syncInterval           time.Duration
+	transferPipelineChunks int
 }
 
 // NewFactory validates and copies runtime TLS configuration.
@@ -57,6 +61,9 @@ func NewFactory(config Config) (*Factory, error) {
 	if config.SyncInterval < 0 {
 		return nil, errors.New("sync interval cannot be negative")
 	}
+	if config.TransferPipelineChunks < 0 {
+		return nil, errors.New("transfer pipeline chunks cannot be negative")
+	}
 	if _, err := network.NewCodec(config.MaxPayload); err != nil {
 		return nil, err
 	}
@@ -71,11 +78,12 @@ func NewFactory(config Config) (*Factory, error) {
 		serverTLS.MinVersion = tls.VersionTLS13
 	}
 	return &Factory{
-		credentials:  config.Credentials,
-		serverTLS:    serverTLS,
-		clientTLS:    clientTLS,
-		maxPayload:   config.MaxPayload,
-		syncInterval: config.SyncInterval,
+		credentials:            config.Credentials,
+		serverTLS:              serverTLS,
+		clientTLS:              clientTLS,
+		maxPayload:             config.MaxPayload,
+		syncInterval:           config.SyncInterval,
+		transferPipelineChunks: config.TransferPipelineChunks,
 	}, nil
 }
 
@@ -204,8 +212,10 @@ func (r *runner) runCycle(ctx context.Context, taskID string, reporter task.Stat
 		if _, err := r.factory.credentials.Claim(r.task.ID, credential.Token, connection.peerID); err != nil {
 			return fmt.Errorf("claim target identity: %w", err)
 		}
-		engine, err := sync.DefaultSourceEngineWithOptions(r.task.SourcePath, transferSession, scanner.Options{
+		engine, err := sync.DefaultSourceEngineWithTransferOptions(r.task.SourcePath, transferSession, scanner.Options{
 			IgnoreRules: r.task.IgnoreRules,
+		}, transfer.Sender{
+			PipelineChunks: r.factory.transferPipelineChunks,
 		}, progressReporter(reporter))
 		if err != nil {
 			return err

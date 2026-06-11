@@ -8,7 +8,7 @@ import (
 )
 
 const (
-	MaxChunkSize = 256 << 10
+	MaxChunkSize = 1 << 20
 	hashSize     = 32
 	fileIDSize   = 32
 )

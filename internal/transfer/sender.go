@@ -7,13 +7,30 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/202121000995/OneSync/internal/network"
 )
 
+const defaultPipelineChunks = 4
+
 // Sender sends files in bounded chunks over an authenticated session.
 type Sender struct {
-	ChunkSize int
+	ChunkSize      int
+	PipelineChunks int
+}
+
+// TransferDescription returns a short human-readable transfer tuning summary.
+func (s Sender) TransferDescription() string {
+	chunkSize := s.ChunkSize
+	if chunkSize == 0 {
+		chunkSize = MaxChunkSize
+	}
+	pipelineChunks := s.PipelineChunks
+	if pipelineChunks == 0 {
+		pipelineChunks = defaultPipelineChunks
+	}
+	return fmt.Sprintf("分块=%s，流水线窗口=%d", formatBytes(chunkSize), pipelineChunks)
 }
 
 // SendFile sends one file and resumes from the receiver-confirmed offset.
@@ -27,6 +44,13 @@ func (s Sender) SendFile(ctx context.Context, session network.Session, requestID
 	}
 	if chunkSize < 1 || chunkSize > MaxChunkSize {
 		return fmt.Errorf("chunk size must be between 1 and %d", MaxChunkSize)
+	}
+	pipelineChunks := s.PipelineChunks
+	if pipelineChunks == 0 {
+		pipelineChunks = defaultPipelineChunks
+	}
+	if pipelineChunks < 1 {
+		return errors.New("pipeline chunks must be positive")
 	}
 
 	file, size, hash, err := openSourceFile(ctx, sourcePath)
@@ -61,9 +85,28 @@ func (s Sender) SendFile(ctx context.Context, session network.Session, requestID
 		return fmt.Errorf("seek source file: %w", err)
 	}
 
+	ackContext, cancelAck := context.WithCancel(ctx)
+	defer cancelAck()
+	expectedAcks := make(chan int64, pipelineChunks)
+	ackResults := make(chan error, pipelineChunks)
+	ackDone := make(chan struct{})
+	go func() {
+		defer close(ackDone)
+		for expected := range expectedAcks {
+			ackResults <- receiveExpectedOffset(ackContext, session, requestID, expected)
+		}
+	}()
+	closeAckReader := func() {
+		cancelAck()
+		close(expectedAcks)
+		<-ackDone
+	}
+
 	buffer := make([]byte, chunkSize)
+	pendingAcks := 0
 	for offset < size {
 		if err := ctx.Err(); err != nil {
+			closeAckReader()
 			return err
 		}
 		remaining := size - offset
@@ -73,26 +116,41 @@ func (s Sender) SendFile(ctx context.Context, session network.Session, requestID
 		}
 		count, readErr := io.ReadFull(file, buffer[:readSize])
 		if readErr != nil {
+			closeAckReader()
 			return fmt.Errorf("read source file: %w", readErr)
 		}
 		payload, err := encodeChunk(offset, buffer[:count])
 		if err != nil {
+			closeAckReader()
 			return err
 		}
 		if err := session.Send(ctx, network.Message{
 			Type: network.MessageFileChunk, RequestID: requestID, Payload: payload,
 		}); err != nil {
+			closeAckReader()
 			return err
 		}
 		offset += int64(count)
-		confirmed, err := receiveAckOffset(ctx, session, requestID)
-		if err != nil {
-			return err
-		}
-		if confirmed != offset {
-			return fmt.Errorf("receiver confirmed offset %d, want %d", confirmed, offset)
+		expectedAcks <- offset
+		pendingAcks++
+		if pendingAcks >= pipelineChunks {
+			if err := <-ackResults; err != nil {
+				closeAckReader()
+				return err
+			}
+			pendingAcks--
 		}
 	}
+	close(expectedAcks)
+	for pendingAcks > 0 {
+		if err := <-ackResults; err != nil {
+			cancelAck()
+			<-ackDone
+			return err
+		}
+		pendingAcks--
+	}
+	<-ackDone
 
 	endPayload, err := encodeEnd(size, hash)
 	if err != nil {
@@ -109,6 +167,35 @@ func (s Sender) SendFile(ctx context.Context, session network.Session, requestID
 	}
 	if response.RequestID != requestID || response.Type != network.MessageAck {
 		return errors.New("receiver rejected completed file")
+	}
+	return nil
+}
+
+func formatBytes(bytes int) string {
+	const unit = 1024
+	if bytes < unit {
+		return fmt.Sprintf("%d B", bytes)
+	}
+	units := []string{"KB", "MB", "GB"}
+	value := float64(bytes)
+	for _, suffix := range units {
+		value /= unit
+		if value < unit {
+			text := fmt.Sprintf("%.1f", value)
+			text = strings.TrimSuffix(strings.TrimSuffix(text, "0"), ".")
+			return text + " " + suffix
+		}
+	}
+	return fmt.Sprintf("%d B", bytes)
+}
+
+func receiveExpectedOffset(ctx context.Context, session network.Session, requestID uint64, expected int64) error {
+	confirmed, err := receiveAckOffset(ctx, session, requestID)
+	if err != nil {
+		return err
+	}
+	if confirmed != expected {
+		return fmt.Errorf("receiver confirmed offset %d, want %d", confirmed, expected)
 	}
 	return nil
 }

@@ -41,6 +41,7 @@ func main() {
 	caPath := flag.String("ca", "", "optional trusted CA certificate file")
 	logPath := flag.String("log-file", "", "optional log file path")
 	syncInterval := flag.Duration("sync-interval", client.DefaultSyncInterval, "time between completed synchronization cycles")
+	transferPipeline := flag.Int("transfer-pipeline", 0, "file transfer pipeline window; 0 uses the safe default")
 	flag.Parse()
 
 	paths, err := config.NewPaths(*dataDir)
@@ -75,10 +76,11 @@ func main() {
 		log.Fatal(err)
 	}
 	runnerFactory, err := client.NewFactory(client.Config{
-		Credentials:  credentials,
-		ServerTLS:    serverTLS,
-		ClientTLS:    clientTLS,
-		SyncInterval: *syncInterval,
+		Credentials:            credentials,
+		ServerTLS:              serverTLS,
+		ClientTLS:              clientTLS,
+		SyncInterval:           *syncInterval,
+		TransferPipelineChunks: *transferPipeline,
 	})
 	if err != nil {
 		log.Fatal(err)
