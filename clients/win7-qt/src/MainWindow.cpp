@@ -182,7 +182,7 @@ void applyModernDialogStyle(QDialog* dialog)
 }
 } // namespace
 
-const QString kWin7Version = QStringLiteral("1.25");
+const QString kWin7Version = QStringLiteral("1.26");
 
 MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent)
@@ -702,8 +702,13 @@ void MainWindow::startSelectedTask()
     task->connectedDevices = 0;
     task->receivedBytes = 0;
     task->sentBytes = 0;
+    task->currentReceivedRate = 0;
+    task->currentSentRate = 0;
+    task->lastTrafficReceivedBytes = 0;
+    task->lastTrafficSentBytes = 0;
     task->ignoredCount = 0;
     task->startedAtMs = QDateTime::currentDateTimeUtc().toMSecsSinceEpoch();
+    task->lastTrafficAtMs = task->startedAtMs;
     task->status = QStringLiteral("运行-连接中");
     task->detail = source ? QStringLiteral("正在等待目标端") : QStringLiteral("正在连接源端");
     refreshTaskTable();
@@ -741,8 +746,7 @@ void MainWindow::startSelectedTask()
             if (task == nullptr) {
                 return;
             }
-            task->receivedBytes = receivedBytes;
-            task->sentBytes = sentBytes;
+            updateTaskTraffic(task, receivedBytes, sentBytes);
             refreshTaskTable();
         });
         connect(sourceConnector, &SourceConnector::snapshotScanned, this, [this, taskID](quint64 fileCount, quint64 byteCount, quint64 ignoredCount) {
@@ -779,8 +783,7 @@ void MainWindow::startSelectedTask()
             if (task == nullptr) {
                 return;
             }
-            task->receivedBytes = receivedBytes;
-            task->sentBytes = sentBytes;
+            updateTaskTraffic(task, receivedBytes, sentBytes);
             refreshTaskTable();
         });
         connect(connector, &TargetConnector::snapshotScanned, this, [this, taskID](quint64 fileCount, quint64 byteCount, quint64 ignoredCount) {
@@ -1354,8 +1357,8 @@ void MainWindow::refreshTaskTable()
             devices,
             task.localBytes > 0 ? formatBytes(task.localBytes) : QStringLiteral("-"),
             task.globalBytes > 0 ? formatBytes(task.globalBytes) : QStringLiteral("-"),
-            formatAverageRate(task.receivedBytes, task.startedAtMs),
-            formatAverageRate(task.sentBytes, task.startedAtMs)
+            formatRate(task.currentReceivedRate),
+            formatRate(task.currentSentRate)
         };
         for (int column = 0; column < values.size(); ++column) {
             auto* item = taskTable->item(row, column);
@@ -1364,11 +1367,13 @@ void MainWindow::refreshTaskTable()
                 taskTable->setItem(row, column, item);
             }
             item->setText(values[column]);
-            item->setToolTip(QStringLiteral("%1\n设备别名：%2\n接收总量：%3\n发送总量：%4\n忽略：%5 项")
+            item->setToolTip(QStringLiteral("%1\n设备别名：%2\n接收总量：%3\n发送总量：%4\n当前接收：%5\n当前发送：%6\n忽略：%7 项")
                 .arg(task.detail,
                     task.deviceAlias.isEmpty() ? QStringLiteral("-") : task.deviceAlias,
                     formatBytes(task.receivedBytes),
-                    formatBytes(task.sentBytes))
+                    formatBytes(task.sentBytes),
+                    formatRate(task.currentReceivedRate),
+                    formatRate(task.currentSentRate))
                 .arg(task.ignoredCount));
         }
     }
@@ -2104,6 +2109,30 @@ QString MainWindow::taskDiagnosticsText(const SyncTask& task) const
     return text;
 }
 
+void MainWindow::updateTaskTraffic(SyncTask* task, quint64 receivedBytes, quint64 sentBytes)
+{
+    if (task == nullptr) {
+        return;
+    }
+    const qint64 nowMs = QDateTime::currentDateTimeUtc().toMSecsSinceEpoch();
+    const qint64 elapsedMs = task->lastTrafficAtMs > 0 ? nowMs - task->lastTrafficAtMs : 0;
+    if (elapsedMs > 0) {
+        const quint64 receivedDelta = receivedBytes >= task->lastTrafficReceivedBytes
+            ? receivedBytes - task->lastTrafficReceivedBytes
+            : 0;
+        const quint64 sentDelta = sentBytes >= task->lastTrafficSentBytes
+            ? sentBytes - task->lastTrafficSentBytes
+            : 0;
+        task->currentReceivedRate = quint64((receivedDelta * 1000) / quint64(elapsedMs));
+        task->currentSentRate = quint64((sentDelta * 1000) / quint64(elapsedMs));
+    }
+    task->receivedBytes = receivedBytes;
+    task->sentBytes = sentBytes;
+    task->lastTrafficReceivedBytes = receivedBytes;
+    task->lastTrafficSentBytes = sentBytes;
+    task->lastTrafficAtMs = nowMs;
+}
+
 QString MainWindow::formatBytes(quint64 value) const
 {
     const char* units[] = {"B", "KB", "MB", "GB", "TB"};
@@ -2117,15 +2146,6 @@ QString MainWindow::formatBytes(quint64 value) const
         return QStringLiteral("%1 B").arg(value);
     }
     return QStringLiteral("%1 %2").arg(size, 0, 'f', size >= 10.0 ? 1 : 2).arg(QString::fromLatin1(units[unit]));
-}
-
-QString MainWindow::formatAverageRate(quint64 bytes, qint64 startedAtMs) const
-{
-    if (bytes == 0 || startedAtMs <= 0) {
-        return QStringLiteral("0 B/s");
-    }
-    const qint64 elapsedMs = qMax<qint64>(1, QDateTime::currentDateTimeUtc().toMSecsSinceEpoch() - startedAtMs);
-    return formatRate(quint64((bytes * 1000) / quint64(elapsedMs)));
 }
 
 QString MainWindow::formatRate(quint64 value) const

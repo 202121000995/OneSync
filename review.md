@@ -2343,6 +2343,46 @@
 
 - 这个修复解决的是“升级/重启后旧运行态被误恢复为失败”的问题；如果源端和目标端使用不同 session/token 的同步链接，仍然需要重新从源端复制最新链接加入。
 
+## v1.26 当前速率显示与 Relay 流水线窗口审核
+
+审核分支：`main`
+
+审核结论：本地通过，暂未发布 GitHub Release。
+
+现场现象：
+
+- Win7 Qt 源端界面显示发送速度只有数 KB/s，但日志显示已经开始传输大文件。
+- 代码检查确认表格“接收/发送”列显示的是“累计传输字节 ÷ 任务启动到当前的总时间”，目标端等待时间也被算进去，因此长期等待后会严重低估当前速度。
+
+修复说明：
+
+- Win7 Qt 任务表的“接收/发送”列改为显示最近一次流量变化计算出的当前速率。
+- Win7 Qt 任务 tooltip 保留累计接收/发送总量，并新增当前接收/当前发送速率。
+- Win7 Qt 启动任务时重置当前速率和上一次流量采样点。
+- Win7 Qt 源端传输流水线窗口从 4 提升到 16，Relay 高延迟场景下减少 ACK 往返造成的等待。
+- Go/Linux 主客户端默认传输流水线窗口从 4 提升到 16；仍可通过 `ONESYNC_TRANSFER_PIPELINE` 自定义。
+- README 的传输窗口说明改为“自定义窗口”，不再暗示默认窗口仍偏小。
+- 根版本号从 `1.25` 提升到 `1.26`，主包、Win7 Qt 包、Linux 安装/升级示例统一使用 `v1.26`。
+
+验证结果：
+
+- `GOCACHE=/Users/apple/Documents/同步软件/.cache/go-build go test ./internal/transfer` 通过。
+- `GOCACHE=/Users/apple/Documents/同步软件/.cache/go-build go test ./...` 非沙盒运行通过；沙盒内因本地端口监听权限失败，非代码问题。
+- `sh clients/win7-qt/build-win7.sh` 成功，生成 `clients/win7-qt/dist/OneSyncWin7-win7-x86-v1.26.zip`。
+- `PATH=/Users/apple/Library/Go/sdk/go1.26.3/bin:$PATH sh packaging/package-acceptance.sh` 成功，生成主 Windows/Linux v1.26 包。
+- `unzip -t clients/win7-qt/dist/OneSyncWin7-win7-x86-v1.26.zip` 通过。
+- `unzip -t dist/acceptance-packages/onesync-windows-amd64-v1.26.zip` 通过。
+- `tar -tzf dist/acceptance-packages/onesync-linux-amd64-v1.26.tar.gz` 通过。
+- `strings clients/win7-qt/dist/OneSyncWin7-win7-x86-v1.26/OneSyncWin7.exe | rg 'GetSystemTimePreciseAsFileTime|KERNEL32\.dll|1\.26'` 只匹配到 `KERNEL32.dll`。
+- `sh -n` 检查 Linux 一键脚本和控制脚本通过。
+- `git diff --check` 通过。
+- 仓库内未检出用户测试域名、测试 IP 或测试 token。
+
+剩余风险：
+
+- 这次修复了速度显示口径并提高默认流水线窗口，但真实吞吐仍受 Relay 服务器带宽、源端上行、目标端写盘、TLS 加密和跨境/跨运营商线路影响。
+- 完整 Syncthing 式多块并发/块级复用仍未实现。
+
 ## v1.21 流水线 ACK 提速审核
 
 审核分支：`main`

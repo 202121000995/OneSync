@@ -72,8 +72,13 @@ private:
         quint64 globalBytes = 0;
         quint64 receivedBytes = 0;
         quint64 sentBytes = 0;
+        quint64 currentReceivedRate = 0;
+        quint64 currentSentRate = 0;
+        quint64 lastTrafficReceivedBytes = 0;
+        quint64 lastTrafficSentBytes = 0;
         quint64 ignoredCount = 0;
         qint64 startedAtMs = 0;
+        qint64 lastTrafficAtMs = 0;
         int localFiles = 0;
         int connectedDevices = 0;
         int totalDevices = 1;
@@ -109,8 +114,8 @@ private:
     void showSourceLink(const SyncTask& task);
     void showTaskParameters(SyncTask* task);
     QString taskDiagnosticsText(const SyncTask& task) const;
+    void updateTaskTraffic(SyncTask* task, quint64 receivedBytes, quint64 sentBytes);
     QString formatBytes(quint64 value) const;
-    QString formatAverageRate(quint64 bytes, qint64 startedAtMs) const;
     QString formatRate(quint64 value) const;
     void appendLog(const QString& message);
     void appendTaskLog(const QString& taskID, const QString& message);

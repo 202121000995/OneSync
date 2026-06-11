@@ -12,7 +12,7 @@ import (
 	"github.com/202121000995/OneSync/internal/network"
 )
 
-const defaultPipelineChunks = 4
+const defaultPipelineChunks = 16
 
 // Sender sends files in bounded chunks over an authenticated session.
 type Sender struct {
