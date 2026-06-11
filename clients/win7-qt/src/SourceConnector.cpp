@@ -9,6 +9,7 @@
 #include <QFileInfo>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QThread>
 #include <QSslCertificate>
 #include <QtEndian>
 
@@ -18,6 +19,7 @@
 namespace {
 const int kTlsTimeoutMs = 15000;
 const int kRelayWaitTimeoutMs = 120000;
+const int kRetryDelayMs = 30000;
 const int kAuthenticationTimeoutMs = 15000;
 const int kSyncMessageTimeoutMs = 30000;
 const int kMaxPayload = 16 * 1024 * 1024;
@@ -70,7 +72,6 @@ void SourceConnector::cancel()
 
 void SourceConnector::run()
 {
-    emit statusChanged(QStringLiteral("运行-连接中"));
     QString error;
     if (isCancelled(&error)) {
         emit finished(false, error);
@@ -99,31 +100,65 @@ void SourceConnector::run()
         return;
     }
 
-    QSslSocket socket;
-    if (!connectTls(&socket, endpoint, kTlsTimeoutMs, &error)) {
-        emit finished(false, error);
-        return;
-    }
+    emit logMessage(QStringLiteral("发送端已进入长期等待模式；没有目标端加入时会自动重试，不需要重新创建链接。"));
+    while (true) {
+        if (isCancelled(&error)) {
+            emit finished(false, error);
+            return;
+        }
+        emit statusChanged(QStringLiteral("运行-连接中"));
+        QString cycleError;
+        QSslSocket socket;
+        if (!connectTls(&socket, endpoint, kTlsTimeoutMs, &cycleError)) {
+            emit logMessage(QStringLiteral("本轮连接 Relay 失败：%1").arg(cycleError));
+            if (!waitBeforeRetry(&error)) {
+                emit finished(false, error);
+                return;
+            }
+            continue;
+        }
 
-    emit logMessage(QStringLiteral("已连接 Relay TLS：%1").arg(endpoint.display()));
-    emit logMessage(QStringLiteral("等待目标端加入同步。"));
-    if (!registerRelay(&socket, token, &error)) {
-        emit finished(false, error);
-        return;
-    }
-    emit logMessage(QStringLiteral("Relay 已配对，等待目标端认证。"));
+        emit logMessage(QStringLiteral("已连接 Relay TLS：%1").arg(endpoint.display()));
+        emit logMessage(QStringLiteral("等待目标端加入同步。"));
+        if (!registerRelay(&socket, token, &cycleError)) {
+            emit logMessage(QStringLiteral("本轮 Relay 配对未完成：%1").arg(cycleError));
+            socket.disconnectFromHost();
+            if (!waitBeforeRetry(&error)) {
+                emit finished(false, error);
+                return;
+            }
+            continue;
+        }
+        emit logMessage(QStringLiteral("Relay 已配对，等待目标端认证。"));
 
-    if (!authenticateTarget(&socket, token, &error)) {
-        emit finished(false, error);
-        return;
-    }
+        if (!authenticateTarget(&socket, token, &cycleError)) {
+            emit logMessage(QStringLiteral("本轮目标端认证失败：%1").arg(cycleError));
+            socket.disconnectFromHost();
+            if (!waitBeforeRetry(&error)) {
+                emit finished(false, error);
+                return;
+            }
+            continue;
+        }
 
-    emit statusChanged(QStringLiteral("运行-已连接目标端"));
-    if (!runSourceSync(&socket, &error)) {
-        emit finished(false, error);
-        return;
+        emit statusChanged(QStringLiteral("运行-已连接目标端"));
+        if (!runSourceSync(&socket, &cycleError)) {
+            emit logMessage(QStringLiteral("本轮同步失败：%1").arg(cycleError));
+            socket.disconnectFromHost();
+            if (!waitBeforeRetry(&error)) {
+                emit finished(false, error);
+                return;
+            }
+            continue;
+        }
+        emit statusChanged(QStringLiteral("运行-等待"));
+        emit logMessage(QStringLiteral("本轮同步完成，继续等待下一轮同步。"));
+        socket.disconnectFromHost();
+        if (!waitBeforeRetry(&error)) {
+            emit finished(false, error);
+            return;
+        }
     }
-    emit finished(true, QStringLiteral("本轮同步完成。"));
 }
 
 bool SourceConnector::isCancelled(QString* error) const
@@ -135,6 +170,17 @@ bool SourceConnector::isCancelled(QString* error) const
         return true;
     }
     return false;
+}
+
+bool SourceConnector::waitBeforeRetry(QString* error) const
+{
+    for (int elapsed = 0; elapsed < kRetryDelayMs; elapsed += 250) {
+        if (isCancelled(error)) {
+            return false;
+        }
+        QThread::msleep(250);
+    }
+    return true;
 }
 
 bool SourceConnector::connectTls(QSslSocket* socket, const Endpoint& endpoint, int timeoutMs, QString* error)

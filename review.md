@@ -2271,6 +2271,38 @@
 - `PATH=/Users/apple/Library/Go/sdk/go1.26.3/bin:$PATH sh packaging/package-acceptance.sh` 成功，生成主 Windows/Linux v1.07 包。
 - `unzip -t clients/win7-qt/dist/OneSyncWin7-win7-x86-v1.07.zip` 通过。
 - `strings clients/win7-qt/release-win7/OneSyncWin7.exe | rg "GetSystemTimePreciseAsFileTime|KERNEL32.dll"` 只匹配到 `KERNEL32.dll`。
+
+## v1.18 Win7 长期等待审核
+
+审核分支：`main`
+
+审核结论：本地通过，尚未提交和上传。
+
+审核说明：
+
+- 根版本号从 `1.17` 提升到 `1.18`，主包、Win7 Qt 包、Linux 安装/升级示例统一使用 `v1.18`。
+- Win7 Qt 源端和目标端改为长期运行模式：点击开始后会持续在线等待对端，不再因为单轮 Relay 配对超时就停止任务。
+- 120 秒现在只代表一轮 Relay 配对等待窗口；窗口过期后客户端会记录日志，等待 30 秒后自动进入下一轮配对。
+- 同步完成后任务不会退出，会继续等待下一轮同步。
+- 用户点击暂停/停止时，长期等待循环会正常退出。
+
+产品结论：
+
+- 创建发送任务后，用户不需要在 120 秒内配置好另一端。
+- 只要发送端任务保持“开始/运行”，目标端晚几个小时再加入也可以通过下一轮 Relay 配对连上。
+- 这更接近 Syncthing / 微力同步的体验：任务是长期活跃对象，Relay 只是连接通道，不是一次性倒计时。
+
+验证结果：
+
+- `go test ./...` 通过。
+- `sh -n` 检查 Linux 一键脚本和控制脚本通过。
+- `git diff --check` 通过。
+- `sh clients/win7-qt/build-win7.sh` 成功，生成 `clients/win7-qt/dist/OneSyncWin7-win7-x86-v1.18.zip`。
+- `PATH=/Users/apple/Library/Go/sdk/go1.26.3/bin:$PATH sh packaging/package-acceptance.sh` 成功，生成主 Windows/Linux v1.18 包。
+- `unzip -t clients/win7-qt/dist/OneSyncWin7-win7-x86-v1.18.zip` 通过。
+- `unzip -t dist/acceptance-packages/onesync-windows-amd64-v1.18.zip` 通过。
+- `tar -tzf dist/acceptance-packages/onesync-linux-amd64-v1.18.tar.gz` 通过。
+- `strings clients/win7-qt/release-win7/OneSyncWin7.exe | rg "GetSystemTimePreciseAsFileTime|KERNEL32.dll"` 只匹配到 `KERNEL32.dll`。
 - `unzip -t dist/acceptance-packages/onesync-windows-amd64-v1.07.zip` 通过。
 - `tar -tzf dist/acceptance-packages/onesync-linux-amd64-v1.07.tar.gz` 通过。
 
