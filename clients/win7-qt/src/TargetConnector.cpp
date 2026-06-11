@@ -16,7 +16,7 @@
 namespace {
 const int kTlsTimeoutMs = 15000;
 const int kRelayWaitTimeoutMs = 120000;
-const int kRetryDelayMs = 30000;
+const int kRetryDelayMs = 5000;
 const int kAuthenticationTimeoutMs = 15000;
 const int kSyncMessageTimeoutMs = 120000;
 const int kMaxPayload = 16 * 1024 * 1024;

@@ -2982,3 +2982,37 @@
 剩余风险：
 
 - Relay 中转速度仍受服务器带宽、跨网链路质量和目标端落盘速度影响；v1.27 修正统计口径和误超时，不等同于无限提升公网中转速度。
+
+## v1.28 Relay 重连窗口优化审核
+
+审核分支：`main`
+
+审核结论：本地验证中，准备发布 GitHub Release。
+
+现场现象：
+
+- v1.27 大文件传输本身已能完成，但目标端删除文件后重新触发同步，需要源端和目标端反复重连，等待时间偏长。
+- 日志显示每轮完成后约 30 秒才重新连接 Relay；目标端变化触发后如果错过源端窗口，就要等待下一轮配对。
+
+修复说明：
+
+- Win7 Qt 源端和目标端 Relay 重连等待从 30 秒降到 5 秒，让两端更快重新进入 Relay 等待状态。
+- Linux/主客户端默认同步间隔从 30 秒降到 10 秒，减少目标端文件变化后的下一轮触发等待。
+- 根版本号从 `1.27` 提升到 `1.28`，主包、Win7 Qt 包、Linux 安装/升级示例统一使用 `v1.28`。
+
+验证结果：
+
+- `go test ./...` 通过。
+- `sh clients/win7-qt/build-win7.sh` 成功，生成 `clients/win7-qt/dist/OneSyncWin7-win7-x86-v1.28.zip`。
+- `PATH=/Users/apple/Library/Go/sdk/go1.26.3/bin:$PATH sh packaging/package-acceptance.sh` 成功，生成主 Windows/Linux v1.28 包。
+- `unzip -t clients/win7-qt/dist/OneSyncWin7-win7-x86-v1.28.zip` 通过。
+- `unzip -t dist/acceptance-packages/onesync-windows-amd64-v1.28.zip` 通过。
+- `tar -tzf dist/acceptance-packages/onesync-linux-amd64-v1.28.tar.gz` 通过。
+- `strings clients/win7-qt/dist/OneSyncWin7-win7-x86-v1.28/OneSyncWin7.exe | rg 'GetSystemTimePreciseAsFileTime|KERNEL32\.dll|1\.28'` 只匹配到 `KERNEL32.dll`。
+- `sh -n` 检查 Linux 一键脚本和控制脚本通过。
+- `git diff --check` 通过。
+- 仓库内未检出用户测试域名、测试 IP 或测试 token。
+
+剩余风险：
+
+- 这仍是“周期性重连等待”模型，不是 Syncthing 那种长期保持双端会话；后续要进一步产品化，应把 Relay 会话改成长连接常驻或加入轻量心跳。

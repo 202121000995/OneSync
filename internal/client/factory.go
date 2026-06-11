@@ -22,7 +22,7 @@ import (
 	"github.com/202121000995/OneSync/internal/transfer"
 )
 
-const DefaultSyncInterval = 30 * time.Second
+const DefaultSyncInterval = 10 * time.Second
 
 const maxConnectionRetryDelay = 30 * time.Second
 
