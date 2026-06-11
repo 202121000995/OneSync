@@ -30,6 +30,7 @@ func main() {
 	maxBytes := flag.Int64("max-bytes", relay.DefaultMaxBytes, "maximum bytes per direction and session")
 	accessToken := flag.String("access-token", "", "optional Relay access token")
 	accessTokenFile := flag.String("access-token-file", "", "optional file containing the Relay access token")
+	accessKeysFile := flag.String("access-keys-file", "", "optional JSON file containing multiple Relay access keys")
 	logPath := flag.String("log-file", "", "optional log file path")
 	adminListen := flag.String("admin-listen", "", "optional Relay admin web listen address")
 	adminAuthPath := flag.String("admin-auth-file", "", "optional Relay admin account file")
@@ -62,7 +63,7 @@ func main() {
 		MaxActive:           *maxActive,
 		MaxBytes:            *maxBytes,
 		AccessToken:         relayAccessToken,
-		AccessTokenProvider: accessTokenProvider(*accessTokenFile),
+		AccessTokenProvider: accessTokenProvider(*accessToken, *accessTokenFile, *accessKeysFile),
 		Logger:              logger.NewText(logWriter),
 	})
 	if err != nil {
@@ -84,13 +85,17 @@ func main() {
 			authPath = "relay-admin-auth.json"
 		}
 		if err := startAdminServer(ctx, adminConfig{
-			Listen:       *adminListen,
-			AuthPath:     authPath,
-			TokenFile:    *accessTokenFile,
-			CertPathFile: *certificatePathFile,
-			DefaultCert:  *certificatePath,
-			DefaultKey:   *privateKeyPath,
-			RelayListen:  *address,
+			Listen:         *adminListen,
+			AuthPath:       authPath,
+			TokenFile:      *accessTokenFile,
+			AccessKeysFile: *accessKeysFile,
+			CertPathFile:   *certificatePathFile,
+			DefaultCert:    *certificatePath,
+			DefaultKey:     *privateKeyPath,
+			LogPath:        *logPath,
+			ServiceName:    "onesync-relay.service",
+			Broker:         broker,
+			RelayListen:    *address,
 		}); err != nil {
 			log.Fatal(err)
 		}
@@ -211,16 +216,27 @@ func latestModTime(paths ...string) (time.Time, error) {
 	return latest, nil
 }
 
-func accessTokenProvider(path string) func() string {
+func accessTokenProvider(value, path, keysPath string) func() []string {
+	value = strings.TrimSpace(value)
 	path = strings.TrimSpace(path)
-	if path == "" {
+	keysPath = strings.TrimSpace(keysPath)
+	if value == "" && path == "" && keysPath == "" {
 		return nil
 	}
-	return func() string {
-		token, err := loadAccessToken("", path)
-		if err != nil {
-			return ""
+	return func() []string {
+		tokens := make([]string, 0, 4)
+		if value != "" {
+			tokens = append(tokens, value)
 		}
-		return token
+		if path != "" {
+			token, err := loadAccessToken("", path)
+			if err == nil && token != "" {
+				tokens = append(tokens, token)
+			}
+		}
+		if keysPath != "" {
+			tokens = append(tokens, newAccessKeyStore(keysPath).enabledTokens()...)
+		}
+		return tokens
 	}
 }

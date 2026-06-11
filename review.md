@@ -2511,3 +2511,44 @@
 剩余风险：
 
 - 粘贴证书不会替用户申请和续期证书；证书过期后仍需要在宝塔 / 1Panel / 证书服务商续期后重新粘贴，或改用证书路径方式。
+
+## v1.14 Relay 运营面板审核
+
+审核分支：`main`
+
+审核结论：本地通过，尚未上传 GitHub Release。
+
+审核说明：
+
+- 根版本号从 `1.13` 提升到 `1.14`，主包、Win7 Qt 包、Linux 安装/升级示例统一使用 `v1.14`。
+- Relay broker 新增运行快照：当前连接数、等待配对数、在线会话数、累计源到目标字节、累计目标到源字节。
+- Relay broker 记录等待、在线和最近关闭的会话，面板可查看源端地址、目标端地址、会话状态和流量。
+- Relay 面板新增“连接和流量”区域，展示在线设备/连接列表和实时流量统计。
+- Relay 面板新增“Relay 日志”区域，展示最近 120 行日志，并提供下载日志入口。
+- Relay 面板新增“客户 Relay 令牌”，支持创建、禁用、启用、删除多组令牌；旧单令牌继续兼容。
+- Linux Relay systemd 服务新增 `-access-keys-file /etc/onesync/relay.keys.json` 参数。
+- Relay 面板新增“重启 Relay”按钮，在 systemd 环境下执行 `systemctl restart onesync-relay.service`。
+
+验证结果：
+
+- `git diff --check` 通过。
+- `sh -n packaging/acceptance-scripts/linux/onesync-relayctl` 通过。
+- `/Users/apple/Library/Go/sdk/go1.26.3/bin/go test ./...` 通过。
+- 本地启动 Relay 管理面板，首次设置临时管理账号成功。
+- 管理面板显示“连接和流量”“客户 Relay 令牌”“Relay 日志”“服务操作”区域。
+- 管理面板创建“客户A”Relay 令牌成功，页面显示令牌，令牌 JSON 文件落盘成功。
+- 新增单元测试覆盖多令牌创建、禁用、删除。
+- 新增单元测试覆盖多令牌 provider 认证。
+- 新增单元测试覆盖 Relay 流量快照统计。
+- `sh clients/win7-qt/build-win7.sh` 成功，生成 `clients/win7-qt/dist/OneSyncWin7-win7-x86-v1.14.zip`。
+- `PATH=/Users/apple/Library/Go/sdk/go1.26.3/bin:$PATH sh packaging/package-acceptance.sh` 成功，生成主 Windows/Linux v1.14 包。
+- `unzip -t clients/win7-qt/dist/OneSyncWin7-win7-x86-v1.14.zip` 通过。
+- `strings clients/win7-qt/release-win7/OneSyncWin7.exe | rg "GetSystemTimePreciseAsFileTime|KERNEL32.dll"` 只匹配到 `KERNEL32.dll`。
+- `unzip -t dist/acceptance-packages/onesync-windows-amd64-v1.14.zip` 通过。
+- `tar -tzf dist/acceptance-packages/onesync-linux-amd64-v1.14.tar.gz` 通过。
+
+剩余风险：
+
+- 面板重启 Relay 依赖 systemd，非 systemd 环境会失败；正式 Linux 一键安装是 systemd 服务模式。
+- 当前连接列表展示的是 Relay 会话级别，不等同于 OneSync 客户端设备名；设备友好名称需要客户端协议继续上报。
+- 流量统计是 Relay 层转发字节，不等同于最终文件有效数据量。

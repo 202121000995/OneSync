@@ -104,6 +104,63 @@ func TestBrokerAcceptsAccessToken(t *testing.T) {
 	waitBrokerResults(t, results, false)
 }
 
+func TestBrokerAcceptsProvidedAccessToken(t *testing.T) {
+	broker := mustBroker(t, Config{
+		WaitTimeout: time.Second,
+		IdleTimeout: time.Second,
+		MaxWaiting:  10,
+		MaxBytes:    1024,
+		AccessTokenProvider: func() []string {
+			return []string{"customer-a", "customer-b"}
+		},
+	})
+	token := bytes.Repeat([]byte{0x42}, tokenSize)
+	source, target, results := connectPairWithAccessToken(t, broker, "session", token, token, "customer-b")
+	defer source.Close()
+	defer target.Close()
+	if _, err := source.Write([]byte("ok")); err != nil {
+		t.Fatalf("source Write() error = %v", err)
+	}
+	assertRead(t, target, "ok")
+	_ = source.Close()
+	_ = target.Close()
+	waitBrokerResults(t, results, false)
+}
+
+func TestBrokerSnapshotTracksRelayTraffic(t *testing.T) {
+	broker := mustBroker(t, Config{
+		WaitTimeout: time.Second,
+		IdleTimeout: time.Second,
+		MaxWaiting:  10,
+		MaxBytes:    1024,
+	})
+	token := bytes.Repeat([]byte{0x42}, tokenSize)
+	source, target, results := connectPair(t, broker, token, token)
+	defer source.Close()
+	defer target.Close()
+
+	if _, err := source.Write([]byte("source-to-target")); err != nil {
+		t.Fatalf("source Write() error = %v", err)
+	}
+	assertRead(t, target, "source-to-target")
+	if _, err := target.Write([]byte("target-to-source")); err != nil {
+		t.Fatalf("target Write() error = %v", err)
+	}
+	assertRead(t, source, "target-to-source")
+
+	snapshot := broker.Snapshot()
+	if snapshot.Active != 1 || snapshot.Connections != 2 {
+		t.Fatalf("Snapshot active/connections = %d/%d, want 1/2", snapshot.Active, snapshot.Connections)
+	}
+	if snapshot.TotalSourceBytes != uint64(len("source-to-target")) || snapshot.TotalTargetBytes != uint64(len("target-to-source")) {
+		t.Fatalf("Snapshot bytes = %d/%d", snapshot.TotalSourceBytes, snapshot.TotalTargetBytes)
+	}
+
+	_ = source.Close()
+	_ = target.Close()
+	waitBrokerResults(t, results, false)
+}
+
 func TestBrokerRejectsDuplicateRole(t *testing.T) {
 	broker := mustBroker(t, Config{
 		WaitTimeout: 100 * time.Millisecond,

@@ -47,7 +47,7 @@ type Config struct {
 	MaxActive           int
 	MaxBytes            int64
 	AccessToken         string
-	AccessTokenProvider func() string
+	AccessTokenProvider func() []string
 	Logger              *slog.Logger
 }
 
@@ -65,7 +65,11 @@ type Broker struct {
 	maxBytes            int64
 	accessTokenHash     [sha256.Size]byte
 	accessTokenRequired bool
-	accessTokenProvider func() string
+	accessTokenProvider func() []string
+	sessionStats        map[string]*sessionStats
+	recentSessions      []SessionSnapshot
+	totalSourceBytes    uint64
+	totalTargetBytes    uint64
 	logger              *slog.Logger
 }
 
@@ -114,6 +118,7 @@ func NewBroker(config Config) (*Broker, error) {
 		accessTokenHash:     accessTokenHash,
 		accessTokenRequired: accessTokenRequired,
 		accessTokenProvider: config.AccessTokenProvider,
+		sessionStats:        make(map[string]*sessionStats),
 		logger:              config.Logger,
 	}, nil
 }
@@ -172,7 +177,7 @@ func (b *Broker) Handle(ctx context.Context, connection net.Conn) error {
 	if err := writeAll(outcome.peer, []byte{1}); err != nil {
 		return fmt.Errorf("confirm Relay peer pairing: %w", err)
 	}
-	return b.forward(ctx, connection, outcome.peer, registration.sessionID)
+	return b.forward(ctx, connection, outcome.peer, registration.sessionID, registration.role)
 }
 
 func (b *Broker) authorize(registration registration) bool {
@@ -180,11 +185,15 @@ func (b *Broker) authorize(registration registration) bool {
 		return true
 	}
 	if b.accessTokenProvider != nil {
-		token := b.accessTokenProvider()
-		if token == "" || len(token) > maxAccessTokenLength {
-			return false
+		for _, token := range b.accessTokenProvider() {
+			if token == "" || len(token) > maxAccessTokenLength {
+				continue
+			}
+			if registration.accessTokenPresent && sameToken(sha256.Sum256([]byte(token)), registration.accessTokenHash) {
+				return true
+			}
 		}
-		return registration.accessTokenPresent && sameToken(sha256.Sum256([]byte(token)), registration.accessTokenHash)
+		return false
 	}
 	return registration.accessTokenPresent && sameToken(b.accessTokenHash, registration.accessTokenHash)
 }
@@ -208,6 +217,7 @@ func (b *Broker) pair(ctx context.Context, connection net.Conn, registration reg
 		}
 		delete(b.waiting, registration.sessionID)
 		b.active++
+		b.markActiveLocked(registration.sessionID, waiting.registration.role, waiting.connection.RemoteAddr().String(), registration.role, connection.RemoteAddr().String())
 		b.mu.Unlock()
 		b.logger.Info("Relay peer matched", "session", sessionLabel, "role", role)
 		waiting.ready <- pairResult{peer: connection}
@@ -225,6 +235,7 @@ func (b *Broker) pair(ctx context.Context, connection net.Conn, registration reg
 		done:         make(chan struct{}),
 	}
 	b.waiting[registration.sessionID] = waiting
+	b.markWaitingLocked(registration.sessionID, registration.role, connection.RemoteAddr().String())
 	b.mu.Unlock()
 	b.logger.Info("Relay peer waiting", "session", sessionLabel, "role", role, "timeout", b.waitTimeout.String())
 
@@ -269,11 +280,12 @@ func (b *Broker) removeWaiting(sessionID string, waiting *waitingPeer) {
 	b.mu.Lock()
 	if b.waiting[sessionID] == waiting {
 		delete(b.waiting, sessionID)
+		b.markClosedLocked(sessionID, "waiting removed")
 	}
 	b.mu.Unlock()
 }
 
-func (b *Broker) forward(ctx context.Context, left, right net.Conn, sessionID string) error {
+func (b *Broker) forward(ctx context.Context, left, right net.Conn, sessionID string, leftRole byte) error {
 	sessionLabel := sessionDigest(sessionID)
 	b.logger.Info("Relay session paired", "session", sessionLabel)
 	defer b.logger.Info("Relay session closed", "session", sessionLabel)
@@ -282,7 +294,7 @@ func (b *Broker) forward(ctx context.Context, left, right net.Conn, sessionID st
 		err error
 	}
 	results := make(chan copyResult, 2)
-	copyStream := func(destination, source net.Conn) {
+	copyStream := func(destination, source net.Conn, sourceToTarget bool) {
 		buffer := make([]byte, 32<<10)
 		var transferred int64
 		for {
@@ -300,6 +312,7 @@ func (b *Broker) forward(ctx context.Context, left, right net.Conn, sessionID st
 					return
 				}
 				transferred += int64(count)
+				b.addSessionBytes(sessionID, sourceToTarget, uint64(count))
 			}
 			if readErr != nil {
 				if errors.Is(readErr, io.EOF) {
@@ -311,16 +324,132 @@ func (b *Broker) forward(ctx context.Context, left, right net.Conn, sessionID st
 			}
 		}
 	}
-	go copyStream(left, right)
-	go copyStream(right, left)
+	leftToRightIsSourceToTarget := leftRole == roleSource
+	go copyStream(right, left, leftToRightIsSourceToTarget)
+	go copyStream(left, right, !leftToRightIsSourceToTarget)
 
 	select {
 	case <-ctx.Done():
-		return ctx.Err()
+		err := ctx.Err()
+		b.markClosed(sessionID, err.Error())
+		return err
 	case result := <-results:
 		_ = left.SetDeadline(time.Now())
 		_ = right.SetDeadline(time.Now())
+		reason := "closed"
+		if result.err != nil {
+			reason = result.err.Error()
+		}
+		b.markClosed(sessionID, reason)
 		return result.err
+	}
+}
+
+// Snapshot returns a point-in-time Relay runtime view.
+func (b *Broker) Snapshot() Snapshot {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	sessions := make([]SessionSnapshot, 0, len(b.sessionStats)+len(b.recentSessions))
+	for _, session := range b.sessionStats {
+		sessions = append(sessions, snapshotFromStats(session))
+	}
+	sessions = append(sessions, b.recentSessions...)
+	return Snapshot{
+		Connections:      b.connections,
+		Waiting:          len(b.waiting),
+		Active:           b.active,
+		TotalSourceBytes: b.totalSourceBytes,
+		TotalTargetBytes: b.totalTargetBytes,
+		Sessions:         sessions,
+	}
+}
+
+func (b *Broker) markWaitingLocked(sessionID string, role byte, remote string) {
+	now := time.Now().UTC()
+	stats := &sessionStats{
+		sessionID: sessionDigest(sessionID),
+		state:     "waiting",
+		startedAt: now,
+		updatedAt: now,
+	}
+	if role == roleSource {
+		stats.sourceRemote = remote
+	} else {
+		stats.targetRemote = remote
+	}
+	b.sessionStats[sessionID] = stats
+}
+
+func (b *Broker) markActiveLocked(sessionID string, firstRole byte, firstRemote string, secondRole byte, secondRemote string) {
+	now := time.Now().UTC()
+	stats := b.sessionStats[sessionID]
+	if stats == nil {
+		stats = &sessionStats{sessionID: sessionDigest(sessionID), startedAt: now}
+		b.sessionStats[sessionID] = stats
+	}
+	stats.state = "active"
+	stats.updatedAt = now
+	if firstRole == roleSource {
+		stats.sourceRemote = firstRemote
+		stats.targetRemote = secondRemote
+	} else {
+		stats.targetRemote = firstRemote
+		stats.sourceRemote = secondRemote
+	}
+}
+
+func (b *Broker) addSessionBytes(sessionID string, sourceToTarget bool, count uint64) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	stats := b.sessionStats[sessionID]
+	if stats == nil {
+		return
+	}
+	stats.updatedAt = time.Now().UTC()
+	if sourceToTarget {
+		stats.sourceToTarget += count
+		b.totalSourceBytes += count
+	} else {
+		stats.targetToSource += count
+		b.totalTargetBytes += count
+	}
+}
+
+func (b *Broker) markClosed(sessionID, reason string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.markClosedLocked(sessionID, reason)
+}
+
+func (b *Broker) markClosedLocked(sessionID, reason string) {
+	stats := b.sessionStats[sessionID]
+	if stats == nil {
+		return
+	}
+	now := time.Now().UTC()
+	stats.state = "closed"
+	stats.updatedAt = now
+	stats.completedAt = now
+	stats.closeReason = reason
+	b.recentSessions = append([]SessionSnapshot{snapshotFromStats(stats)}, b.recentSessions...)
+	if len(b.recentSessions) > 50 {
+		b.recentSessions = b.recentSessions[:50]
+	}
+	delete(b.sessionStats, sessionID)
+}
+
+func snapshotFromStats(stats *sessionStats) SessionSnapshot {
+	return SessionSnapshot{
+		SessionID:      stats.sessionID,
+		State:          stats.state,
+		SourceRemote:   stats.sourceRemote,
+		TargetRemote:   stats.targetRemote,
+		SourceToTarget: stats.sourceToTarget,
+		TargetToSource: stats.targetToSource,
+		StartedAt:      stats.startedAt,
+		UpdatedAt:      stats.updatedAt,
+		CompletedAt:    stats.completedAt,
+		CloseReason:    stats.closeReason,
 	}
 }
 
