@@ -2442,3 +2442,35 @@
 - Relay 面板目前是基础管理页，先覆盖账号登录、令牌、证书路径和状态查看；后续可以继续做更完整的连接列表、流量统计和审计日志。
 - 轮换 Relay 令牌后，旧同步链接里的令牌会失效，需要源端重新生成链接给目标端。
 - 如果服务器安全组或防火墙未开放 `8766`，外部访问不到 Relay 面板；也可以用宝塔 / Nginx 反代到 `127.0.0.1:8766`。
+
+## v1.12 Relay 升级启用管理面板审核
+
+审核分支：`main`
+
+审核结论：通过。
+
+审核说明：
+
+- 根版本号从 `1.11` 提升到 `1.12`，主包、Win7 Qt 包、Linux 安装/升级示例统一使用 `v1.12`。
+- 修复旧 Relay 执行 `onesync-relayctl upgrade` 后只替换二进制、不重写 systemd 服务文件的问题。
+- Relay 升级时会读取当前服务里的 `-listen`、`-cert`、`-key`、`-admin-listen` 参数，尽量保留原端口和证书路径。
+- Relay 升级时会补写新服务参数：`-cert-path-file`、`-admin-listen`、`-admin-auth-file`，并执行 `systemctl daemon-reload`。
+- 升级完成提示 Relay 管理面板地址，旧安装升级到 v1.12 后可直接访问默认 `http://服务器IP:8766`。
+
+验证结果：
+
+- `git diff --check` 通过。
+- `sh -n packaging/acceptance-scripts/linux/onesync-relayctl` 通过。
+- `sh -n packaging/acceptance-scripts/linux/deploy-relaytls.sh` 通过。
+- 仓库内未检出测试域名和测试令牌。
+- `/Users/apple/Library/Go/sdk/go1.26.3/bin/go test ./...` 通过。
+- `sh clients/win7-qt/build-win7.sh` 成功，生成 `clients/win7-qt/dist/OneSyncWin7-win7-x86-v1.12.zip`。
+- `PATH=/Users/apple/Library/Go/sdk/go1.26.3/bin:$PATH sh packaging/package-acceptance.sh` 成功，生成主 Windows/Linux v1.12 包。
+- `unzip -t clients/win7-qt/dist/OneSyncWin7-win7-x86-v1.12.zip` 通过。
+- `strings clients/win7-qt/release-win7/OneSyncWin7.exe | rg "GetSystemTimePreciseAsFileTime|KERNEL32.dll"` 只匹配到 `KERNEL32.dll`。
+- `unzip -t dist/acceptance-packages/onesync-windows-amd64-v1.12.zip` 通过。
+- `tar -tzf dist/acceptance-packages/onesync-linux-amd64-v1.12.tar.gz` 通过。
+
+剩余风险：
+
+- 如果旧 systemd 服务文件里路径包含空格，当前 shell 参数解析不支持；Linux 常见安装路径不包含空格，正式安装脚本生成的路径也不包含空格。

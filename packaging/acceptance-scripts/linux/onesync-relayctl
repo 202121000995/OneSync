@@ -6,6 +6,12 @@ INSTALL_DIR=${ONESYNC_INSTALL_DIR:-/usr/local/bin}
 COMMAND_LINK_DIR=${ONESYNC_COMMAND_LINK_DIR:-/usr/bin}
 CONFIG_DIR=${ONESYNC_RELAY_CONFIG_DIR:-/etc/onesync}
 LOG_DIR=${ONESYNC_LOG_DIR:-/var/log/onesync}
+USER_SET_RELAY_PORT=${RELAY_PORT+x}
+USER_SET_RELAY_LISTEN=${ONESYNC_RELAY_LISTEN+x}
+USER_SET_RELAY_CERT=${ONESYNC_RELAY_CERT+x}
+USER_SET_RELAY_KEY=${ONESYNC_RELAY_KEY+x}
+USER_SET_RELAY_ADMIN_PORT=${ONESYNC_RELAY_ADMIN_PORT+x}
+USER_SET_RELAY_ADMIN_LISTEN=${ONESYNC_RELAY_ADMIN_LISTEN+x}
 RELAY_PORT=${RELAY_PORT:-7443}
 LISTEN=${ONESYNC_RELAY_LISTEN:-:$RELAY_PORT}
 CERT=${ONESYNC_RELAY_CERT:-$CONFIG_DIR/relay.crt}
@@ -16,7 +22,7 @@ CERT_PATH_FILE=${ONESYNC_RELAY_CERT_PATH_FILE:-$CONFIG_DIR/relay.cert-paths}
 ADMIN_LISTEN=${ONESYNC_RELAY_ADMIN_LISTEN:-0.0.0.0:${ONESYNC_RELAY_ADMIN_PORT:-8766}}
 ADMIN_AUTH_FILE=${ONESYNC_RELAY_ADMIN_AUTH_FILE:-$CONFIG_DIR/relay-admin-auth.json}
 REPO=${ONESYNC_REPO:-202121000995/OneSync}
-DEFAULT_RELEASE_TAG=${ONESYNC_DEFAULT_RELEASE_TAG:-v1.11}
+DEFAULT_RELEASE_TAG=${ONESYNC_DEFAULT_RELEASE_TAG:-v1.12}
 GH_PROXY=${GH_PROXY:-}
 RELEASE_TAG=${ONESYNC_RELEASE_TAG:-${RELEASE_TAG:-}}
 PACKAGE_URL=${ONESYNC_LINUX_PACKAGE_URL:-${PACKAGE_URL:-}}
@@ -80,6 +86,49 @@ proxy_url() {
 			printf '%s/%s' "$GH_PROXY" "$url"
 			;;
 	esac
+}
+
+current_service_arg() {
+	key=$1
+	line=$(systemctl cat "$SERVICE" 2>/dev/null | sed -n 's/^ExecStart=//p' | tail -n 1 || true)
+	if [ -z "$line" ]; then
+		return
+	fi
+	set -- $line
+	while [ "$#" -gt 0 ]; do
+		if [ "$1" = "$key" ] && [ "$#" -gt 1 ]; then
+			printf '%s\n' "$2"
+			return
+		fi
+		shift
+	done
+}
+
+preserve_current_service_options() {
+	if [ -z "$USER_SET_RELAY_LISTEN" ] && [ -z "$USER_SET_RELAY_PORT" ]; then
+		current=$(current_service_arg -listen || true)
+		if [ -n "$current" ]; then
+			LISTEN=$current
+		fi
+	fi
+	if [ -z "$USER_SET_RELAY_CERT" ]; then
+		current=$(current_service_arg -cert || true)
+		if [ -n "$current" ]; then
+			CERT=$current
+		fi
+	fi
+	if [ -z "$USER_SET_RELAY_KEY" ]; then
+		current=$(current_service_arg -key || true)
+		if [ -n "$current" ]; then
+			KEY=$current
+		fi
+	fi
+	if [ -z "$USER_SET_RELAY_ADMIN_LISTEN" ] && [ -z "$USER_SET_RELAY_ADMIN_PORT" ]; then
+		current=$(current_service_arg -admin-listen || true)
+		if [ -n "$current" ]; then
+			ADMIN_LISTEN=$current
+		fi
+	fi
 }
 
 latest_linux_package_url() {
@@ -415,7 +464,7 @@ upgrade_service() {
 	url=$(latest_linux_package_url)
 	if [ -z "$url" ]; then
 		printf 'Cannot find latest Linux package from GitHub repo %s.\n' "$REPO" >&2
-		printf 'Retry with RELEASE_TAG=v1.11 or PACKAGE_URL=https://...tar.gz.\n' >&2
+		printf 'Retry with RELEASE_TAG=v1.12 or PACKAGE_URL=https://...tar.gz.\n' >&2
 		exit 1
 	fi
 	curl -fL "$(proxy_url "$url")" -o "$tmp/onesync-linux.tar.gz"
@@ -440,11 +489,16 @@ upgrade_service() {
 	if [ ! -x "$INSTALL_DIR/onesyncctl" ]; then
 		rm -f "$INSTALL_DIR/onesync"
 	fi
+	preserve_current_service_options
+	save_cert_paths
+	write_service_unit
+	systemctl daemon-reload
 	if [ "$was_active" -eq 1 ]; then
 		systemctl start "$SERVICE"
 	fi
 	printf 'OneSync Relay upgraded from %s.\n' "$url"
 	printf 'Menu command: onesyncr\n'
+	printf 'Relay admin panel: http://<server-ip>:%s\n' "$(printf '%s' "$ADMIN_LISTEN" | sed 's/.*://')"
 }
 
 uninstall_service() {
