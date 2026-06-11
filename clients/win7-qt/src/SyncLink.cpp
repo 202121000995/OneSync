@@ -99,7 +99,9 @@ bool SyncLinkParser::validate(const SyncLink& link, QString* error)
 {
     if (link.version != kLinkVersion) {
         if (error != nullptr) {
-            *error = QStringLiteral("同步链接版本不支持。");
+            *error = QStringLiteral("同步链接版本不支持：当前 Win7 客户端只支持链接版本 %1，收到版本 %2。请升级客户端，或让源端重新生成兼容链接。")
+                .arg(kLinkVersion)
+                .arg(link.version);
         }
         return false;
     }

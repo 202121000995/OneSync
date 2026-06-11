@@ -1,9 +1,12 @@
 package auth
 
 import (
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -127,6 +130,36 @@ func TestLinkRejectsMalformedAndUnsafeMetadata(t *testing.T) {
 	}
 	if _, err := service.Parse("not-base64!"); err == nil {
 		t.Fatal("Parse() accepted malformed input")
+	}
+}
+
+func TestLinkRejectsUnsupportedVersionWithActionableError(t *testing.T) {
+	service := NewLinkService()
+	service.random = fixedRandom
+	encoded, err := service.Issue("session-1", "sync.example:443", "")
+	if err != nil {
+		t.Fatalf("Issue() error = %v", err)
+	}
+	data, err := base64.RawURLEncoding.DecodeString(encoded)
+	if err != nil {
+		t.Fatalf("DecodeString() error = %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(data, &payload); err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+	payload["version"] = float64(LinkVersion + 1)
+	data, err = json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+
+	_, err = service.Parse(base64.RawURLEncoding.EncodeToString(data))
+	if err == nil {
+		t.Fatal("Parse() accepted unsupported version")
+	}
+	if !strings.Contains(err.Error(), "同步链接版本不支持") || !strings.Contains(err.Error(), "请升级") {
+		t.Fatalf("Parse() error = %v, want actionable version message", err)
 	}
 }
 

@@ -369,7 +369,7 @@ func TestManagerStopReturnsFinalPersistenceError(t *testing.T) {
 	}
 }
 
-func TestManagerRecoversInterruptedTaskAsFailed(t *testing.T) {
+func TestManagerRecoversInterruptedTaskAsStopped(t *testing.T) {
 	storePath := filepath.Join(t.TempDir(), "tasks.json")
 	taskStore, err := newStore(storePath)
 	if err != nil {
@@ -390,8 +390,11 @@ func TestManagerRecoversInterruptedTaskAsFailed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get() error = %v", err)
 	}
-	if task.State != StateFailed || task.LastError != "previous run was interrupted" {
+	if task.State != StateStopped || task.LastError != "" {
 		t.Fatalf("recovered task = %+v", task)
+	}
+	if task.Devices.Connected != 0 || len(task.Logs) == 0 {
+		t.Fatalf("recovered task device/logs = %+v / %+v", task.Devices, task.Logs)
 	}
 }
 

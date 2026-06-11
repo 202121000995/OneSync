@@ -16,6 +16,7 @@ import (
 	"github.com/202121000995/OneSync/internal/auth"
 	"github.com/202121000995/OneSync/internal/filewatch"
 	"github.com/202121000995/OneSync/internal/network"
+	"github.com/202121000995/OneSync/internal/progress"
 	"github.com/202121000995/OneSync/internal/scanner"
 	"github.com/202121000995/OneSync/internal/sync"
 	"github.com/202121000995/OneSync/internal/task"
@@ -154,6 +155,7 @@ func (r *runner) run(ctx context.Context, taskID string, reporter task.StateRepo
 		if err := reportState(ctx, reporter, task.StateIdle); err != nil {
 			return err
 		}
+		reportProgressStage(ctx, reporter, progress.StageWaiting)
 		changed, err := filewatch.WaitForChangeOrPeriodic(ctx, r.localRoot(), r.task.IgnoreRules, r.factory.syncInterval)
 		if err != nil {
 			return err
@@ -349,6 +351,7 @@ func (r *runner) runConnectedCycles(ctx context.Context, taskID string, reporter
 		if err := reportState(ctx, reporter, task.StateIdle); err != nil {
 			return err
 		}
+		reportProgressStage(ctx, reporter, progress.StageWaiting)
 		changed, woke, err := r.waitForConnectedChange(ctx, wake, idleInterval)
 		if err != nil {
 			return err
@@ -458,6 +461,14 @@ func reportState(ctx context.Context, reporter task.StateReporter, state string)
 func progressReporter(reporter task.StateReporter) sync.ProgressReporter {
 	progressReporter, _ := reporter.(sync.ProgressReporter)
 	return progressReporter
+}
+
+func reportProgressStage(ctx context.Context, reporter task.StateReporter, stage string) {
+	reporterWithProgress := progressReporter(reporter)
+	if reporterWithProgress == nil {
+		return
+	}
+	_ = reporterWithProgress.SetProgress(ctx, progress.Snapshot{Stage: stage})
 }
 
 func setDevice(ctx context.Context, reporter task.StateReporter, details task.DeviceStats) {

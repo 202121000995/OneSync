@@ -25,8 +25,16 @@ type fileSender interface {
 	SendFile(ctx context.Context, session network.Session, requestID uint64, sourcePath, relativePath string) error
 }
 
+type fileProgressSender interface {
+	SendFileWithProgress(ctx context.Context, session network.Session, requestID uint64, sourcePath, relativePath string, progress transfer.ProgressFunc) error
+}
+
 type fileReceiver interface {
 	ReceiveFile(ctx context.Context, session network.Session) error
+}
+
+type fileProgressReceiver interface {
+	ReceiveFileWithProgress(ctx context.Context, session network.Session, progress transfer.ReceiveProgressFunc) error
 }
 
 // ProgressReporter receives file-level synchronization progress.
@@ -128,6 +136,9 @@ func (e *Engine) Run(ctx context.Context, taskID string) error {
 
 func (e *Engine) runSource(ctx context.Context) error {
 	const snapshotRequestID uint64 = 1
+	if err := e.reportProgress(ctx, progress.Snapshot{Stage: progress.StageConnecting}); err != nil {
+		return err
+	}
 	if err := e.session.Send(ctx, network.Message{
 		Type: network.MessageSnapshotRequest, RequestID: snapshotRequestID,
 	}); err != nil {
@@ -145,6 +156,10 @@ func (e *Engine) runSource(ctx context.Context) error {
 		return fmt.Errorf("decode target snapshot: %w", err)
 	}
 
+	if err := e.reportProgress(ctx, progress.Snapshot{Stage: progress.StageScanning}); err != nil {
+		return err
+	}
+	e.reportLog(ctx, "info", "开始扫描源端目录并计算文件指纹")
 	sourceSnapshot, err := e.scanner.Scan(ctx, e.root)
 	if err != nil {
 		return fmt.Errorf("scan source: %w", err)
@@ -153,14 +168,18 @@ func (e *Engine) runSource(ctx context.Context) error {
 	if err := e.reportSizes(ctx, sourceBytes, sourceBytes, sourceFiles, sourceFiles); err != nil {
 		return err
 	}
+	if err := e.reportProgress(ctx, progress.Snapshot{Stage: progress.StagePlanning}); err != nil {
+		return err
+	}
 	operations, err := e.differ.Compare(sourceSnapshot, targetSnapshot)
 	if err != nil {
 		return fmt.Errorf("compare snapshots: %w", err)
 	}
+	targetExtraFiles := countTargetExtraFiles(sourceSnapshot, targetSnapshot)
 	if len(operations) > MaxOperations {
 		return fmt.Errorf("sync plan contains %d operations, limit is %d", len(operations), MaxOperations)
 	}
-	if err := e.reportProgress(ctx, progress.Snapshot{TotalFiles: len(operations)}); err != nil {
+	if err := e.reportProgress(ctx, progress.Snapshot{TotalFiles: len(operations), Stage: progress.StagePlanning}); err != nil {
 		return err
 	}
 	if len(operations) > 0 {
@@ -171,6 +190,9 @@ func (e *Engine) runSource(ctx context.Context) error {
 		e.reportLog(ctx, "info", fmt.Sprintf("本轮同步计划：%d 个文件，源端大小 %s，传输参数：%s", len(operations), humanBytes(sourceBytes), description))
 	} else {
 		e.reportLog(ctx, "info", fmt.Sprintf("本轮同步无需传输文件，源端大小 %s", humanBytes(sourceBytes)))
+	}
+	if targetExtraFiles > 0 {
+		e.reportLog(ctx, "info", fmt.Sprintf("目标端存在 %d 个源端没有的文件；按当前策略保留，不自动删除。", targetExtraFiles))
 	}
 
 	const planRequestID uint64 = 2
@@ -194,20 +216,55 @@ func (e *Engine) runSource(ctx context.Context) error {
 		if err := e.reportProgress(ctx, progress.Snapshot{
 			TotalFiles:     len(operations),
 			CompletedFiles: index,
+			Stage:          progress.StageTransfer,
 			CurrentPath:    operation.Entry.Path,
 		}); err != nil {
 			return err
 		}
 		startedAt := time.Now()
-		if err := e.sender.SendFile(ctx, e.session, requestID, sourcePath, operation.Entry.Path); err != nil {
-			e.reportLog(ctx, "error", fmt.Sprintf("文件发送失败：%s，错误：%v", operation.Entry.Path, err))
-			return fmt.Errorf("transfer %q: %w", operation.Entry.Path, err)
+		lastProgressLogAt := time.Now()
+		var lastProgressBytes uint64
+		sendErr := error(nil)
+		if sender, ok := e.sender.(fileProgressSender); ok {
+			sendErr = sender.SendFileWithProgress(ctx, e.session, requestID, sourcePath, operation.Entry.Path, func(path string, current, total int64) {
+				currentBytes := nonNegativeUint64(current)
+				totalBytes := nonNegativeUint64(total)
+				_ = e.reportProgress(ctx, progress.Snapshot{
+					TotalFiles:        len(operations),
+					CompletedFiles:    index,
+					Stage:             progress.StageTransfer,
+					CurrentPath:       path,
+					CurrentBytes:      currentBytes,
+					CurrentTotalBytes: totalBytes,
+				})
+				now := time.Now()
+				if totalBytes > 0 && (currentBytes == totalBytes || now.Sub(lastProgressLogAt) >= 10*time.Second) {
+					recentBytes := currentBytes - minUint64(currentBytes, lastProgressBytes)
+					recentElapsed := now.Sub(lastProgressLogAt)
+					e.reportLog(ctx, "info", fmt.Sprintf("发送进度：%s，%s/%s，最近速度 %s/s，平均速度 %s/s",
+						path,
+						humanBytes(currentBytes),
+						humanBytes(totalBytes),
+						humanBytesPerSecond(recentBytes, recentElapsed),
+						humanBytesPerSecond(currentBytes, now.Sub(startedAt)),
+					))
+					lastProgressLogAt = now
+					lastProgressBytes = currentBytes
+				}
+			})
+		} else {
+			sendErr = e.sender.SendFile(ctx, e.session, requestID, sourcePath, operation.Entry.Path)
+		}
+		if sendErr != nil {
+			e.reportLog(ctx, "error", fmt.Sprintf("文件发送失败：%s，错误：%v；保留目标端临时文件，下一轮会尝试断点续传。", operation.Entry.Path, sendErr))
+			return fmt.Errorf("transfer %q: %w", operation.Entry.Path, sendErr)
 		}
 		elapsed := time.Since(startedAt)
 		e.reportLog(ctx, "info", fmt.Sprintf("文件发送完成：%s，大小 %s，耗时 %s，平均速度 %s/s", operation.Entry.Path, humanBytes(uint64(operation.Entry.Size)), humanDuration(elapsed), humanBytesPerSecond(uint64(operation.Entry.Size), elapsed)))
 		if err := e.reportProgress(ctx, progress.Snapshot{
 			TotalFiles:     len(operations),
 			CompletedFiles: index + 1,
+			Stage:          progress.StageTransfer,
 		}); err != nil {
 			return err
 		}
@@ -222,7 +279,11 @@ func (e *Engine) runSource(ctx context.Context) error {
 	if err := expectAck(ctx, e.session, completeRequestID); err != nil {
 		return fmt.Errorf("target rejected sync completion: %w", err)
 	}
-	return nil
+	return e.reportProgress(ctx, progress.Snapshot{
+		TotalFiles:     len(operations),
+		CompletedFiles: len(operations),
+		Stage:          progress.StageComplete,
+	})
 }
 
 func (e *Engine) runTarget(ctx context.Context) error {
@@ -233,6 +294,10 @@ func (e *Engine) runTarget(ctx context.Context) error {
 	if request.Type != network.MessageSnapshotRequest {
 		return errors.New("expected snapshot request")
 	}
+	if err := e.reportProgress(ctx, progress.Snapshot{Stage: progress.StageScanning}); err != nil {
+		return err
+	}
+	e.reportLog(ctx, "info", "开始扫描目标端目录并上报快照")
 	targetSnapshot, err := e.scanner.Scan(ctx, e.root)
 	if err != nil {
 		return fmt.Errorf("scan target: %w", err)
@@ -265,7 +330,7 @@ func (e *Engine) runTarget(ctx context.Context) error {
 	if err := e.reportSizes(ctx, targetBytes, plan.StandardBytes, targetFiles, plan.StandardFiles); err != nil {
 		return err
 	}
-	if err := e.reportProgress(ctx, progress.Snapshot{TotalFiles: plan.OperationCount}); err != nil {
+	if err := e.reportProgress(ctx, progress.Snapshot{TotalFiles: plan.OperationCount, Stage: progress.StagePlanning}); err != nil {
 		return err
 	}
 	e.reportLog(ctx, "info", fmt.Sprintf("收到同步计划：%d 个文件，标准大小 %s", plan.OperationCount, humanBytes(plan.StandardBytes)))
@@ -276,12 +341,53 @@ func (e *Engine) runTarget(ctx context.Context) error {
 	}
 
 	for index := range plan.OperationCount {
-		if err := e.receiver.ReceiveFile(ctx, e.session); err != nil {
-			return fmt.Errorf("receive file: %w", err)
+		startedAt := time.Now()
+		lastProgressLogAt := time.Now()
+		var lastProgressBytes uint64
+		receiveErr := error(nil)
+		if receiver, ok := e.receiver.(fileProgressReceiver); ok {
+			receiveErr = receiver.ReceiveFileWithProgress(ctx, e.session, func(path string, current, total int64) {
+				currentBytes := nonNegativeUint64(current)
+				totalBytes := nonNegativeUint64(total)
+				_ = e.reportProgress(ctx, progress.Snapshot{
+					TotalFiles:        plan.OperationCount,
+					CompletedFiles:    index,
+					Stage:             progress.StageTransfer,
+					CurrentPath:       path,
+					CurrentBytes:      currentBytes,
+					CurrentTotalBytes: totalBytes,
+				})
+				now := time.Now()
+				if lastProgressBytes == 0 && currentBytes > 0 && currentBytes < totalBytes {
+					e.reportLog(ctx, "info", fmt.Sprintf("检测到未完成临时文件，从 %s/%s 继续接收：%s", humanBytes(currentBytes), humanBytes(totalBytes), path))
+					lastProgressLogAt = now
+					lastProgressBytes = currentBytes
+				}
+				if totalBytes > 0 && (currentBytes == totalBytes || now.Sub(lastProgressLogAt) >= 10*time.Second) {
+					recentBytes := currentBytes - minUint64(currentBytes, lastProgressBytes)
+					recentElapsed := now.Sub(lastProgressLogAt)
+					e.reportLog(ctx, "info", fmt.Sprintf("接收进度：%s，%s/%s，最近速度 %s/s，平均速度 %s/s",
+						path,
+						humanBytes(currentBytes),
+						humanBytes(totalBytes),
+						humanBytesPerSecond(recentBytes, recentElapsed),
+						humanBytesPerSecond(currentBytes, now.Sub(startedAt)),
+					))
+					lastProgressLogAt = now
+					lastProgressBytes = currentBytes
+				}
+			})
+		} else {
+			receiveErr = e.receiver.ReceiveFile(ctx, e.session)
+		}
+		if receiveErr != nil {
+			e.reportLog(ctx, "error", fmt.Sprintf("文件接收失败：%v；已接收的临时文件会保留，下一轮会尝试断点续传。", receiveErr))
+			return fmt.Errorf("receive file: %w", receiveErr)
 		}
 		if err := e.reportProgress(ctx, progress.Snapshot{
 			TotalFiles:     plan.OperationCount,
 			CompletedFiles: index + 1,
+			Stage:          progress.StageTransfer,
 		}); err != nil {
 			return err
 		}
@@ -302,9 +408,40 @@ func (e *Engine) runTarget(ctx context.Context) error {
 	if err := e.reportSizes(ctx, finalBytes, plan.StandardBytes, finalFiles, plan.StandardFiles); err != nil {
 		return err
 	}
-	return e.session.Send(ctx, network.Message{
+	if err := e.session.Send(ctx, network.Message{
 		Type: network.MessageAck, RequestID: complete.RequestID,
+	}); err != nil {
+		return err
+	}
+	return e.reportProgress(ctx, progress.Snapshot{
+		TotalFiles:     plan.OperationCount,
+		CompletedFiles: plan.OperationCount,
+		Stage:          progress.StageComplete,
 	})
+}
+
+func countTargetExtraFiles(source, target scanner.Snapshot) int {
+	count := 0
+	for filePath := range target.Files {
+		if _, ok := source.Files[filePath]; !ok {
+			count++
+		}
+	}
+	return count
+}
+
+func nonNegativeUint64(value int64) uint64 {
+	if value <= 0 {
+		return 0
+	}
+	return uint64(value)
+}
+
+func minUint64(left, right uint64) uint64 {
+	if left < right {
+		return left
+	}
+	return right
 }
 
 func (e *Engine) reportProgress(ctx context.Context, snapshot progress.Snapshot) error {

@@ -17,8 +17,16 @@ type Receiver struct {
 	Root string
 }
 
+// ReceiveProgressFunc receives persisted target-side file progress.
+type ReceiveProgressFunc func(relativePath string, receivedBytes, totalBytes int64)
+
 // ReceiveFile receives one file transaction from a session.
 func (r Receiver) ReceiveFile(ctx context.Context, session network.Session) error {
+	return r.ReceiveFileWithProgress(ctx, session, nil)
+}
+
+// ReceiveFileWithProgress receives one file and reports stored progress.
+func (r Receiver) ReceiveFileWithProgress(ctx context.Context, session network.Session, progress ReceiveProgressFunc) error {
 	root, err := validateRoot(r.Root)
 	if err != nil {
 		return err
@@ -49,6 +57,9 @@ func (r Receiver) ReceiveFile(ctx context.Context, session network.Session) erro
 	} else if matches {
 		if err := sendOffsetAck(ctx, session, beginMessage.RequestID, begin.Size); err != nil {
 			return err
+		}
+		if progress != nil {
+			progress(begin.Path, begin.Size, begin.Size)
 		}
 		endMessage, err := session.Receive(ctx)
 		if err != nil {
@@ -87,6 +98,9 @@ func (r Receiver) ReceiveFile(ctx context.Context, session network.Session) erro
 	if err := sendOffsetAck(ctx, session, beginMessage.RequestID, offset); err != nil {
 		return err
 	}
+	if progress != nil {
+		progress(begin.Path, offset, begin.Size)
+	}
 
 	for {
 		message, err := session.Receive(ctx)
@@ -110,6 +124,9 @@ func (r Receiver) ReceiveFile(ctx context.Context, session network.Session) erro
 				return fmt.Errorf("write temporary file: %w", err)
 			}
 			offset += int64(len(data))
+			if progress != nil {
+				progress(begin.Path, offset, begin.Size)
+			}
 			if err := sendOffsetAck(ctx, session, message.RequestID, offset); err != nil {
 				return err
 			}

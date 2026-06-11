@@ -128,7 +128,7 @@ func (s *LinkService) Parse(encoded string) (Link, error) {
 		return Link{}, errors.New("synchronization link is malformed")
 	}
 	if link.Version != LinkVersion {
-		return Link{}, fmt.Errorf("unsupported synchronization link version %d", link.Version)
+		return Link{}, fmt.Errorf("同步链接版本不支持：当前客户端只支持链接版本 %d，收到版本 %d；请升级 OneSync，或让源端重新生成兼容链接", LinkVersion, link.Version)
 	}
 	if err := validateLinkMetadata(link.SessionID, link.Endpoint, link.RelayEndpoint, link.RelayToken, link.CACertificatePEM); err != nil {
 		return Link{}, err

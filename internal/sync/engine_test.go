@@ -124,13 +124,20 @@ func TestEngineReportsFileProgress(t *testing.T) {
 		t.Fatalf("final progress = %+v", final)
 	}
 	foundCurrent := false
+	foundByteProgress := false
 	for _, snapshot := range snapshots {
 		if snapshot.CurrentPath == "a.txt" || snapshot.CurrentPath == "b.txt" {
 			foundCurrent = true
 		}
+		if snapshot.CurrentPath != "" && snapshot.CurrentTotalBytes > 0 && snapshot.CurrentBytes <= snapshot.CurrentTotalBytes {
+			foundByteProgress = true
+		}
 	}
 	if !foundCurrent {
 		t.Fatalf("progress did not include current file: %+v", snapshots)
+	}
+	if !foundByteProgress {
+		t.Fatalf("progress did not include current file bytes: %+v", snapshots)
 	}
 }
 

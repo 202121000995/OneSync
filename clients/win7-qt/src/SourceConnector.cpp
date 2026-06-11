@@ -24,13 +24,13 @@ namespace {
 const int kTlsTimeoutMs = 15000;
 const int kRelayWaitTimeoutMs = 120000;
 const int kRetryDelayMs = 5000;
-const int kConnectedIdleDelayMs = 30000;
-const int kAuthenticationTimeoutMs = 15000;
+const int kConnectedIdleDelayMs = 10 * 60 * 1000;
+const int kAuthenticationTimeoutMs = 60000;
 const int kSyncMessageTimeoutMs = 120000;
 const int kMaxPayload = 16 * 1024 * 1024;
 const int kMaxChunkSize = 1024 * 1024;
-const int kPipelineChunks = 16;
-const int kProgressLogIntervalMs = 15000;
+const int kPipelineChunks = 4;
+const int kProgressLogIntervalMs = 10000;
 const int kHashSize = 32;
 const quint64 kSnapshotRequestID = 1;
 const quint64 kPlanRequestID = 2;
@@ -223,7 +223,7 @@ void SourceConnector::run()
             continue;
         }
 
-        emit logMessage(QStringLiteral("Relay 长连接已建立；后续同步会复用当前连接。"));
+        emit logMessage(QStringLiteral("Relay 长连接已建立；后续同步会复用当前连接。Win7 稳定模式：单文件流水线窗口=%1，空闲时只等待变化和对端通知。").arg(kPipelineChunks));
         while (true) {
             if (isCancelled(&error)) {
                 emit finished(false, error);
@@ -838,9 +838,7 @@ bool SourceConnector::sendFile(QSslSocket* socket, quint64 requestID, const Snap
                 return false;
             }
             if (confirmed > confirmedOffset) {
-                sentBytes += quint64(confirmed - confirmedOffset);
                 confirmedOffset = confirmed;
-                emitTrafficIfChanged();
                 emit fileProgress(entry.path, quint64(confirmedOffset), quint64(file.size()));
                 const qint64 elapsedMs = transferTimer.elapsed();
                 if (elapsedMs - lastProgressLogMs >= kProgressLogIntervalMs) {
@@ -865,9 +863,7 @@ bool SourceConnector::sendFile(QSslSocket* socket, quint64 requestID, const Snap
             return false;
         }
         if (confirmed > confirmedOffset) {
-            sentBytes += quint64(confirmed - confirmedOffset);
             confirmedOffset = confirmed;
-            emitTrafficIfChanged();
             emit fileProgress(entry.path, quint64(confirmedOffset), quint64(file.size()));
             const qint64 elapsedMs = transferTimer.elapsed();
             if (elapsedMs - lastProgressLogMs >= kProgressLogIntervalMs && confirmedOffset < file.size()) {
@@ -909,6 +905,8 @@ bool SourceConnector::writeAll(QSslSocket* socket, const QByteArray& data, int t
         }
         if (written > 0) {
             offset += written;
+            sentBytes += quint64(written);
+            emitTrafficIfChanged();
             idleTimer.restart();
         }
         const int remaining = timeoutMs - int(idleTimer.elapsed());

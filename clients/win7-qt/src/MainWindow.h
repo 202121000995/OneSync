@@ -76,9 +76,12 @@ private:
         quint64 currentSentRate = 0;
         quint64 lastTrafficReceivedBytes = 0;
         quint64 lastTrafficSentBytes = 0;
+        quint64 rateWindowReceivedBytes = 0;
+        quint64 rateWindowSentBytes = 0;
         quint64 ignoredCount = 0;
         qint64 startedAtMs = 0;
         qint64 lastTrafficAtMs = 0;
+        qint64 rateWindowStartedAtMs = 0;
         int localFiles = 0;
         int connectedDevices = 0;
         int totalDevices = 1;

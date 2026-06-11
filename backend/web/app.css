@@ -62,6 +62,9 @@ button.suggestion:hover { background: #dcebdd; }
 .task-name strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .task-name span { color: #77847b; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .status-cell, .device-cell { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.progress-inline { color: #496052; font-size: 12px; max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.progress-bar { flex-basis: 100%; max-width: 260px; height: 6px; border-radius: 999px; overflow: hidden; background: #e7efe8; }
+.progress-bar span { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #2c7f4f, #4fb477); transition: width .2s ease; }
 .mini-detail { max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .row-error { color: #b42318; font-size: 12px; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .muted { color: #77847b !important; }

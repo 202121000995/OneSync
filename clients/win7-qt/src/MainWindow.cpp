@@ -182,7 +182,7 @@ void applyModernDialogStyle(QDialog* dialog)
 }
 } // namespace
 
-const QString kWin7Version = QStringLiteral("1.30");
+const QString kWin7Version = QStringLiteral("1.31");
 
 MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent)
@@ -2138,16 +2138,40 @@ void MainWindow::updateTaskTraffic(SyncTask* task, quint64 receivedBytes, quint6
         return;
     }
     const qint64 nowMs = QDateTime::currentDateTimeUtc().toMSecsSinceEpoch();
-    const qint64 elapsedMs = task->lastTrafficAtMs > 0 ? nowMs - task->lastTrafficAtMs : 0;
-    if (elapsedMs > 0) {
-        const quint64 receivedDelta = receivedBytes >= task->lastTrafficReceivedBytes
-            ? receivedBytes - task->lastTrafficReceivedBytes
-            : 0;
-        const quint64 sentDelta = sentBytes >= task->lastTrafficSentBytes
-            ? sentBytes - task->lastTrafficSentBytes
-            : 0;
-        task->currentReceivedRate = quint64((receivedDelta * 1000) / quint64(elapsedMs));
-        task->currentSentRate = quint64((sentDelta * 1000) / quint64(elapsedMs));
+    const quint64 receivedDelta = receivedBytes >= task->lastTrafficReceivedBytes
+        ? receivedBytes - task->lastTrafficReceivedBytes
+        : 0;
+    const quint64 sentDelta = sentBytes >= task->lastTrafficSentBytes
+        ? sentBytes - task->lastTrafficSentBytes
+        : 0;
+
+    if (task->rateWindowStartedAtMs <= 0 || nowMs < task->rateWindowStartedAtMs) {
+        task->rateWindowStartedAtMs = nowMs;
+        task->rateWindowReceivedBytes = 0;
+        task->rateWindowSentBytes = 0;
+    }
+    task->rateWindowReceivedBytes += receivedDelta;
+    task->rateWindowSentBytes += sentDelta;
+
+    const qint64 windowMs = nowMs - task->rateWindowStartedAtMs;
+    if (windowMs >= 1000) {
+        const quint64 receivedRate = quint64((task->rateWindowReceivedBytes * 1000) / quint64(windowMs));
+        const quint64 sentRate = quint64((task->rateWindowSentBytes * 1000) / quint64(windowMs));
+        auto smoothRate = [](quint64 previous, quint64 current) -> quint64 {
+            if (previous == 0) {
+                return current;
+            }
+            if (current == 0) {
+                const quint64 decayed = quint64((previous * 7) / 10);
+                return decayed < 1024 ? 0 : decayed;
+            }
+            return quint64((previous * 3 + current * 7) / 10);
+        };
+        task->currentReceivedRate = smoothRate(task->currentReceivedRate, receivedRate);
+        task->currentSentRate = smoothRate(task->currentSentRate, sentRate);
+        task->rateWindowStartedAtMs = nowMs;
+        task->rateWindowReceivedBytes = 0;
+        task->rateWindowSentBytes = 0;
     }
     task->receivedBytes = receivedBytes;
     task->sentBytes = sentBytes;

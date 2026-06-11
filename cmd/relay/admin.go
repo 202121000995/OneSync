@@ -470,7 +470,7 @@ func (s *adminServer) render(writer http.ResponseWriter, request *http.Request, 
 		if s.config.Broker != nil {
 			data.Runtime = s.config.Broker.Snapshot()
 		}
-		data.LogTail = readTail(s.config.LogPath, 120)
+		data.LogTail = readTail(s.config.LogPath, 200)
 		certPath, keyPath := s.currentCertPaths()
 		data.CertPath = certPath
 		data.KeyPath = keyPath
@@ -765,7 +765,7 @@ code,pre{background:#0f172a;color:#dbeafe;border-radius:10px;padding:10px;white-
 <button type="submit">登录</button>
 </form></div>
 {{else}}
-<div class="card"><form method="post" action="/logout"><button class="secondary" type="submit">退出登录</button></form></div>
+<div class="card"><div class="actions"><a href="/"><button class="secondary" type="button">刷新状态</button></a><form method="post" action="/logout"><button class="secondary" type="submit">退出登录</button></form></div></div>
 <div class="card"><h2>Relay 状态</h2>
 <div class="kv">
 <b>Relay 监听</b><span>{{.RelayListen}}</span>
@@ -865,7 +865,7 @@ code,pre{background:#0f172a;color:#dbeafe;border-radius:10px;padding:10px;white-
 <button type="submit">修改面板密码</button>
 </form></div>
 <div class="card"><h2>Relay 日志</h2>
-<p class="hint">显示最近 120 行 Relay 日志。日志可能包含旧版本或旧端口的历史报错；遇到连接问题时，可以下载日志发给我排查。</p>
+<p class="hint">显示最近 200 行 Relay 日志，固定高度滚动显示。日志可能包含旧版本或旧端口的历史报错；遇到连接问题时，可以下载日志发给我排查。</p>
 <pre class="logbox">{{.LogTail}}</pre>
 <div class="actions">
 <a href="/download-log"><button type="button">下载日志</button></a>

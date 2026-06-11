@@ -262,6 +262,22 @@ function statusCell(task) {
   badge.className = `badge ${task.state || "unknown"}`;
   badge.textContent = stateLabel(task);
   box.append(badge);
+  const progress = task.progress || null;
+  if (progress && isRunningTask(task)) {
+    const detail = document.createElement("span");
+    detail.className = "progress-inline";
+    detail.textContent = progressLabel(progress);
+    box.append(detail);
+    const percent = progressPercent(progress);
+    if (percent !== null) {
+      const bar = document.createElement("span");
+      bar.className = "progress-bar";
+      const fill = document.createElement("span");
+      fill.style.width = `${Math.max(0, Math.min(100, percent))}%`;
+      bar.append(fill);
+      box.append(bar);
+    }
+  }
   if (task.last_error) {
     const error = document.createElement("span");
     error.className = "row-error";
@@ -370,12 +386,12 @@ function isRunningTask(task) {
 
 function taskStateDetail(task) {
   if (task.role === "source") {
-    if (isRunningTask(task)) return "源端运行中：可接受目标端连接并发送同步内容。";
+    if (isRunningTask(task)) return `源端运行中：${progressStageSentence(task.progress, "可接受目标端连接并发送同步内容。")}`;
     if (task.state === "failed") return "源端失败：请查看下方错误信息和任务日志。";
     return "源端已停止：请先生成链接并启动。";
   }
-  if (isRunningTask(task) && deviceConnected(task)) return "目标端运行中：已连接源端。";
-  if (isRunningTask(task)) return "目标端运行中：正在连接源端。";
+  if (isRunningTask(task) && deviceConnected(task)) return `目标端运行中：${progressStageSentence(task.progress, "已连接源端。")}`;
+  if (isRunningTask(task)) return `目标端运行中：${progressStageSentence(task.progress, "正在连接源端。")}`;
   if (task.state === "failed") return "目标端失败：请查看下方错误信息和任务日志。";
   return "目标端已停止：请先加入链接并启动。";
 }
@@ -409,21 +425,57 @@ function showSavedLink(taskId, savedLink) {
 }
 
 function progressLabel(progress) {
-  if (!progress || progress.total_files === 0) return "";
+  if (!progress) return "";
+  const stage = progressStageLabel(progress.stage);
+  if (progress.total_files === 0) return stage;
   const base = `本轮进度：${progress.completed_files}/${progress.total_files}`;
   if (!progress.current_path) return base;
-  return `${base} · 正在处理 ${progress.current_path}`;
+  const currentBytes = Number(progress.current_bytes || 0);
+  const totalBytes = Number(progress.current_total_bytes || 0);
+  const percent = progressPercent(progress);
+  const byteProgress = totalBytes > 0 ? ` · ${formatBytes(currentBytes)} / ${formatBytes(totalBytes)}${percent !== null ? ` · ${percent.toFixed(1)}%` : ""}` : "";
+  return `${stage ? `${stage} · ` : ""}${base} · 正在处理 ${progress.current_path}${byteProgress}`;
+}
+
+function progressPercent(progress) {
+  const currentBytes = Number(progress?.current_bytes || 0);
+  const totalBytes = Number(progress?.current_total_bytes || 0);
+  if (totalBytes > 0) return (currentBytes / totalBytes) * 100;
+  const totalFiles = Number(progress?.total_files || 0);
+  const completedFiles = Number(progress?.completed_files || 0);
+  if (totalFiles > 0) return (completedFiles / totalFiles) * 100;
+  return null;
+}
+
+function progressStageLabel(stage) {
+  switch (stage) {
+    case "connecting": return "连接中";
+    case "scanning": return "扫描中";
+    case "planning": return "生成计划";
+    case "transfer": return "传输中";
+    case "complete": return "本轮完成";
+    case "waiting": return "等待变化";
+    default: return "";
+  }
+}
+
+function progressStageSentence(progress, fallback) {
+  const label = progressStageLabel(progress?.stage);
+  if (!label) return fallback;
+  if (progress?.current_path) return `${label}，当前文件 ${progress.current_path}。`;
+  return `${label}。`;
 }
 
 function stateLabel(task) {
+  const stage = progressStageLabel(task.progress?.stage);
   if (task.role === "source") {
     if (task.state === "failed") return "失败";
-    if (isRunningTask(task)) return "运行中";
+    if (isRunningTask(task)) return stage ? `运行-${stage}` : "运行中";
     return "停止";
   }
   if (task.state === "failed") return "失败";
-  if (isRunningTask(task) && deviceConnected(task)) return "运行-已连接源端";
-  if (isRunningTask(task)) return "运行-连接中";
+  if (isRunningTask(task) && deviceConnected(task)) return stage ? `运行-${stage}` : "运行-已连接源端";
+  if (isRunningTask(task)) return stage ? `运行-${stage}` : "运行-连接中";
   return "停止";
 }
 

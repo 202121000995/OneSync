@@ -22,8 +22,8 @@ namespace {
 const int kTlsTimeoutMs = 15000;
 const int kRelayWaitTimeoutMs = 120000;
 const int kRetryDelayMs = 5000;
-const int kConnectedIdleDelayMs = 30000;
-const int kAuthenticationTimeoutMs = 15000;
+const int kConnectedIdleDelayMs = 10 * 60 * 1000;
+const int kAuthenticationTimeoutMs = 60000;
 const int kSyncMessageTimeoutMs = 120000;
 const int kMaxPayload = 16 * 1024 * 1024;
 const quint64 kAuthenticationRequestID = 1;

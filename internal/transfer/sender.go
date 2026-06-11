@@ -20,6 +20,9 @@ type Sender struct {
 	PipelineChunks int
 }
 
+// ProgressFunc receives confirmed file-transfer progress.
+type ProgressFunc func(relativePath string, confirmedBytes, totalBytes int64)
+
 // TransferDescription returns a short human-readable transfer tuning summary.
 func (s Sender) TransferDescription() string {
 	chunkSize := s.ChunkSize
@@ -35,6 +38,11 @@ func (s Sender) TransferDescription() string {
 
 // SendFile sends one file and resumes from the receiver-confirmed offset.
 func (s Sender) SendFile(ctx context.Context, session network.Session, requestID uint64, sourcePath, relativePath string) error {
+	return s.SendFileWithProgress(ctx, session, requestID, sourcePath, relativePath, nil)
+}
+
+// SendFileWithProgress sends one file and reports receiver-confirmed progress.
+func (s Sender) SendFileWithProgress(ctx context.Context, session network.Session, requestID uint64, sourcePath, relativePath string, progress ProgressFunc) error {
 	if err := validateRelativePath(relativePath); err != nil {
 		return fmt.Errorf("validate transfer path: %w", err)
 	}
@@ -84,16 +92,24 @@ func (s Sender) SendFile(ctx context.Context, session network.Session, requestID
 	if _, err := file.Seek(offset, io.SeekStart); err != nil {
 		return fmt.Errorf("seek source file: %w", err)
 	}
+	if progress != nil {
+		progress(relativePath, offset, size)
+	}
 
 	ackContext, cancelAck := context.WithCancel(ctx)
 	defer cancelAck()
 	expectedAcks := make(chan int64, pipelineChunks)
-	ackResults := make(chan error, pipelineChunks)
+	type ackResult struct {
+		confirmed int64
+		err       error
+	}
+	ackResults := make(chan ackResult, pipelineChunks)
 	ackDone := make(chan struct{})
 	go func() {
 		defer close(ackDone)
 		for expected := range expectedAcks {
-			ackResults <- receiveExpectedOffset(ackContext, session, requestID, expected)
+			confirmed, err := receiveExpectedOffset(ackContext, session, requestID, expected)
+			ackResults <- ackResult{confirmed: confirmed, err: err}
 		}
 	}()
 	closeAckReader := func() {
@@ -134,21 +150,29 @@ func (s Sender) SendFile(ctx context.Context, session network.Session, requestID
 		expectedAcks <- offset
 		pendingAcks++
 		if pendingAcks >= pipelineChunks {
-			if err := <-ackResults; err != nil {
+			result := <-ackResults
+			if result.err != nil {
 				closeAckReader()
-				return err
+				return result.err
 			}
 			pendingAcks--
+			if progress != nil {
+				progress(relativePath, result.confirmed, size)
+			}
 		}
 	}
 	close(expectedAcks)
 	for pendingAcks > 0 {
-		if err := <-ackResults; err != nil {
+		result := <-ackResults
+		if result.err != nil {
 			cancelAck()
 			<-ackDone
-			return err
+			return result.err
 		}
 		pendingAcks--
+		if progress != nil {
+			progress(relativePath, result.confirmed, size)
+		}
 	}
 	<-ackDone
 
@@ -167,6 +191,9 @@ func (s Sender) SendFile(ctx context.Context, session network.Session, requestID
 	}
 	if response.RequestID != requestID || response.Type != network.MessageAck {
 		return errors.New("receiver rejected completed file")
+	}
+	if progress != nil {
+		progress(relativePath, size, size)
 	}
 	return nil
 }
@@ -189,15 +216,15 @@ func formatBytes(bytes int) string {
 	return fmt.Sprintf("%d B", bytes)
 }
 
-func receiveExpectedOffset(ctx context.Context, session network.Session, requestID uint64, expected int64) error {
+func receiveExpectedOffset(ctx context.Context, session network.Session, requestID uint64, expected int64) (int64, error) {
 	confirmed, err := receiveAckOffset(ctx, session, requestID)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if confirmed != expected {
-		return fmt.Errorf("receiver confirmed offset %d, want %d", confirmed, expected)
+		return confirmed, fmt.Errorf("receiver confirmed offset %d, want %d", confirmed, expected)
 	}
-	return nil
+	return confirmed, nil
 }
 
 func receiveAckOffset(ctx context.Context, session network.Session, requestID uint64) (int64, error) {

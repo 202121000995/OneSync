@@ -17,7 +17,7 @@
 - 表格显示任务类型、名称、状态、同步设备、本地大小、全局大小、接收和发送。
 - 参数窗口可保存忽略规则，扫描和接收文件时会按规则跳过。
 - 运行中任务支持请求暂停，网络读写会在安全点退出。
-- 接收/发送列显示任务本轮平均速度，悬停可看收发总量。
+- 接收/发送列显示最近窗口速度，悬停可看收发总量，避免确认包集中返回时速度忽高忽低。
 - 日志支持全部日志、选中任务和指定任务过滤。
 - 可导出全部诊断，也可只导出选中任务诊断。
 - 设备管理页可重命名设备、禁用/启用任务设备状态。
@@ -42,7 +42,6 @@
 
 - 暂停不是杀进程式立即中断；TLS 连接和网络等待最多需要等当前等待点返回。
 - 忽略规则已支持常见通配符和目录规则，但还没有规则测试器。
-- 收发速度按本轮平均速度显示，后续可改成滑动窗口实时速度。
 - 断点续传真实场景校准。
 - Win7 实机托盘、现代皮肤和源端 Relay 发送行为验收。
 
@@ -75,8 +74,8 @@ package-win7.cmd
 成功后会生成：
 
 ```text
-clients\win7-qt\dist\OneSyncWin7-win7-qt-v1.30\OneSyncWin7.exe
-clients\win7-qt\dist\OneSyncWin7-win7-qt-v1.30.zip
+clients\win7-qt\dist\OneSyncWin7-win7-qt-v1.31\OneSyncWin7.exe
+clients\win7-qt\dist\OneSyncWin7-win7-qt-v1.31.zip
 ```
 
 这个目录和 zip 会同时包含 Qt DLL。脚本会尽量自动复制 OpenSSL DLL；如果 Win7 上 TLS 连接失败，请检查 `libssl` / `libcrypto` DLL 是否在 exe 同目录。
@@ -93,7 +92,7 @@ sh clients/win7-qt/build-win7.sh
 
 ```text
 clients/win7-qt/release-win7/OneSyncWin7.exe
-clients/win7-qt/dist/OneSyncWin7-win7-x86-v1.30.zip
+clients/win7-qt/dist/OneSyncWin7-win7-x86-v1.31.zip
 ```
 
 这是 32 位 Windows GUI 程序，包内包含 Qt 5 DLL、OpenSSL DLL 和 `platforms/qwindows.dll`，可用于 Windows 7 SP1 测试。
@@ -171,5 +170,7 @@ Win7 Qt 客户端必须兼容当前 OneSync 协议：
 - 网络帧协议：版本 `1`，14 字节帧头。
 - 同步认证：目标端发送 peer identity + 同步令牌。
 - 文件传输：分块接收、SHA-256 校验、临时文件落盘后替换。
+
+遇到更高版本的同步链接或协议帧时，客户端必须明确提示“请升级客户端或让源端重新生成兼容链接”，不能把版本不兼容显示成普通网络失败。
 
 详细字段见 `docs/protocol-notes.md`。
