@@ -2174,3 +2174,37 @@
 
 - 如果 Relay 证书本身域名错误，例如证书只包含 `zz.31pk.top`，但链接填写 `r.31pk.top`，目标端仍会因为主机名不匹配失败；需要先在 Relay 服务器执行 `regen-cert` 生成匹配地址的证书。
 - 自动读取 Relay 证书需要源端能访问 Relay TLS 端口；如果源端网络无法连接 Relay，仍需要手动粘贴 `onesync-relayctl info` 输出的证书文本。
+
+## v1.05 Win7 创建/加入后自动启动审核
+
+审核分支：`feature/v1.05-win7-auto-start`
+
+审核结论：通过。
+
+审核说明：
+
+- 根版本号从 `1.04` 提升到 `1.05`，主包、Win7 Qt 包、Linux 安装/升级示例统一使用 `v1.05`。
+- GitHub `v1.04` Release 说明已重新编辑为真实换行，不再显示字面量 `\n`。
+- Win7 Qt 创建发送任务后，会立即启动该源端任务并显示同步链接。
+- Win7 Qt 加入接收任务后，会立即启动该目标端任务，不再需要用户额外点击“开始”。
+
+验证结果：
+
+- `git diff --check` 通过。
+- `sh -n clients/win7-qt/build-win7.sh` 通过。
+- `sh clients/win7-qt/build-win7.sh` 成功，生成 `clients/win7-qt/dist/OneSyncWin7-win7-x86-v1.05.zip`。
+- `PATH=/Users/apple/Library/Go/sdk/go1.26.3/bin:$PATH sh packaging/package-acceptance.sh` 成功，生成主 Windows/Linux v1.05 包。
+- `unzip -t clients/win7-qt/dist/OneSyncWin7-win7-x86-v1.05.zip` 通过。
+- `strings clients/win7-qt/release-win7/OneSyncWin7.exe | rg "GetSystemTimePreciseAsFileTime"` 无匹配。
+- `unzip -t dist/acceptance-packages/onesync-windows-amd64-v1.05.zip` 通过。
+- `tar -tzf dist/acceptance-packages/onesync-linux-amd64-v1.05.tar.gz` 通过。
+
+本地包路径：
+
+- `/Users/apple/Documents/同步软件/clients/win7-qt/dist/OneSyncWin7-win7-x86-v1.05.zip`
+- `/Users/apple/Documents/同步软件/dist/acceptance-packages/onesync-windows-amd64-v1.05.zip`
+- `/Users/apple/Documents/同步软件/dist/acceptance-packages/onesync-linux-amd64-v1.05.tar.gz`
+
+剩余风险：
+
+- 创建发送任务后会立刻进入等待目标端状态；如果用户只是想先保存任务不启动，后续需要再补“仅保存”选项。

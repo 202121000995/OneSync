@@ -162,7 +162,7 @@ void applyModernDialogStyle(QDialog* dialog)
 }
 } // namespace
 
-const QString kWin7Version = QStringLiteral("1.04");
+const QString kWin7Version = QStringLiteral("1.05");
 
 MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent)
@@ -601,6 +601,7 @@ void MainWindow::createTask()
     refreshTaskTable();
     taskTable->selectRow(tasks.size() - 1);
     appendTaskLog(task.id, QStringLiteral("已创建发送同步任务。"));
+    startSelectedTask();
     showSourceLink(task);
 }
 
@@ -621,6 +622,7 @@ void MainWindow::addTask()
     refreshTaskTable();
     taskTable->selectRow(tasks.size() - 1);
     appendTaskLog(task.id, QStringLiteral("已加入同步任务。"));
+    startSelectedTask();
 }
 
 void MainWindow::startSelectedTask()
