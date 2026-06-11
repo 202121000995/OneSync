@@ -38,7 +38,7 @@ func Register(ctx context.Context, connection net.Conn, sessionID, role string, 
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return ctxErr
 		}
-		return fmt.Errorf("wait for Relay peer: %w", err)
+		return fmt.Errorf("wait for Relay peer: %w; possible causes: the peer is not started yet, the same link was started twice on the same side, or the Relay access token does not match", err)
 	}
 	if ready[0] != 1 {
 		return errors.New("Relay returned an invalid ready response")

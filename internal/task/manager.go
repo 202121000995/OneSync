@@ -265,6 +265,41 @@ func (m *Manager) UpdateIgnoreRules(ctx context.Context, taskID string, rules []
 	return nil
 }
 
+// UpdateTargetLink refreshes connection metadata for an existing target task.
+func (m *Manager) UpdateTargetLink(ctx context.Context, taskID, targetPath, peerAddress, relayURL string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	task, exists := m.tasks[taskID]
+	if !exists {
+		return ErrTaskNotFound
+	}
+	if task.Role != RoleTarget {
+		return fmt.Errorf("task %q is not a target task", taskID)
+	}
+	previous := task
+	if strings.TrimSpace(targetPath) != "" {
+		task.TargetPath = targetPath
+	}
+	task.PeerAddress = peerAddress
+	task.RelayURL = relayURL
+	task.State = StateStopped
+	task.LastError = ""
+	task.Logs = appendLogEntry(task.Logs, LogEntry{Time: m.now().UTC(), Level: "info", Message: "已重新加入同步链接"})
+	task.UpdatedAt = m.now().UTC()
+	if err := validateTask(task); err != nil {
+		return err
+	}
+	m.tasks[taskID] = task
+	if err := m.store.save(m.tasks); err != nil {
+		m.tasks[taskID] = previous
+		return err
+	}
+	return nil
+}
+
 // RenameDevice stores a friendly device name for one task.
 func (m *Manager) RenameDevice(ctx context.Context, taskID, alias string) error {
 	if err := ctx.Err(); err != nil {

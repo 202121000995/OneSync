@@ -2619,3 +2619,36 @@
 剩余风险：
 
 - 如果 Windows 7 机器系统根证书过旧，即使 Relay 使用公网可信证书，也可能因为本机不信任签发 CA 而连接失败；这种情况下需要更新系统根证书，或临时粘贴 Relay 证书作为固定信任证书。
+
+## v1.17 Relay 配对与目标端重入审核
+
+审核分支：`main`
+
+审核结论：本地通过，准备发布 GitHub Release。
+
+审核说明：
+
+- 根版本号从 `1.16` 提升到 `1.17`，主包、Win7 Qt 包、Linux 安装/升级示例统一使用 `v1.17`。
+- 修复目标端已有同名任务时重新加入同步链接会失败的问题；现在会刷新目标端凭据、更新目标目录、清除旧错误，并把任务恢复到可启动状态。
+- 新增单元测试覆盖“目标端旧任务缺凭据后重新加入链接”的恢复路径。
+- Win7 Qt 源端和目标端等待 Relay 配对时间从 30 秒提升到 120 秒，与 Relay 服务端默认等待时间一致，避免客户端提前超时后再次启动造成“同角色重复进入”。
+- Win7 Qt Relay 配对失败提示改为说明常见原因：对端未启动、同一侧重复启动、Relay 令牌不匹配。
+- 普通 Linux/Windows 客户端的 Relay 配对底层错误增加原因提示，便于从日志中判断是对端未启动还是令牌/角色问题。
+
+现场结论：
+
+- Relay 服务器已确认能接受源端和目标端连接，证书、端口、令牌配置正常。
+- Linux 接收端原任务存在但凭据文件缺失，因此显示 `task credential is missing`，目标端没有真正注册到 Relay。
+- 源端 Win7 日志里的 `Remote host closed` 是 Relay 拒绝同一会话的第二个源端连接；根因是第一次源端连接还在 Relay 等待窗口内，客户端本地 30 秒已超时后又重复启动。
+
+验证结果：
+
+- `go test ./...` 通过。
+- `sh -n` 检查 Linux 一键脚本和控制脚本通过。
+- `git diff --check` 通过。
+- `sh clients/win7-qt/build-win7.sh` 成功，生成 `clients/win7-qt/dist/OneSyncWin7-win7-x86-v1.17.zip`。
+- `PATH=/Users/apple/Library/Go/sdk/go1.26.3/bin:$PATH sh packaging/package-acceptance.sh` 成功，生成主 Windows/Linux v1.17 包。
+- `unzip -t clients/win7-qt/dist/OneSyncWin7-win7-x86-v1.17.zip` 通过。
+- `unzip -t dist/acceptance-packages/onesync-windows-amd64-v1.17.zip` 通过。
+- `tar -tzf dist/acceptance-packages/onesync-linux-amd64-v1.17.tar.gz` 通过。
+- `strings clients/win7-qt/release-win7/OneSyncWin7.exe | rg "GetSystemTimePreciseAsFileTime|KERNEL32.dll"` 只匹配到 `KERNEL32.dll`。

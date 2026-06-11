@@ -14,7 +14,7 @@
 
 namespace {
 const int kTlsTimeoutMs = 15000;
-const int kRelayWaitTimeoutMs = 30000;
+const int kRelayWaitTimeoutMs = 120000;
 const int kAuthenticationTimeoutMs = 15000;
 const int kSyncMessageTimeoutMs = 30000;
 const int kMaxPayload = 16 * 1024 * 1024;
@@ -323,6 +323,10 @@ bool TargetConnector::registerRelay(QSslSocket* socket, const QByteArray& token,
     }
     const QByteArray ready = readExact(socket, 1, kRelayWaitTimeoutMs, error);
     if (ready.size() != 1) {
+        if (error != nullptr) {
+            const QString detail = error->trimmed().isEmpty() ? QStringLiteral("Relay 未返回配对确认。") : *error;
+            *error = QStringLiteral("Relay 配对失败：源端没有及时启动、目标端重复启动了同一个链接，或 Relay 令牌不匹配。请先启动源端，避免重复点击目标端开始，并查看 Relay 日志。原始错误：%1").arg(detail);
+        }
         return false;
     }
     if (quint8(ready[0]) != 1) {

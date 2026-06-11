@@ -44,6 +44,7 @@ type taskManager interface {
 	Stop(ctx context.Context, taskID string) error
 	Delete(ctx context.Context, taskID string) error
 	UpdateIgnoreRules(ctx context.Context, taskID string, rules []string) error
+	UpdateTargetLink(ctx context.Context, taskID, targetPath, peerAddress, relayURL string) error
 	RenameDevice(ctx context.Context, taskID, alias string) error
 	SetDeviceTrusted(ctx context.Context, taskID string, trusted bool) error
 	SetDeviceDisabled(ctx context.Context, taskID string, disabled bool) error
@@ -795,8 +796,32 @@ func (s *Server) joinLink(writer http.ResponseWriter, request *http.Request) {
 		writeAPIError(writer, http.StatusInternalServerError, err)
 		return
 	}
-	if _, err := s.manager.Get(request.Context(), input.TaskID); err == nil {
-		writeAPIError(writer, http.StatusBadRequest, errors.New("task ID already exists"))
+	existing, err := s.manager.Get(request.Context(), input.TaskID)
+	if err == nil {
+		if existing.Role != task.RoleTarget {
+			writeAPIError(writer, http.StatusBadRequest, errors.New("task ID already exists and is not a target task"))
+			return
+		}
+		if strings.TrimSpace(input.TargetPath) == "" {
+			input.TargetPath = existing.TargetPath
+		}
+		if input.TargetPath == "" {
+			writeAPIError(writer, http.StatusBadRequest, errors.New("target path is required"))
+			return
+		}
+		if err := s.credentials.Save(input.TaskID, syncauth.Credential{
+			SessionID: link.SessionID, Endpoint: link.Endpoint,
+			RelayEndpoint: link.RelayEndpoint, RelayToken: link.RelayToken, CACertificatePEM: link.CACertificatePEM,
+			Token: link.Token, PeerID: peerID,
+		}); err != nil {
+			writeAPIError(writer, http.StatusInternalServerError, err)
+			return
+		}
+		if err := s.manager.UpdateTargetLink(request.Context(), input.TaskID, input.TargetPath, link.Endpoint, link.RelayEndpoint); err != nil {
+			writeAPIError(writer, http.StatusBadRequest, err)
+			return
+		}
+		writeJSON(writer, http.StatusOK, map[string]string{"task": input.TaskID, "status": "rejoined"})
 		return
 	} else if !errors.Is(err, task.ErrTaskNotFound) {
 		writeAPIError(writer, http.StatusInternalServerError, err)

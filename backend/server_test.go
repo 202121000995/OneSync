@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -213,6 +214,58 @@ func TestLinkIssueAndJoinStoresCredentialSeparately(t *testing.T) {
 	}
 	if manager.tasks["target"].PeerAddress != "192.168.1.10:7443" {
 		t.Fatalf("joined task = %+v", manager.tasks["target"])
+	}
+}
+
+func TestJoinLinkRefreshesExistingTargetCredential(t *testing.T) {
+	manager := &fakeManager{tasks: map[string]task.Task{
+		"source": {ID: "source", Role: task.RoleSource, SourcePath: "/private/source"},
+		"target": {ID: "target", Role: task.RoleTarget, TargetPath: "/private/target", State: task.StateFailed, LastError: "task credential is missing"},
+	}}
+	credentials, err := auth.NewCredentialStore(filepath.Join(t.TempDir(), "credentials"))
+	if err != nil {
+		t.Fatalf("NewCredentialStore() error = %v", err)
+	}
+	server, err := NewServerWithOptions(manager, auth.NewLinkService(), credentials, Options{
+		DirectTLSConfigured:  true,
+		DirectTLSCertificate: testCertificatePEM(t),
+		CertificateFetcher:   &fakeCertificateFetcher{certificate: testRelayCertificatePEM(t)},
+	})
+	if err != nil {
+		t.Fatalf("NewServerWithOptions() error = %v", err)
+	}
+	issue := jsonRequest(http.MethodPost, "http://127.0.0.1/api/links", map[string]any{
+		"task_id": "source", "endpoint": "192.168.1.10:7443", "relay_endpoint": "relay.example:17443", "relay_token": "relay-secret",
+	})
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, issue)
+	if response.Code != http.StatusCreated {
+		t.Fatalf("issue status = %d, body = %s", response.Code, response.Body.String())
+	}
+	var issued struct {
+		Link string `json:"link"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &issued); err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+	join := jsonRequest(http.MethodPost, "http://127.0.0.1/api/links/join", map[string]any{
+		"task_id": "target", "target_path": "/private/target2", "link": issued.Link,
+	})
+	response = httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, join)
+	if response.Code != http.StatusOK {
+		t.Fatalf("join existing status = %d, body = %s", response.Code, response.Body.String())
+	}
+	credential, err := credentials.Load("target")
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if credential.RelayEndpoint != "relay.example:17443" || credential.RelayToken != "relay-secret" || credential.PeerID == "" {
+		t.Fatalf("credential = %+v", credential)
+	}
+	updated := manager.tasks["target"]
+	if updated.TargetPath != "/private/target2" || updated.RelayURL != "relay.example:17443" || updated.State != task.StateStopped || updated.LastError != "" {
+		t.Fatalf("updated target = %+v", updated)
 	}
 }
 
@@ -625,6 +678,24 @@ func (m *fakeManager) UpdateIgnoreRules(_ context.Context, id string, rules []st
 		return task.ErrTaskNotFound
 	}
 	found.IgnoreRules = append([]string(nil), rules...)
+	m.tasks[id] = found
+	return nil
+}
+func (m *fakeManager) UpdateTargetLink(_ context.Context, id, targetPath, peerAddress, relayURL string) error {
+	found, ok := m.tasks[id]
+	if !ok {
+		return task.ErrTaskNotFound
+	}
+	if found.Role != task.RoleTarget {
+		return fmt.Errorf("task %q is not a target task", id)
+	}
+	if targetPath != "" {
+		found.TargetPath = targetPath
+	}
+	found.PeerAddress = peerAddress
+	found.RelayURL = relayURL
+	found.State = task.StateStopped
+	found.LastError = ""
 	m.tasks[id] = found
 	return nil
 }
