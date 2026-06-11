@@ -44,6 +44,27 @@ func (r Receiver) ReceiveFile(ctx context.Context, session network.Session) erro
 	if err := prepareTargetParent(root, begin.Path); err != nil {
 		return r.reject(ctx, session, beginMessage.RequestID, fmt.Errorf("prepare target parent: %w", err))
 	}
+	if matches, err := fileMatches(ctx, finalPath, begin.Size, begin.Hash); err != nil {
+		return r.reject(ctx, session, beginMessage.RequestID, err)
+	} else if matches {
+		if err := sendOffsetAck(ctx, session, beginMessage.RequestID, begin.Size); err != nil {
+			return err
+		}
+		endMessage, err := session.Receive(ctx)
+		if err != nil {
+			return err
+		}
+		if endMessage.RequestID != beginMessage.RequestID || endMessage.Type != network.MessageFileEnd {
+			return r.reject(ctx, session, endMessage.RequestID, errors.New("expected file end after complete-file resume"))
+		}
+		endSize, endHash, err := decodeEnd(endMessage.Payload)
+		if err != nil || endSize != begin.Size || endHash != begin.Hash {
+			return r.reject(ctx, session, endMessage.RequestID, errors.New("file end metadata does not match existing file"))
+		}
+		return session.Send(ctx, network.Message{
+			Type: network.MessageAck, RequestID: endMessage.RequestID,
+		})
+	}
 
 	partDir := filepath.Join(root, ".onesync-part")
 	if err := preparePartDir(partDir); err != nil {
@@ -237,4 +258,22 @@ func hashPath(ctx context.Context, filePath string) ([hashSize]byte, error) {
 	var sum [hashSize]byte
 	copy(sum[:], hash.Sum(nil))
 	return sum, nil
+}
+
+func fileMatches(ctx context.Context, filePath string, size int64, hash [hashSize]byte) (bool, error) {
+	info, err := os.Lstat(filePath)
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("inspect target file: %w", err)
+	}
+	if !info.Mode().IsRegular() || info.Size() != size {
+		return false, nil
+	}
+	actual, err := hashPath(ctx, filePath)
+	if err != nil {
+		return false, fmt.Errorf("hash target file: %w", err)
+	}
+	return actual == hash, nil
 }

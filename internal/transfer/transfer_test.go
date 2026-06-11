@@ -87,6 +87,34 @@ func TestFileTransferResumesFromExistingPart(t *testing.T) {
 	}
 }
 
+func TestFileTransferSkipsExistingMatchingFile(t *testing.T) {
+	content := bytes.Repeat([]byte("already-have-this-block-"), 1000)
+	sourceRoot := t.TempDir()
+	targetRoot := t.TempDir()
+	sourcePath := filepath.Join(sourceRoot, "source.bin")
+	targetPath := filepath.Join(targetRoot, "same.bin")
+	writeTestFile(t, sourcePath, content)
+	writeTestFile(t, targetPath, content)
+
+	client, server := transferSessionPair(t)
+	receiverErrors := make(chan error, 1)
+	go func() {
+		receiverErrors <- (Receiver{Root: targetRoot}).ReceiveFile(context.Background(), server)
+	}()
+	counting := &countingSession{Session: client}
+	if err := (Sender{ChunkSize: 128}).SendFile(
+		context.Background(), counting, 77, sourcePath, "same.bin",
+	); err != nil {
+		t.Fatalf("SendFile() error = %v", err)
+	}
+	if err := <-receiverErrors; err != nil {
+		t.Fatalf("ReceiveFile() error = %v", err)
+	}
+	if counting.fileChunks != 0 {
+		t.Fatalf("sent %d file chunks, want none for an existing matching target file", counting.fileChunks)
+	}
+}
+
 func TestFileTransferResumesAfterInterruptedSession(t *testing.T) {
 	content := bytes.Repeat([]byte("disconnect-resume-"), 20000)
 	sourcePath := filepath.Join(t.TempDir(), "source.bin")
@@ -349,6 +377,18 @@ func (s *interruptingSession) Send(ctx context.Context, message network.Message)
 			return errors.New("simulated connection loss")
 		}
 		s.chunksSent++
+	}
+	return s.Session.Send(ctx, message)
+}
+
+type countingSession struct {
+	network.Session
+	fileChunks int
+}
+
+func (s *countingSession) Send(ctx context.Context, message network.Message) error {
+	if message.Type == network.MessageFileChunk {
+		s.fileChunks++
 	}
 	return s.Session.Send(ctx, message)
 }

@@ -5,9 +5,15 @@ import (
 	"errors"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/202121000995/OneSync/internal/scanner"
+)
+
+const (
+	defaultSettleDuration = 600 * time.Millisecond
+	defaultSettleCheck    = 200 * time.Millisecond
 )
 
 // WaitPeriodic waits for the next polling trigger or context cancellation.
@@ -63,8 +69,47 @@ func WaitForChangeOrPeriodic(ctx context.Context, root string, ignoreRules []str
 			if err != nil {
 				continue
 			}
-			if signature(current) != baselineSignature {
+			currentSignature := signature(current)
+			if currentSignature != baselineSignature {
+				if err := waitUntilStable(ctx, watcher, root, currentSignature, defaultSettleDuration); err != nil {
+					return false, err
+				}
 				return true, nil
+			}
+		}
+	}
+}
+
+func waitUntilStable(ctx context.Context, watcher scanner.Scanner, root, currentSignature string, quietFor time.Duration) error {
+	if quietFor <= 0 {
+		return nil
+	}
+	quietTimer := time.NewTimer(quietFor)
+	defer quietTimer.Stop()
+	ticker := time.NewTicker(defaultSettleCheck)
+	defer ticker.Stop()
+	lastSignature := currentSignature
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-quietTimer.C:
+			return nil
+		case <-ticker.C:
+			current, err := watcher.Scan(ctx, root)
+			if err != nil {
+				continue
+			}
+			nextSignature := signature(current)
+			if nextSignature != lastSignature {
+				lastSignature = nextSignature
+				if !quietTimer.Stop() {
+					select {
+					case <-quietTimer.C:
+					default:
+					}
+				}
+				quietTimer.Reset(quietFor)
 			}
 		}
 	}
@@ -90,4 +135,8 @@ func signature(snapshot scanner.Snapshot) string {
 		mix(uint64(file.ModTime))
 	}
 	return strconv.FormatUint(hash, 16)
+}
+
+func DescribeChangeWait() string {
+	return strings.TrimSpace(defaultSettleDuration.String())
 }

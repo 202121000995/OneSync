@@ -39,7 +39,7 @@ func connectSource(
 	maxPayload uint32,
 ) (authenticatedConnection, error) {
 	var direct func(context.Context) (authenticatedConnection, error)
-	if serverTLS != nil {
+	if serverTLS != nil && directEndpointUsable(credential.Endpoint) {
 		listenAddress, err := sourceListenAddress(credential.Endpoint)
 		if err != nil {
 			return authenticatedConnection{}, err
@@ -96,14 +96,19 @@ func connectTarget(
 	if err != nil {
 		return targetConnection{}, err
 	}
-	session, directErr := transport.Connect(ctx, credential.Endpoint)
-	directConnected := directErr == nil
-	if directErr == nil {
-		directErr = network.AuthenticatePeerClient(ctx, session, 1, authenticationToken, peerID)
-		if directErr == nil {
-			return targetConnection{session: session}, nil
+	var directErr error = errors.New("direct endpoint is not usable")
+	directConnected := false
+	if directEndpointUsable(credential.Endpoint) {
+		session, err := transport.Connect(ctx, credential.Endpoint)
+		directErr = err
+		directConnected = err == nil
+		if err == nil {
+			directErr = network.AuthenticatePeerClient(ctx, session, 1, authenticationToken, peerID)
+			if directErr == nil {
+				return targetConnection{session: session}, nil
+			}
+			_ = session.Close()
 		}
-		_ = session.Close()
 	}
 	if credential.RelayEndpoint == "" {
 		if directConnected {
@@ -207,4 +212,15 @@ func sourceListenAddress(endpoint string) (string, error) {
 		return "", fmt.Errorf("parse source endpoint: %w", err)
 	}
 	return net.JoinHostPort("", port), nil
+}
+
+func directEndpointUsable(endpoint string) bool {
+	host, port, err := net.SplitHostPort(endpoint)
+	if err != nil {
+		return false
+	}
+	if port == "" || port == "0" {
+		return false
+	}
+	return host != ""
 }

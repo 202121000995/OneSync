@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/202121000995/OneSync/internal/auth"
@@ -22,6 +23,8 @@ import (
 )
 
 const DefaultSyncInterval = 30 * time.Second
+
+const maxConnectionRetryDelay = 30 * time.Second
 
 // Config provides shared dependencies for task runners.
 type Config struct {
@@ -126,6 +129,7 @@ func (r *runner) run(ctx context.Context, taskID string, reporter task.StateRepo
 	if taskID != r.task.ID {
 		return errors.New("runner task ID does not match")
 	}
+	retryFailures := 0
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -134,11 +138,18 @@ func (r *runner) run(ctx context.Context, taskID string, reporter task.StateRepo
 			return err
 		}
 		if err := r.runCycle(ctx, taskID, reporter); err != nil {
-			if !errors.Is(err, errConnectionUnavailable) {
+			if !retryableRunError(err) {
 				return err
 			}
-			addLog(ctx, reporter, "warning", fmt.Sprintf("本轮连接暂不可用，%s 后重试：%v", r.factory.syncInterval, err))
+			retryFailures++
+			delay := connectionRetryDelay(retryFailures, r.factory.syncInterval)
+			addLog(ctx, reporter, "warning", fmt.Sprintf("本轮连接或网络暂不可用，%s 后自动重试：%v", delay, err))
+			if err := filewatch.WaitPeriodic(ctx, delay); err != nil {
+				return err
+			}
+			continue
 		}
+		retryFailures = 0
 		if err := reportState(ctx, reporter, task.StateIdle); err != nil {
 			return err
 		}
@@ -147,9 +158,51 @@ func (r *runner) run(ctx context.Context, taskID string, reporter task.StateRepo
 			return err
 		}
 		if changed {
-			addLog(ctx, reporter, "info", "检测到同步目录变化，提前开始下一轮同步")
+			addLog(ctx, reporter, "info", fmt.Sprintf("检测到同步目录变化，并已等待 %s 确认文件写入稳定，提前开始下一轮同步", filewatch.DescribeChangeWait()))
 		}
 	}
+}
+
+func retryableRunError(err error) bool {
+	if errors.Is(err, errConnectionUnavailable) {
+		return true
+	}
+	text := strings.ToLower(err.Error())
+	if strings.Contains(text, "authentication failed") || strings.Contains(text, "认证失败") {
+		return false
+	}
+	for _, marker := range []string{
+		"timeout",
+		"connection reset",
+		"connection refused",
+		"broken pipe",
+		"remote host closed",
+		"read frame header: eof",
+		"unexpected eof",
+		"use of closed network connection",
+	} {
+		if strings.Contains(text, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func connectionRetryDelay(failures int, syncInterval time.Duration) time.Duration {
+	if failures < 1 {
+		failures = 1
+	}
+	delay := time.Duration(1<<min(failures-1, 4)) * 5 * time.Second
+	if syncInterval > 0 && delay > syncInterval {
+		delay = syncInterval
+	}
+	if delay > maxConnectionRetryDelay {
+		delay = maxConnectionRetryDelay
+	}
+	if syncInterval >= 5*time.Second && delay < 5*time.Second {
+		delay = 5 * time.Second
+	}
+	return delay
 }
 
 func (r *runner) localRoot() string {

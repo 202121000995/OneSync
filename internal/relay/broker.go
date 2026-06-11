@@ -307,12 +307,12 @@ func (b *Broker) forward(ctx context.Context, left, right net.Conn, sessionID st
 					results <- copyResult{err: errors.New("Relay byte limit exceeded")}
 					return
 				}
+				b.addSessionBytes(sessionID, sourceToTarget, uint64(count))
 				if err := writeAll(destination, buffer[:count]); err != nil {
 					results <- copyResult{err: err}
 					return
 				}
 				transferred += int64(count)
-				b.addSessionBytes(sessionID, sourceToTarget, uint64(count))
 			}
 			if readErr != nil {
 				if errors.Is(readErr, io.EOF) {
@@ -362,6 +362,16 @@ func (b *Broker) Snapshot() Snapshot {
 		TotalTargetBytes: b.totalTargetBytes,
 		Sessions:         sessions,
 	}
+}
+
+// ClearHistory clears accumulated Relay traffic totals and closed session history.
+// Active and waiting sessions remain untouched.
+func (b *Broker) ClearHistory() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.recentSessions = nil
+	b.totalSourceBytes = 0
+	b.totalTargetBytes = 0
 }
 
 func (b *Broker) markWaitingLocked(sessionID string, role byte, remote string) {

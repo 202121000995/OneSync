@@ -102,6 +102,8 @@ func startAdminServer(ctx context.Context, config adminConfig) error {
 	mux.HandleFunc("/set-ports", server.setPorts)
 	mux.HandleFunc("/change-password", server.changePassword)
 	mux.HandleFunc("/download-log", server.downloadLog)
+	mux.HandleFunc("/clear-log", server.clearLog)
+	mux.HandleFunc("/clear-runtime", server.clearRuntime)
 	mux.HandleFunc("/restart", server.restart)
 	server.httpServer = &http.Server{
 		Addr:              config.Listen,
@@ -405,6 +407,33 @@ func (s *adminServer) downloadLog(writer http.ResponseWriter, request *http.Requ
 	http.ServeFile(writer, request, s.config.LogPath)
 }
 
+func (s *adminServer) clearLog(writer http.ResponseWriter, request *http.Request) {
+	if request.Method != http.MethodPost || !s.authenticated(request) {
+		http.Redirect(writer, request, "/", http.StatusSeeOther)
+		return
+	}
+	if s.config.LogPath == "" {
+		s.render(writer, request, adminPageData{Error: "当前 Relay 没有配置日志文件，不能清空日志。"})
+		return
+	}
+	if err := os.Truncate(s.config.LogPath, 0); err != nil {
+		s.render(writer, request, adminPageData{Error: "清空 Relay 日志失败: " + err.Error()})
+		return
+	}
+	s.render(writer, request, adminPageData{Message: "Relay 日志已清空。"})
+}
+
+func (s *adminServer) clearRuntime(writer http.ResponseWriter, request *http.Request) {
+	if request.Method != http.MethodPost || !s.authenticated(request) {
+		http.Redirect(writer, request, "/", http.StatusSeeOther)
+		return
+	}
+	if s.config.Broker != nil {
+		s.config.Broker.ClearHistory()
+	}
+	s.render(writer, request, adminPageData{Message: "连接和流量历史已清空，正在进行的连接不会断开。"})
+}
+
 func (s *adminServer) restart(writer http.ResponseWriter, request *http.Request) {
 	if request.Method != http.MethodPost || !s.authenticated(request) {
 		http.Redirect(writer, request, "/", http.StatusSeeOther)
@@ -626,6 +655,22 @@ func readTail(path string, maxLines int) string {
 	return strings.Join(lines, "\n")
 }
 
+func humanAdminBytes(bytes uint64) string {
+	const unit = 1024
+	if bytes < unit {
+		return fmt.Sprintf("%d B", bytes)
+	}
+	value := float64(bytes)
+	for _, suffix := range []string{"KB", "MB", "GB", "TB"} {
+		value /= unit
+		if value < unit {
+			text := strings.TrimSuffix(strings.TrimSuffix(fmt.Sprintf("%.1f", value), "0"), ".")
+			return text + " " + suffix
+		}
+	}
+	return fmt.Sprintf("%d B", bytes)
+}
+
 func loadCertificateInfo(certPath, keyPath string) (*x509.Certificate, error) {
 	certPath = strings.TrimSpace(certPath)
 	keyPath = strings.TrimSpace(keyPath)
@@ -666,7 +711,9 @@ func loadCertificateInfoFromPEM(certPEM, keyPEM string) (*x509.Certificate, erro
 	return certificate, nil
 }
 
-var adminTemplate = template.Must(template.New("relay-admin").Parse(`<!doctype html>
+var adminTemplate = template.Must(template.New("relay-admin").Funcs(template.FuncMap{
+	"bytes": humanAdminBytes,
+}).Parse(`<!doctype html>
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
@@ -693,6 +740,10 @@ table{width:100%;border-collapse:collapse;font-size:14px}th,td{border-bottom:1px
 td form{display:inline}.small{font-size:12px;color:#64748b}
 code,pre{background:#0f172a;color:#dbeafe;border-radius:10px;padding:10px;white-space:pre-wrap;word-break:break-all}
 .hint{color:#64748b;font-size:14px;line-height:1.7}
+.scrollbox{max-height:340px;overflow:auto;border:1px solid #e2e8f0;border-radius:12px}
+.scrollbox table{min-width:920px}.scrollbox th{position:sticky;top:0;z-index:1}
+.logbox{max-height:360px;overflow:auto}
+.actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.actions form{display:inline}
 </style>
 </head>
 <body><div class="wrap">
@@ -739,18 +790,20 @@ code,pre{background:#0f172a;color:#dbeafe;border-radius:10px;padding:10px;white-
 <div class="stat">当前连接<b>{{.Runtime.Connections}}</b></div>
 <div class="stat">等待配对<b>{{.Runtime.Waiting}}</b></div>
 <div class="stat">在线会话<b>{{.Runtime.Active}}</b></div>
-<div class="stat">发送 / 接收<b>{{.Runtime.TotalSourceBytes}} / {{.Runtime.TotalTargetBytes}}</b></div>
+<div class="stat">发送 / 接收<b>{{bytes .Runtime.TotalSourceBytes}} / {{bytes .Runtime.TotalTargetBytes}}</b></div>
 </div>
+<div class="actions"><form method="post" action="/clear-runtime"><button class="secondary" type="submit">清空连接/流量历史</button></form></div>
+<div class="scrollbox">
 <table>
 <thead><tr><th>状态</th><th>会话</th><th>源端</th><th>目标端</th><th>源到目标</th><th>目标到源</th><th>更新时间</th></tr></thead>
 <tbody>
 {{range .Runtime.Sessions}}
-<tr><td>{{.State}}</td><td>{{.SessionID}}</td><td>{{.SourceRemote}}</td><td>{{.TargetRemote}}</td><td>{{.SourceToTarget}}</td><td>{{.TargetToSource}}</td><td>{{.UpdatedAt}}</td></tr>
+<tr><td>{{.State}}</td><td>{{.SessionID}}</td><td>{{.SourceRemote}}</td><td>{{.TargetRemote}}</td><td>{{bytes .SourceToTarget}}</td><td>{{bytes .TargetToSource}}</td><td>{{.UpdatedAt}}</td></tr>
 {{else}}
 <tr><td colspan="7" class="small">当前没有 Relay 会话。</td></tr>
 {{end}}
 </tbody>
-</table></div>
+</table></div></div>
 <div class="card"><h2>Relay 访问令牌</h2>
 <p class="hint">轮换后，新连接会立即使用新令牌；已经生成的旧同步链接会失效，需要源端重新生成链接。</p>
 <pre>{{.Token}}</pre>
@@ -813,8 +866,11 @@ code,pre{background:#0f172a;color:#dbeafe;border-radius:10px;padding:10px;white-
 </form></div>
 <div class="card"><h2>Relay 日志</h2>
 <p class="hint">显示最近 120 行 Relay 日志。日志可能包含旧版本或旧端口的历史报错；遇到连接问题时，可以下载日志发给我排查。</p>
-<pre>{{.LogTail}}</pre>
+<pre class="logbox">{{.LogTail}}</pre>
+<div class="actions">
 <a href="/download-log"><button type="button">下载日志</button></a>
+<form method="post" action="/clear-log"><button class="danger" type="submit">清空日志</button></form>
+</div>
 </div>
 <div class="card"><h2>服务操作</h2>
 <p class="hint">Relay 和管理面板运行在同一个服务里，重启会短暂断开连接。几秒后刷新页面即可。</p>
