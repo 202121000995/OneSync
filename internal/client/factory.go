@@ -236,6 +236,9 @@ func (r *runner) runCycle(ctx context.Context, taskID string, reporter task.Stat
 		if err != nil {
 			return err
 		}
+		if credential.RelayEndpoint != "" {
+			return r.runRelaySourceControlCycles(ctx, taskID, reporter, credential, token, []byte(credential.Token), expectedPeerID, clientTLS)
+		}
 		connection, err := connectSource(
 			ctx,
 			credential,
@@ -411,6 +414,92 @@ func (r *runner) runRelayTargetControlCycles(ctx context.Context, taskID string,
 			return err
 		}
 		addLog(ctx, reporter, "info", "本轮同步已完成，关闭本轮 Relay 数据通道，控制通道继续等待下一轮。")
+	}
+}
+
+func (r *runner) runRelaySourceControlCycles(ctx context.Context, taskID string, reporter task.StateReporter, credential auth.Credential, relayToken, authenticationToken []byte, expectedPeerID string, clientTLS *tls.Config) error {
+	session := sessionDigest(credential.SessionID)
+	control, err := connectRelayControl(ctx, credential.RelayEndpoint, credential.SessionID, relay.RoleSource, relayToken, credential.RelayToken, clientTLS, r.factory.maxPayload)
+	if err != nil {
+		addLog(ctx, reporter, "warning", fmt.Sprintf("源端 Relay 控制通道连接失败：%v", err))
+		return fmt.Errorf("%w: %v", errConnectionUnavailable, err)
+	}
+	defer control.Close()
+
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := reportState(ctx, reporter, task.StateIdle); err != nil {
+			return err
+		}
+		reportProgressStage(ctx, reporter, progress.StageWaiting)
+		addLog(ctx, reporter, "info", "Relay 控制通道在线，等待目标端在线并邀请数据会话；本地变化会立即通知目标端。")
+
+		sessionConnection, err := control.OpenSession(ctx)
+		if err != nil {
+			addLog(ctx, reporter, "warning", fmt.Sprintf("Relay 数据会话暂不可用：%v", err))
+			return fmt.Errorf("%w: %v", errConnectionUnavailable, err)
+		}
+		peerID, err := network.AuthenticatePeerServer(ctx, sessionConnection, authenticationToken, expectedPeerID)
+		if err != nil {
+			_ = sessionConnection.Close()
+			return fmt.Errorf("authenticate through Relay: %w", err)
+		}
+		transferSession := meteredSession{base: sessionConnection, reporter: trafficReporter(reporter)}
+		setDevice(ctx, reporter, task.DeviceStats{
+			Connected:     1,
+			Total:         1,
+			PeerID:        peerID,
+			Endpoint:      credential.Endpoint,
+			RelayEndpoint: credential.RelayEndpoint,
+			Connection:    connectionLabel(true),
+			TLS:           "TLS 1.3",
+			ClientVersion: "OneSync",
+		})
+		addLog(ctx, reporter, "info", fmt.Sprintf("Relay 数据会话已建立：会话=%s，对端=%s", session, safePeerID(peerID)))
+		if err := reportState(ctx, reporter, task.StateSyncing); err != nil {
+			_ = transferSession.Close()
+			return err
+		}
+		if _, err := r.factory.credentials.Claim(r.task.ID, credential.Token, peerID); err != nil {
+			_ = transferSession.Close()
+			return fmt.Errorf("claim target identity: %w", err)
+		}
+		engine, err := sync.DefaultSourceEngineWithTransferOptions(r.task.SourcePath, transferSession, scanner.Options{
+			IgnoreRules: r.task.IgnoreRules,
+		}, transfer.Sender{
+			PipelineChunks: r.factory.transferPipelineChunks,
+		}, progressReporter(reporter))
+		if err != nil {
+			_ = transferSession.Close()
+			return err
+		}
+		if err := engine.Run(ctx, taskID); err != nil {
+			_ = transferSession.Close()
+			return err
+		}
+		_ = transferSession.Close()
+		if err := reportState(ctx, reporter, task.StateIdle); err != nil {
+			return err
+		}
+		reportProgressStage(ctx, reporter, progress.StageWaiting)
+		addLog(ctx, reporter, "info", "本轮同步已完成，关闭本轮 Relay 数据通道，控制通道继续等待下一轮。")
+
+		changed, woke, err := r.waitForConnectedChange(ctx, control)
+		if err != nil {
+			return err
+		}
+		if changed {
+			if err := control.SendWake(ctx); err != nil {
+				addLog(ctx, reporter, "warning", fmt.Sprintf("检测到同步目录变化，但通知目标端失败：%v；仍会新开数据会话开始下一轮同步", err))
+			} else {
+				addLog(ctx, reporter, "info", fmt.Sprintf("检测到同步目录变化，并已等待 %s 确认文件写入稳定，已通知目标端并新开数据会话开始下一轮同步", filewatch.DescribeChangeWait()))
+			}
+		}
+		if woke {
+			addLog(ctx, reporter, "info", "收到目标端变化通知，新开数据会话开始下一轮同步")
+		}
 	}
 }
 

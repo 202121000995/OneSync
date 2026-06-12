@@ -158,36 +158,64 @@ void TargetConnector::run()
                 continue;
             }
             emit logMessage(QStringLiteral("Relay 控制通道已登记，等待源端邀请数据会话。"));
-            QByteArray sessionKey;
-            if (!waitRelaySession(&controlSocket, &sessionKey, &cycleError)) {
-                emit logMessage(QStringLiteral("本轮 Relay 数据会话邀请失败：%1").arg(cycleError));
-                controlSocket.disconnectFromHost();
-                if (!waitBeforeRetry(&error)) {
+            while (true) {
+                if (isCancelled(&error)) {
                     emit finished(false, error);
                     return;
                 }
-                continue;
-            }
-            if (!connectTls(&socket, endpoint, kTlsTimeoutMs, &cycleError)) {
-                emit logMessage(QStringLiteral("本轮连接 Relay 数据通道失败：%1").arg(cycleError));
-                controlSocket.disconnectFromHost();
-                if (!waitBeforeRetry(&error)) {
-                    emit finished(false, error);
-                    return;
+                QByteArray sessionKey;
+                if (!waitRelaySession(&controlSocket, &sessionKey, &cycleError)) {
+                    emit logMessage(QStringLiteral("本轮 Relay 数据会话邀请失败：%1").arg(cycleError));
+                    break;
                 }
-                continue;
-            }
-            if (!joinRelayDataSession(&socket, sessionKey, &cycleError)) {
-                emit logMessage(QStringLiteral("本轮加入 Relay 数据通道失败：%1").arg(cycleError));
-                socket.disconnectFromHost();
-                controlSocket.disconnectFromHost();
-                if (!waitBeforeRetry(&error)) {
-                    emit finished(false, error);
-                    return;
+                QSslSocket relaySocket;
+                if (!connectTls(&relaySocket, endpoint, kTlsTimeoutMs, &cycleError)) {
+                    emit logMessage(QStringLiteral("本轮连接 Relay 数据通道失败：%1").arg(cycleError));
+                    break;
                 }
-                continue;
+                if (!joinRelayDataSession(&relaySocket, sessionKey, &cycleError)) {
+                    emit logMessage(QStringLiteral("本轮加入 Relay 数据通道失败：%1").arg(cycleError));
+                    relaySocket.disconnectFromHost();
+                    break;
+                }
+                emit logMessage(QStringLiteral("Relay 数据通道已建立，开始同步认证。"));
+                if (!authenticate(&relaySocket, authenticationToken, peerID, &cycleError)) {
+                    emit logMessage(QStringLiteral("本轮同步认证失败：%1").arg(cycleError));
+                    relaySocket.disconnectFromHost();
+                    break;
+                }
+
+                emit logMessage(QStringLiteral("Relay 数据通道已建立；本轮同步使用独立数据会话，空闲时只保留控制通道。"));
+                emit statusChanged(QStringLiteral("运行-已连接源端"));
+                if (!respondSnapshot(&relaySocket, &cycleError)) {
+                    emit logMessage(QStringLiteral("本轮快照响应失败：%1").arg(cycleError));
+                    relaySocket.disconnectFromHost();
+                    break;
+                }
+                if (!receivePlan(&relaySocket, &cycleError)) {
+                    emit logMessage(QStringLiteral("本轮接收同步计划失败：%1").arg(cycleError));
+                    relaySocket.disconnectFromHost();
+                    break;
+                }
+                relaySocket.disconnectFromHost();
+                emit statusChanged(QStringLiteral("运行-等待"));
+                emit logMessage(QStringLiteral("本轮同步完成，关闭本轮 Relay 数据通道，控制通道继续等待下一轮。"));
+                QString waitError;
+                if (!waitBeforeConnectedCycle(&controlSocket, &waitError)) {
+                    if (isCancelled(&error)) {
+                        emit finished(false, error);
+                        return;
+                    }
+                    emit logMessage(QStringLiteral("%1，将自动重连 Relay 控制通道。").arg(waitError));
+                    break;
+                }
             }
-            emit logMessage(QStringLiteral("Relay 数据通道已建立，开始同步认证。"));
+            controlSocket.disconnectFromHost();
+            if (!waitBeforeRetry(&error)) {
+                emit finished(false, error);
+                return;
+            }
+            continue;
         } else {
             if (!connectTls(&socket, endpoint, kTlsTimeoutMs, &cycleError)) {
                 emit logMessage(QStringLiteral("本轮 TLS 连接失败：%1").arg(cycleError));
@@ -211,7 +239,7 @@ void TargetConnector::run()
             continue;
         }
 
-        emit logMessage(QStringLiteral("Relay 长连接已建立；后续同步会复用当前连接。"));
+        emit logMessage(QStringLiteral("直连同步连接已建立；后续同步会复用当前连接。"));
         while (true) {
             if (isCancelled(&error)) {
                 emit finished(false, error);
@@ -227,14 +255,14 @@ void TargetConnector::run()
                 break;
             }
             emit statusChanged(QStringLiteral("运行-等待"));
-            emit logMessage(QStringLiteral("本轮同步完成，保持 Relay 连接并等待下一轮。"));
+            emit logMessage(QStringLiteral("本轮同步完成，保持直连连接并等待下一轮。"));
             QString waitError;
             if (!waitBeforeConnectedCycle(link.hasRelay() ? &controlSocket : nullptr, &waitError)) {
                 if (isCancelled(&error)) {
                     emit finished(false, error);
                     return;
                 }
-                emit logMessage(QStringLiteral("%1，将自动重连 Relay 控制通道。").arg(waitError));
+                emit logMessage(QStringLiteral("%1，将自动重连。").arg(waitError));
                 break;
             }
         }

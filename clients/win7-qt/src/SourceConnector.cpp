@@ -179,63 +179,45 @@ void SourceConnector::run()
             continue;
         }
         emit logMessage(QStringLiteral("Relay 控制通道已登记，等待目标端在线并邀请数据会话。"));
-        QByteArray sessionKey;
-        if (!requestRelaySession(&controlSocket, &sessionKey, &cycleError)) {
-            emit logMessage(QStringLiteral("本轮 Relay 数据会话邀请失败：%1").arg(cycleError));
-            controlSocket.disconnectFromHost();
-            if (!waitBeforeRetry(&error)) {
-                emit finished(false, error);
-                return;
-            }
-            continue;
-        }
-
-        QSslSocket socket;
-        if (!connectTls(&socket, endpoint, kTlsTimeoutMs, &cycleError)) {
-            emit logMessage(QStringLiteral("本轮连接 Relay 数据通道失败：%1").arg(cycleError));
-            controlSocket.disconnectFromHost();
-            if (!waitBeforeRetry(&error)) {
-                emit finished(false, error);
-                return;
-            }
-            continue;
-        }
-        if (!joinRelayDataSession(&socket, sessionKey, &cycleError)) {
-            emit logMessage(QStringLiteral("本轮加入 Relay 数据通道失败：%1").arg(cycleError));
-            socket.disconnectFromHost();
-            controlSocket.disconnectFromHost();
-            if (!waitBeforeRetry(&error)) {
-                emit finished(false, error);
-                return;
-            }
-            continue;
-        }
-        emit logMessage(QStringLiteral("Relay 数据通道已建立，等待目标端认证。"));
-
-        if (!authenticateTarget(&socket, authenticationToken, &cycleError)) {
-            emit logMessage(QStringLiteral("本轮目标端认证失败：%1").arg(cycleError));
-            socket.disconnectFromHost();
-            controlSocket.disconnectFromHost();
-            if (!waitBeforeRetry(&error)) {
-                emit finished(false, error);
-                return;
-            }
-            continue;
-        }
-
-        emit logMessage(QStringLiteral("Relay 长连接已建立；后续同步会复用当前连接。Win7 稳定模式：单文件流水线窗口=%1，空闲时只等待变化和对端通知。").arg(kPipelineChunks));
         while (true) {
             if (isCancelled(&error)) {
                 emit finished(false, error);
                 return;
             }
+            QByteArray sessionKey;
+            if (!requestRelaySession(&controlSocket, &sessionKey, &cycleError)) {
+                emit logMessage(QStringLiteral("本轮 Relay 数据会话邀请失败：%1").arg(cycleError));
+                break;
+            }
+
+            QSslSocket socket;
+            if (!connectTls(&socket, endpoint, kTlsTimeoutMs, &cycleError)) {
+                emit logMessage(QStringLiteral("本轮连接 Relay 数据通道失败：%1").arg(cycleError));
+                break;
+            }
+            if (!joinRelayDataSession(&socket, sessionKey, &cycleError)) {
+                emit logMessage(QStringLiteral("本轮加入 Relay 数据通道失败：%1").arg(cycleError));
+                socket.disconnectFromHost();
+                break;
+            }
+            emit logMessage(QStringLiteral("Relay 数据通道已建立，等待目标端认证。"));
+
+            if (!authenticateTarget(&socket, authenticationToken, &cycleError)) {
+                emit logMessage(QStringLiteral("本轮目标端认证失败：%1").arg(cycleError));
+                socket.disconnectFromHost();
+                break;
+            }
+
+            emit logMessage(QStringLiteral("Relay 数据通道已建立；本轮同步使用独立数据会话。Win7 稳定模式：单文件流水线窗口=%1，空闲时只保留控制通道。").arg(kPipelineChunks));
             emit statusChanged(QStringLiteral("运行-已连接目标端"));
             if (!runSourceSync(&socket, &cycleError)) {
                 emit logMessage(QStringLiteral("本轮同步失败：%1").arg(cycleError));
+                socket.disconnectFromHost();
                 break;
             }
+            socket.disconnectFromHost();
             emit statusChanged(QStringLiteral("运行-等待"));
-            emit logMessage(QStringLiteral("本轮同步完成，保持 Relay 连接并等待下一轮。"));
+            emit logMessage(QStringLiteral("本轮同步完成，关闭本轮 Relay 数据通道，控制通道继续等待下一轮。"));
             QString waitError;
             if (!waitBeforeConnectedCycle(&controlSocket, &waitError)) {
                 if (isCancelled(&error)) {
@@ -246,7 +228,6 @@ void SourceConnector::run()
                 break;
             }
         }
-        socket.disconnectFromHost();
         controlSocket.disconnectFromHost();
         if (!waitBeforeRetry(&error)) {
             emit finished(false, error);
