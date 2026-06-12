@@ -11,7 +11,7 @@ SYNC_PORT=${ONESYNC_SYNC_PORT:-7443}
 WEB_BIND=${ONESYNC_WEB_BIND:-0.0.0.0}
 TRANSFER_PIPELINE=${ONESYNC_TRANSFER_PIPELINE:-0}
 REPO=${ONESYNC_REPO:-202121000995/OneSync}
-DEFAULT_RELEASE_TAG=${ONESYNC_DEFAULT_RELEASE_TAG:-v1.36}
+DEFAULT_RELEASE_TAG=${ONESYNC_DEFAULT_RELEASE_TAG:-v1.37}
 GH_PROXY=${GH_PROXY:-}
 RELEASE_TAG=${ONESYNC_RELEASE_TAG:-${RELEASE_TAG:-}}
 PACKAGE_URL=${ONESYNC_LINUX_PACKAGE_URL:-${PACKAGE_URL:-}}
@@ -143,7 +143,7 @@ upgrade_service() {
 	url=$(latest_linux_package_url)
 	if [ -z "$url" ]; then
 		printf 'Cannot find latest Linux package from GitHub repo %s.\n' "$REPO" >&2
-		printf 'Retry with RELEASE_TAG=v1.36 or PACKAGE_URL=https://...tar.gz.\n' >&2
+		printf 'Retry with RELEASE_TAG=v1.37 or PACKAGE_URL=https://...tar.gz.\n' >&2
 		exit 1
 	fi
 	curl -fL "$(proxy_url "$url")" -o "$tmp/onesync-linux.tar.gz"
@@ -203,7 +203,11 @@ case "${1:-status}" in
 		systemctl status "$SERVICE" -l --no-pager
 		;;
 	logs)
-		journalctl -u "$SERVICE" -n "${2:-120}" --no-pager
+		if [ -f "$LOG_DIR/onesync.log" ]; then
+			tail -n "${2:-200}" "$LOG_DIR/onesync.log"
+		else
+			journalctl -u "$SERVICE" -n "${2:-200}" --no-pager
+		fi
 		;;
 	upgrade)
 		upgrade_service

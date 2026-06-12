@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"sort"
 	"strings"
 	"sync"
@@ -162,6 +163,7 @@ func (m *Manager) Start(ctx context.Context, taskID string) error {
 	task.Progress = nil
 	task.Devices.Connected = 0
 	task.Logs = append(task.Logs, LogEntry{Time: m.now().UTC(), Level: "info", Message: "任务正在启动"})
+	logTaskEvent(taskID, "info", "任务正在启动")
 	if len(task.Logs) > 200 {
 		task.Logs = append([]LogEntry(nil), task.Logs[len(task.Logs)-200:]...)
 	}
@@ -598,6 +600,13 @@ func appendLogEntry(logs []LogEntry, entry LogEntry) []LogEntry {
 	return logs
 }
 
+func logTaskEvent(taskID, level, message string) {
+	if strings.TrimSpace(message) == "" {
+		return
+	}
+	log.Printf("[task=%s] %s %s", taskID, level, message)
+}
+
 func appendDeviceEvent(events []DeviceEvent, event DeviceEvent) []DeviceEvent {
 	events = append(events, event)
 	if len(events) > 100 {
@@ -616,10 +625,13 @@ func (m *Manager) setState(taskID, state, lastError string) error {
 	switch state {
 	case StateConnecting:
 		task.Logs = append(task.Logs, LogEntry{Time: m.now().UTC(), Level: "info", Message: "正在连接同步设备"})
+		logTaskEvent(taskID, "info", "正在连接同步设备")
 	case StateSyncing:
 		task.Logs = append(task.Logs, LogEntry{Time: m.now().UTC(), Level: "info", Message: "发起同步"})
+		logTaskEvent(taskID, "info", "发起同步")
 	case StateFailed:
 		task.Logs = append(task.Logs, LogEntry{Time: m.now().UTC(), Level: "error", Message: lastError})
+		logTaskEvent(taskID, "error", lastError)
 	}
 	if len(task.Logs) > 200 {
 		task.Logs = append([]LogEntry(nil), task.Logs[len(task.Logs)-200:]...)
@@ -765,6 +777,7 @@ func (m *Manager) addLog(taskID, level, message string) error {
 		m.tasks[taskID] = previous
 		return err
 	}
+	logTaskEvent(taskID, level, entry.Message)
 	return nil
 }
 
@@ -815,11 +828,14 @@ func (m *Manager) finishRun(taskID string, runtime *runtimeTask, state, lastErro
 	task.LastError = lastError
 	if lastError != "" {
 		task.Logs = append(task.Logs, LogEntry{Time: m.now().UTC(), Level: "error", Message: lastError})
+		logTaskEvent(taskID, "error", lastError)
 	} else if state == StateIdle {
 		task.Logs = append(task.Logs, LogEntry{Time: m.now().UTC(), Level: "info", Message: "同步完成，等待下一轮"})
+		logTaskEvent(taskID, "info", "同步完成，等待下一轮")
 	} else if state == StateStopped {
 		task.Devices.Connected = 0
 		task.Logs = append(task.Logs, LogEntry{Time: m.now().UTC(), Level: "info", Message: "任务已停止"})
+		logTaskEvent(taskID, "info", "任务已停止")
 	}
 	if len(task.Logs) > 200 {
 		task.Logs = append([]LogEntry(nil), task.Logs[len(task.Logs)-200:]...)
