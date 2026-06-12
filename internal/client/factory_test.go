@@ -207,7 +207,7 @@ func TestRunnersSynchronizeThroughRelayAfterDirectFailure(t *testing.T) {
 	serverTLS, clientTLS := clientTestTLS(t)
 	broker, err := relay.NewBroker(relay.Config{
 		WaitTimeout: time.Second,
-		IdleTimeout: time.Second,
+		IdleTimeout: 30 * time.Second,
 		MaxWaiting:  10,
 		MaxActive:   10,
 		MaxBytes:    16 << 20,
@@ -259,6 +259,86 @@ func TestRunnersSynchronizeThroughRelayAfterDirectFailure(t *testing.T) {
 	writeTestFile(t, filepath.Join(sourceRoot, "relay.txt"), "through Relay")
 	runRunnerPairUntilFile(t, sourceFactory, targetFactory, sourceTask, targetTask, filepath.Join(targetRoot, "relay.txt"), "through Relay")
 	assertTestFile(t, filepath.Join(targetRoot, "relay.txt"), "through Relay")
+}
+
+func TestRelayWakeTriggersNextSyncCycle(t *testing.T) {
+	serverTLS, clientTLS := clientTestTLS(t)
+	broker, err := relay.NewBroker(relay.Config{
+		WaitTimeout: time.Second,
+		IdleTimeout: time.Second,
+		MaxWaiting:  10,
+		MaxActive:   10,
+		MaxBytes:    16 << 20,
+		AccessToken: "relay-access-token",
+	})
+	if err != nil {
+		t.Fatalf("NewBroker() error = %v", err)
+	}
+	relayServer, err := relay.Listen("127.0.0.1:0", serverTLS, broker)
+	if err != nil {
+		t.Fatalf("relay.Listen() error = %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	serveResult := make(chan error, 1)
+	go func() { serveResult <- relayServer.Serve(ctx) }()
+	t.Cleanup(func() {
+		cancel()
+		_ = relayServer.Close()
+		<-serveResult
+	})
+
+	sourceRoot := t.TempDir()
+	targetRoot := t.TempDir()
+	sourceStore := credentialStore(t)
+	targetStore := credentialStore(t)
+	token := testToken()
+	peerID, err := auth.NewPeerID()
+	if err != nil {
+		t.Fatalf("NewPeerID() error = %v", err)
+	}
+	credential := auth.Credential{
+		SessionID:     "relay-wake-session",
+		Endpoint:      "127.0.0.1:1",
+		RelayEndpoint: relayServer.Addr().String(),
+		RelayToken:    "relay-access-token",
+		Token:         token,
+	}
+	sourceCredential := credential
+	sourceCredential.OneTime = true
+	saveCredential(t, sourceStore, "source", sourceCredential)
+	targetCredential := credential
+	targetCredential.PeerID = peerID
+	saveCredential(t, targetStore, "target", targetCredential)
+
+	sourceFactory := testFactory(t, sourceStore, nil, clientTLS)
+	targetFactory := testFactory(t, targetStore, nil, clientTLS)
+	sourceTask := task.Task{ID: "source", Role: task.RoleSource, SourcePath: sourceRoot}
+	targetTask := task.Task{ID: "target", Role: task.RoleTarget, TargetPath: targetRoot}
+	sourceRunner, targetRunner := createRunnerPair(t, sourceFactory, targetFactory, sourceTask, targetTask)
+	sourceReporter := newStateRecorder()
+	targetReporter := newStateRecorder()
+	runCtx, runCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer runCancel()
+	results := make(chan error, 2)
+	go func() {
+		results <- sourceRunner.(task.ReportingRunner).RunWithReporter(runCtx, sourceTask.ID, sourceReporter)
+	}()
+	time.Sleep(20 * time.Millisecond)
+	go func() {
+		results <- targetRunner.(task.ReportingRunner).RunWithReporter(runCtx, targetTask.ID, targetReporter)
+	}()
+
+	targetFile := filepath.Join(targetRoot, "relay-wake.txt")
+	writeTestFile(t, filepath.Join(sourceRoot, "relay-wake.txt"), "first")
+	waitForTestFileOrRunnerError(t, targetFile, "first", results)
+	writeTestFile(t, filepath.Join(sourceRoot, "relay-wake.txt"), "second")
+	waitForTestFileOrRunnerError(t, targetFile, "second", results)
+	if err := os.Remove(targetFile); err != nil {
+		t.Fatalf("Remove() error = %v", err)
+	}
+	waitForTestFileOrRunnerErrorWithLogs(t, targetFile, "second", results, sourceReporter, targetReporter)
+	runCancel()
+	waitRunnerCancellation(t, results)
 }
 
 func runRunnerPairUntilFile(
@@ -435,6 +515,11 @@ func waitForTestFile(t *testing.T, path, want string) {
 
 func waitForTestFileOrRunnerError(t *testing.T, path, want string, results <-chan error) {
 	t.Helper()
+	waitForTestFileOrRunnerErrorWithLogs(t, path, want, results)
+}
+
+func waitForTestFileOrRunnerErrorWithLogs(t *testing.T, path, want string, results <-chan error, recorders ...*stateRecorder) {
+	t.Helper()
 	deadline := time.NewTimer(5 * time.Second)
 	defer deadline.Stop()
 	ticker := time.NewTicker(10 * time.Millisecond)
@@ -449,6 +534,9 @@ func waitForTestFileOrRunnerError(t *testing.T, path, want string, results <-cha
 				return
 			}
 		case <-deadline.C:
+			for index, recorder := range recorders {
+				t.Logf("recorder %d logs:\n%s", index, recorder.drainLogs())
+			}
 			assertTestFile(t, path, want)
 		}
 	}
@@ -457,12 +545,14 @@ func waitForTestFileOrRunnerError(t *testing.T, path, want string, results <-cha
 type stateRecorder struct {
 	updates  chan string
 	progress chan progress.Snapshot
+	logs     chan string
 }
 
 func newStateRecorder() *stateRecorder {
 	return &stateRecorder{
 		updates:  make(chan string, 100),
 		progress: make(chan progress.Snapshot, 100),
+		logs:     make(chan string, 500),
 	}
 }
 
@@ -481,6 +571,30 @@ func (r *stateRecorder) SetProgress(ctx context.Context, snapshot progress.Snaps
 		return ctx.Err()
 	case r.progress <- snapshot:
 		return nil
+	}
+}
+
+func (r *stateRecorder) AddLog(ctx context.Context, level, message string) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case r.logs <- level + ": " + message:
+		return nil
+	default:
+		return nil
+	}
+}
+
+func (r *stateRecorder) drainLogs() string {
+	var builder strings.Builder
+	for {
+		select {
+		case line := <-r.logs:
+			builder.WriteString(line)
+			builder.WriteByte('\n')
+		default:
+			return builder.String()
+		}
 	}
 }
 

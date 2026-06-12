@@ -74,8 +74,8 @@ package-win7.cmd
 成功后会生成：
 
 ```text
-clients\win7-qt\dist\OneSyncWin7-win7-qt-v1.35\OneSyncWin7.exe
-clients\win7-qt\dist\OneSyncWin7-win7-qt-v1.35.zip
+clients\win7-qt\dist\OneSyncWin7-win7-qt-v1.36\OneSyncWin7.exe
+clients\win7-qt\dist\OneSyncWin7-win7-qt-v1.36.zip
 ```
 
 这个目录和 zip 会同时包含 Qt DLL。脚本会尽量自动复制 OpenSSL DLL；如果 Win7 上 TLS 连接失败，请检查 `libssl` / `libcrypto` DLL 是否在 exe 同目录。
@@ -92,7 +92,7 @@ sh clients/win7-qt/build-win7.sh
 
 ```text
 clients/win7-qt/release-win7/OneSyncWin7.exe
-clients/win7-qt/dist/OneSyncWin7-win7-x86-v1.35.zip
+clients/win7-qt/dist/OneSyncWin7-win7-x86-v1.36.zip
 ```
 
 这是 32 位 Windows GUI 程序，包内包含 Qt 5 DLL、OpenSSL DLL 和 `platforms/qwindows.dll`，可用于 Windows 7 SP1 测试。

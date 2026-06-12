@@ -56,18 +56,47 @@ func WaitForChangeOrPeriodic(ctx context.Context, root string, ignoreRules []str
 // context is canceled. Unlike WaitForChangeOrPeriodic, it keeps one baseline
 // for the whole wait so a deletion cannot be lost between short wait cycles.
 func WaitForChange(ctx context.Context, root string, ignoreRules []string) error {
-	if root == "" {
-		<-ctx.Done()
-		return ctx.Err()
-	}
-	changed, err := waitForChange(ctx, root, ignoreRules, defaultChangeCheck, 0)
+	monitor, err := NewMonitor(ctx, root, ignoreRules)
 	if err != nil {
 		return err
 	}
-	if !changed {
+	return monitor.Wait(ctx)
+}
+
+// Monitor keeps one filesystem baseline across multiple waits. This prevents a
+// deletion or edit from being absorbed as the new baseline between sync cycles.
+type Monitor struct {
+	root       string
+	watcher    scanner.Scanner
+	signature  string
+	ignoreNone bool
+}
+
+// NewMonitor creates a persistent folder-change monitor.
+func NewMonitor(ctx context.Context, root string, ignoreRules []string) (*Monitor, error) {
+	if root == "" {
+		return &Monitor{ignoreNone: true}, nil
+	}
+	watcher := scanner.New(scanner.Options{ComputeHash: true, IgnoreRules: ignoreRules})
+	baseline, err := watcher.Scan(ctx, root)
+	if err != nil {
+		return nil, err
+	}
+	return &Monitor{
+		root:      root,
+		watcher:   watcher,
+		signature: signature(baseline),
+	}, nil
+}
+
+// Wait returns after the monitored folder changes and updates the stored
+// baseline to the stable post-change state.
+func (m *Monitor) Wait(ctx context.Context) error {
+	if m == nil || m.ignoreNone {
+		<-ctx.Done()
 		return ctx.Err()
 	}
-	return nil
+	return m.wait(ctx, defaultChangeCheck)
 }
 
 func waitForChange(ctx context.Context, root string, ignoreRules []string, checkEvery, deadlineAfter time.Duration) (bool, error) {
@@ -112,8 +141,13 @@ func waitForChange(ctx context.Context, root string, ignoreRules []string, check
 }
 
 func waitUntilStable(ctx context.Context, watcher scanner.Scanner, root, currentSignature string, quietFor time.Duration) error {
+	_, err := waitUntilStableSignature(ctx, watcher, root, currentSignature, quietFor)
+	return err
+}
+
+func waitUntilStableSignature(ctx context.Context, watcher scanner.Scanner, root, currentSignature string, quietFor time.Duration) (string, error) {
 	if quietFor <= 0 {
-		return nil
+		return currentSignature, nil
 	}
 	quietTimer := time.NewTimer(quietFor)
 	defer quietTimer.Stop()
@@ -123,9 +157,9 @@ func waitUntilStable(ctx context.Context, watcher scanner.Scanner, root, current
 	for {
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return "", ctx.Err()
 		case <-quietTimer.C:
-			return nil
+			return lastSignature, nil
 		case <-ticker.C:
 			current, err := watcher.Scan(ctx, root)
 			if err != nil {
@@ -142,6 +176,32 @@ func waitUntilStable(ctx context.Context, watcher scanner.Scanner, root, current
 				}
 				quietTimer.Reset(quietFor)
 			}
+		}
+	}
+}
+
+func (m *Monitor) wait(ctx context.Context, checkEvery time.Duration) error {
+	ticker := time.NewTicker(checkEvery)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+			current, err := m.watcher.Scan(ctx, m.root)
+			if err != nil {
+				continue
+			}
+			currentSignature := signature(current)
+			if currentSignature == m.signature {
+				continue
+			}
+			stableSignature, err := waitUntilStableSignature(ctx, m.watcher, m.root, currentSignature, defaultSettleDuration)
+			if err != nil {
+				return err
+			}
+			m.signature = stableSignature
+			return nil
 		}
 	}
 }

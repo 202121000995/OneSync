@@ -179,6 +179,92 @@ func connectRelay(
 	return relayControlledSession{Session: session, control: control}, nil
 }
 
+type relayControlConnection struct {
+	endpoint   string
+	sessionID  string
+	role       string
+	config     *tls.Config
+	maxPayload uint32
+	control    *relay.ControlClient
+}
+
+func connectRelayControl(
+	ctx context.Context,
+	endpoint, sessionID, role string,
+	token []byte,
+	accessToken string,
+	config *tls.Config,
+	maxPayload uint32,
+) (*relayControlConnection, error) {
+	dialer := tls.Dialer{NetDialer: &net.Dialer{}, Config: config.Clone()}
+	controlConnection, err := dialer.DialContext(ctx, "tcp", endpoint)
+	if err != nil {
+		return nil, fmt.Errorf("connect Relay TLS endpoint: %w", err)
+	}
+	control, err := relay.JoinControl(ctx, controlConnection, sessionID, role, token, accessToken)
+	if err != nil {
+		_ = controlConnection.Close()
+		return nil, err
+	}
+	return &relayControlConnection{
+		endpoint:   endpoint,
+		sessionID:  sessionID,
+		role:       role,
+		config:     config.Clone(),
+		maxPayload: maxPayload,
+		control:    control,
+	}, nil
+}
+
+func (c *relayControlConnection) OpenSession(ctx context.Context) (network.Session, error) {
+	var sessionKey [32]byte
+	var err error
+	if c.role == relay.RoleSource {
+		sessionKey, err = c.control.RequestSession(ctx)
+	} else {
+		sessionKey, err = c.control.WaitSession(ctx)
+	}
+	if err != nil {
+		return nil, err
+	}
+	dialer := tls.Dialer{NetDialer: &net.Dialer{}, Config: c.config.Clone()}
+	dataConnection, err := dialer.DialContext(ctx, "tcp", c.endpoint)
+	if err != nil {
+		return nil, fmt.Errorf("connect Relay data endpoint: %w", err)
+	}
+	if err := relay.JoinSession(ctx, dataConnection, c.sessionID, c.role, sessionKey); err != nil {
+		_ = dataConnection.Close()
+		return nil, err
+	}
+	session, err := network.NewSession(dataConnection, c.maxPayload)
+	if err != nil {
+		_ = dataConnection.Close()
+		return nil, err
+	}
+	return session, nil
+}
+
+func (c *relayControlConnection) SendWake(ctx context.Context) error {
+	if c == nil || c.control == nil {
+		return nil
+	}
+	return c.control.SendWake(ctx)
+}
+
+func (c *relayControlConnection) WaitWake(ctx context.Context) error {
+	if c == nil || c.control == nil {
+		return errConnectionUnavailable
+	}
+	return c.control.WaitWake(ctx)
+}
+
+func (c *relayControlConnection) Close() error {
+	if c == nil || c.control == nil {
+		return nil
+	}
+	return c.control.Close()
+}
+
 type relayControlledSession struct {
 	network.Session
 	control *relay.ControlClient

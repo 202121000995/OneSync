@@ -11,12 +11,14 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/202121000995/OneSync/internal/auth"
 	"github.com/202121000995/OneSync/internal/filewatch"
 	"github.com/202121000995/OneSync/internal/network"
 	"github.com/202121000995/OneSync/internal/progress"
+	"github.com/202121000995/OneSync/internal/relay"
 	"github.com/202121000995/OneSync/internal/scanner"
 	"github.com/202121000995/OneSync/internal/sync"
 	"github.com/202121000995/OneSync/internal/task"
@@ -288,6 +290,9 @@ func (r *runner) runCycle(ctx context.Context, taskID string, reporter task.Stat
 	}
 	session := sessionDigest(credential.SessionID)
 	addLog(ctx, reporter, "info", fmt.Sprintf("目标端开始连接源端：会话=%s，直连地址=%s，Relay=%s，对端身份=%s", session, credential.Endpoint, emptyDash(credential.RelayEndpoint), safePeerID(credential.PeerID)))
+	if credential.RelayEndpoint != "" {
+		return r.runRelayTargetControlCycles(ctx, taskID, reporter, credential, token, clientTLS)
+	}
 	connection, err := connectTarget(
 		ctx,
 		credential,
@@ -327,7 +332,86 @@ func (r *runner) runCycle(ctx context.Context, taskID string, reporter task.Stat
 	if _, ok := connection.session.(wakeController); ok {
 		wake = transferSession
 	}
+	if wake != nil {
+		return r.runRelayTargetConnectedCycles(ctx, taskID, reporter, engine, wake)
+	}
 	return r.runConnectedCycles(ctx, taskID, reporter, engine, wake)
+}
+
+func (r *runner) runRelayTargetControlCycles(ctx context.Context, taskID string, reporter task.StateReporter, credential auth.Credential, relayToken []byte, clientTLS *tls.Config) error {
+	control, err := connectRelayControl(ctx, credential.RelayEndpoint, credential.SessionID, relay.RoleTarget, relayToken, credential.RelayToken, clientTLS, r.factory.maxPayload)
+	if err != nil {
+		addLog(ctx, reporter, "warning", fmt.Sprintf("目标端 Relay 控制通道连接失败：%v", err))
+		return fmt.Errorf("%w: %v", errConnectionUnavailable, err)
+	}
+	defer control.Close()
+
+	var syncing atomic.Bool
+	watchContext, cancelWatch := context.WithCancel(ctx)
+	defer cancelWatch()
+	watchErrors := make(chan error, 1)
+	go func() {
+		watchErrors <- r.notifyLocalChanges(watchContext, reporter, control, &syncing)
+	}()
+
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		select {
+		case err := <-watchErrors:
+			if err != nil {
+				return err
+			}
+			return nil
+		default:
+		}
+		if err := reportState(ctx, reporter, task.StateIdle); err != nil {
+			return err
+		}
+		reportProgressStage(ctx, reporter, progress.StageWaiting)
+		addLog(ctx, reporter, "info", "Relay 控制通道在线，等待源端邀请数据会话；本地变化会立即通知源端。")
+		session, err := control.OpenSession(ctx)
+		if err != nil {
+			addLog(ctx, reporter, "warning", fmt.Sprintf("Relay 数据会话暂不可用：%v", err))
+			return fmt.Errorf("%w: %v", errConnectionUnavailable, err)
+		}
+		if err := network.AuthenticatePeerClient(ctx, session, 1, []byte(credential.Token), credential.PeerID); err != nil {
+			_ = session.Close()
+			return fmt.Errorf("authenticate through Relay: %w", err)
+		}
+		transferSession := meteredSession{base: session, reporter: trafficReporter(reporter)}
+		setDevice(ctx, reporter, task.DeviceStats{
+			Connected:     1,
+			Total:         1,
+			PeerID:        credential.PeerID,
+			Endpoint:      credential.Endpoint,
+			RelayEndpoint: credential.RelayEndpoint,
+			Connection:    connectionLabel(true),
+			TLS:           "TLS 1.3",
+			ClientVersion: "OneSync",
+		})
+		addLog(ctx, reporter, "info", fmt.Sprintf("Relay 数据会话已建立：会话=%s，源端=%s", sessionDigest(credential.SessionID), credential.Endpoint))
+		if err := reportState(ctx, reporter, task.StateSyncing); err != nil {
+			_ = transferSession.Close()
+			return err
+		}
+		engine, err := sync.DefaultTargetEngineWithOptions(r.task.TargetPath, transferSession, scanner.Options{
+			IgnoreRules: r.task.IgnoreRules,
+		}, progressReporter(reporter))
+		if err != nil {
+			_ = transferSession.Close()
+			return err
+		}
+		syncing.Store(true)
+		err = engine.Run(ctx, taskID)
+		syncing.Store(false)
+		_ = transferSession.Close()
+		if err != nil {
+			return err
+		}
+		addLog(ctx, reporter, "info", "本轮同步已完成，关闭本轮 Relay 数据通道，控制通道继续等待下一轮。")
+	}
 }
 
 type wakeController interface {
@@ -368,6 +452,73 @@ func (r *runner) runConnectedCycles(ctx context.Context, taskID string, reporter
 		if woke {
 			addLog(ctx, reporter, "info", "收到对端变化通知，使用现有连接开始下一轮同步")
 		}
+	}
+}
+
+func (r *runner) runRelayTargetConnectedCycles(ctx context.Context, taskID string, reporter task.StateReporter, engine *sync.Engine, wake wakeController) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := reportState(ctx, reporter, task.StateSyncing); err != nil {
+		return err
+	}
+	if err := engine.Run(ctx, taskID); err != nil {
+		return err
+	}
+
+	watchContext, cancelWatch := context.WithCancel(ctx)
+	defer cancelWatch()
+	watchErrors := make(chan error, 1)
+	go func() {
+		watchErrors <- r.notifyLocalChanges(watchContext, reporter, wake, nil)
+	}()
+
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		select {
+		case err := <-watchErrors:
+			if err != nil {
+				return err
+			}
+			return nil
+		default:
+		}
+		if err := reportState(ctx, reporter, task.StateIdle); err != nil {
+			return err
+		}
+		reportProgressStage(ctx, reporter, progress.StageWaiting)
+		addLog(ctx, reporter, "info", "接收端保持 Relay 数据通道在线，等待源端下一轮快照请求；本地变化会立即通知源端。")
+		if err := engine.Run(ctx, taskID); err != nil {
+			return err
+		}
+	}
+}
+
+func (r *runner) notifyLocalChanges(ctx context.Context, reporter task.StateReporter, wake wakeController, syncing *atomic.Bool) error {
+	monitor, err := filewatch.NewMonitor(ctx, r.localRoot(), r.task.IgnoreRules)
+	if err != nil {
+		return err
+	}
+	for {
+		if err := monitor.Wait(ctx); err != nil {
+			if errors.Is(err, context.Canceled) {
+				return nil
+			}
+			return err
+		}
+		if syncing != nil && syncing.Load() {
+			continue
+		}
+		if err := wake.SendWake(ctx); err != nil {
+			if errors.Is(err, context.Canceled) {
+				return nil
+			}
+			addLog(ctx, reporter, "warning", fmt.Sprintf("检测到接收目录变化，但通知源端失败：%v", err))
+			continue
+		}
+		addLog(ctx, reporter, "info", fmt.Sprintf("检测到接收目录变化，并已等待 %s 确认文件写入稳定，已通知源端启动下一轮同步", filewatch.DescribeChangeWait()))
 	}
 }
 
