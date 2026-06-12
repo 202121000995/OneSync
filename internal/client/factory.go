@@ -26,7 +26,6 @@ import (
 const DefaultSyncInterval = 10 * time.Second
 
 const maxConnectionRetryDelay = 30 * time.Second
-const maxConnectedIdleInterval = 2 * time.Second
 
 // Config provides shared dependencies for task runners.
 type Config struct {
@@ -337,7 +336,6 @@ type wakeController interface {
 }
 
 func (r *runner) runConnectedCycles(ctx context.Context, taskID string, reporter task.StateReporter, engine *sync.Engine, wake wakeController) error {
-	idleInterval := connectedIdleInterval(r.factory.syncInterval)
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -352,7 +350,7 @@ func (r *runner) runConnectedCycles(ctx context.Context, taskID string, reporter
 			return err
 		}
 		reportProgressStage(ctx, reporter, progress.StageWaiting)
-		changed, woke, err := r.waitForConnectedChange(ctx, wake, idleInterval)
+		changed, woke, err := r.waitForConnectedChange(ctx, wake)
 		if err != nil {
 			return err
 		}
@@ -365,15 +363,12 @@ func (r *runner) runConnectedCycles(ctx context.Context, taskID string, reporter
 		if woke {
 			addLog(ctx, reporter, "info", "收到对端变化通知，使用现有连接开始下一轮同步")
 		}
-		if !changed && !woke {
-			continue
-		}
 	}
 }
 
-func (r *runner) waitForConnectedChange(ctx context.Context, wake wakeController, idleInterval time.Duration) (changed bool, woke bool, err error) {
+func (r *runner) waitForConnectedChange(ctx context.Context, wake wakeController) (changed bool, woke bool, err error) {
 	if wake == nil {
-		changed, err = filewatch.WaitForChangeOrPeriodic(ctx, r.localRoot(), r.task.IgnoreRules, idleInterval)
+		changed, err = filewatch.WaitForChangeOrPeriodic(ctx, r.localRoot(), r.task.IgnoreRules, r.factory.syncInterval)
 		return changed, false, err
 	}
 	waitContext, cancel := context.WithCancel(ctx)
@@ -385,7 +380,8 @@ func (r *runner) waitForConnectedChange(ctx context.Context, wake wakeController
 	fileResults := make(chan fileResult, 1)
 	wakeResults := make(chan error, 1)
 	go func() {
-		changed, err := filewatch.WaitForChangeOrPeriodic(waitContext, r.localRoot(), r.task.IgnoreRules, idleInterval)
+		err := filewatch.WaitForChange(waitContext, r.localRoot(), r.task.IgnoreRules)
+		changed := err == nil
 		fileResults <- fileResult{changed: changed, err: err}
 	}()
 	go func() {
@@ -408,16 +404,6 @@ func (r *runner) waitForConnectedChange(ctx context.Context, wake wakeController
 		cancel()
 		return false, false, ctx.Err()
 	}
-}
-
-func connectedIdleInterval(syncInterval time.Duration) time.Duration {
-	if syncInterval <= 0 {
-		return maxConnectedIdleInterval
-	}
-	if syncInterval < maxConnectedIdleInterval {
-		return syncInterval
-	}
-	return maxConnectedIdleInterval
 }
 
 func clientTLSForCredential(base *tls.Config, credential auth.Credential) (*tls.Config, error) {

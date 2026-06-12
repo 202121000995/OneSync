@@ -89,3 +89,24 @@ func TestWaitForChangeOrPeriodicReturnsOnSameNameSameSizeContentChange(t *testin
 		t.Fatal("WaitForChangeOrPeriodic() did not report same-size content change")
 	}
 }
+
+func TestWaitForChangeReturnsOnDelete(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "file.txt")
+	if err := os.WriteFile(path, []byte("delete-me"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		done <- WaitForChange(ctx, root, nil)
+	}()
+	time.Sleep(1200 * time.Millisecond)
+	if err := os.Remove(path); err != nil {
+		t.Fatalf("Remove() error = %v", err)
+	}
+	if err := <-done; err != nil {
+		t.Fatalf("WaitForChange() error = %v", err)
+	}
+}

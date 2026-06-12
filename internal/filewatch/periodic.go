@@ -14,6 +14,7 @@ import (
 const (
 	defaultSettleDuration = 600 * time.Millisecond
 	defaultSettleCheck    = 200 * time.Millisecond
+	defaultChangeCheck    = time.Second
 )
 
 // WaitPeriodic waits for the next polling trigger or context cancellation.
@@ -48,21 +49,51 @@ func WaitForChangeOrPeriodic(ctx context.Context, root string, ignoreRules []str
 	if checkEvery < time.Second {
 		checkEvery = time.Second
 	}
+	return waitForChange(ctx, root, ignoreRules, checkEvery, interval)
+}
+
+// WaitForChange returns only when the watched folder content changes or the
+// context is canceled. Unlike WaitForChangeOrPeriodic, it keeps one baseline
+// for the whole wait so a deletion cannot be lost between short wait cycles.
+func WaitForChange(ctx context.Context, root string, ignoreRules []string) error {
+	if root == "" {
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	changed, err := waitForChange(ctx, root, ignoreRules, defaultChangeCheck, 0)
+	if err != nil {
+		return err
+	}
+	if !changed {
+		return ctx.Err()
+	}
+	return nil
+}
+
+func waitForChange(ctx context.Context, root string, ignoreRules []string, checkEvery, deadlineAfter time.Duration) (bool, error) {
 	watcher := scanner.New(scanner.Options{ComputeHash: true, IgnoreRules: ignoreRules})
 	baseline, err := watcher.Scan(ctx, root)
 	if err != nil {
-		return false, WaitPeriodic(ctx, interval)
+		if deadlineAfter > 0 {
+			return false, WaitPeriodic(ctx, deadlineAfter)
+		}
+		return false, err
 	}
 	baselineSignature := signature(baseline)
-	deadline := time.NewTimer(interval)
-	defer deadline.Stop()
+	var deadline <-chan time.Time
+	var deadlineTimer *time.Timer
+	if deadlineAfter > 0 {
+		deadlineTimer = time.NewTimer(deadlineAfter)
+		deadline = deadlineTimer.C
+		defer deadlineTimer.Stop()
+	}
 	ticker := time.NewTicker(checkEvery)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return false, ctx.Err()
-		case <-deadline.C:
+		case <-deadline:
 			return false, nil
 		case <-ticker.C:
 			current, err := watcher.Scan(ctx, root)
