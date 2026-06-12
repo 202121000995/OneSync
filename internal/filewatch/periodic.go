@@ -48,7 +48,7 @@ func WaitForChangeOrPeriodic(ctx context.Context, root string, ignoreRules []str
 	if checkEvery < time.Second {
 		checkEvery = time.Second
 	}
-	watcher := scanner.New(scanner.Options{IgnoreRules: ignoreRules})
+	watcher := scanner.New(scanner.Options{ComputeHash: true, IgnoreRules: ignoreRules})
 	baseline, err := watcher.Scan(ctx, root)
 	if err != nil {
 		return false, WaitPeriodic(ctx, interval)
@@ -133,6 +133,9 @@ func signature(snapshot scanner.Snapshot) string {
 		}
 		mix(uint64(file.Size))
 		mix(uint64(file.ModTime))
+		for _, char := range []byte(file.Hash) {
+			mix(uint64(char))
+		}
 	}
 	return strconv.FormatUint(hash, 16)
 }

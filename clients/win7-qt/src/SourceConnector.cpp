@@ -29,7 +29,7 @@ const int kAuthenticationTimeoutMs = 60000;
 const int kSyncMessageTimeoutMs = 120000;
 const int kMaxPayload = 16 * 1024 * 1024;
 const int kMaxChunkSize = 512 * 1024;
-const int kPipelineChunks = 16;
+const int kPipelineChunks = 8;
 const int kProgressLogIntervalMs = 10000;
 const int kHashSize = 32;
 const quint64 kSnapshotRequestID = 1;
@@ -579,10 +579,15 @@ QString SourceConnector::folderSignature(QString* error) const
         if (matcher.matches(relativePath, false)) {
             continue;
         }
-        entries.append(QStringLiteral("%1|%2|%3")
+        const QByteArray hash = fileHash(info.absoluteFilePath(), error).toHex();
+        if (hash.isEmpty()) {
+            return {};
+        }
+        entries.append(QStringLiteral("%1|%2|%3|%4")
             .arg(relativePath)
             .arg(info.size())
-            .arg(info.lastModified().toUTC().toMSecsSinceEpoch()));
+            .arg(info.lastModified().toUTC().toMSecsSinceEpoch())
+            .arg(QString::fromLatin1(hash)));
     }
     std::sort(entries.begin(), entries.end());
     return entries.join(QLatin1Char('\n'));
@@ -826,12 +831,20 @@ bool SourceConnector::sendFile(QSslSocket* socket, quint64 requestID, const Snap
             break;
         }
         if (!writeAll(socket, SyncProtocol::buildFrame(SyncProtocol::MessageFileChunk, requestID, encodeFileChunk(offset, chunk)), kSyncMessageTimeoutMs, error)) {
+            if (error != nullptr) {
+                *error = QStringLiteral("%1；已确认 %2 / %3，下一轮会尝试断点续传。")
+                             .arg(*error, humanBytes(confirmedOffset), humanBytes(file.size()));
+            }
             return false;
         }
         offset += chunk.size();
         pendingOffsets.append(offset);
         if (pendingOffsets.size() >= kPipelineChunks) {
             if (!expectAck(socket, requestID, kSyncMessageTimeoutMs, &ackPayload, error)) {
+                if (error != nullptr) {
+                    *error = QStringLiteral("%1；已确认 %2 / %3，下一轮会尝试断点续传。")
+                                 .arg(*error, humanBytes(confirmedOffset), humanBytes(file.size()));
+                }
                 return false;
             }
             const qint64 confirmed = decodeOffset(ackPayload, error);
@@ -857,6 +870,10 @@ bool SourceConnector::sendFile(QSslSocket* socket, quint64 requestID, const Snap
     }
     while (!pendingOffsets.isEmpty()) {
         if (!expectAck(socket, requestID, kSyncMessageTimeoutMs, &ackPayload, error)) {
+            if (error != nullptr) {
+                *error = QStringLiteral("%1；已确认 %2 / %3，下一轮会尝试断点续传。")
+                             .arg(*error, humanBytes(confirmedOffset), humanBytes(file.size()));
+            }
             return false;
         }
         const qint64 confirmed = decodeOffset(ackPayload, error);

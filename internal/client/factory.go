@@ -365,6 +365,9 @@ func (r *runner) runConnectedCycles(ctx context.Context, taskID string, reporter
 		if woke {
 			addLog(ctx, reporter, "info", "收到对端变化通知，使用现有连接开始下一轮同步")
 		}
+		if !changed && !woke {
+			continue
+		}
 	}
 }
 

@@ -56,3 +56,36 @@ func TestWaitForChangeOrPeriodicReturnsOnChange(t *testing.T) {
 		t.Fatal("WaitForChangeOrPeriodic() did not report a change")
 	}
 }
+
+func TestWaitForChangeOrPeriodicReturnsOnSameNameSameSizeContentChange(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "file.txt")
+	if err := os.WriteFile(path, []byte("one"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("Stat() error = %v", err)
+	}
+	originalTime := info.ModTime()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	done := make(chan bool, 1)
+	go func() {
+		changed, err := WaitForChangeOrPeriodic(ctx, root, nil, 3*time.Second)
+		if err != nil {
+			t.Errorf("WaitForChangeOrPeriodic() error = %v", err)
+		}
+		done <- changed
+	}()
+	time.Sleep(1200 * time.Millisecond)
+	if err := os.WriteFile(path, []byte("two"), 0o644); err != nil {
+		t.Fatalf("WriteFile() update error = %v", err)
+	}
+	if err := os.Chtimes(path, originalTime, originalTime); err != nil {
+		t.Fatalf("Chtimes() error = %v", err)
+	}
+	if changed := <-done; !changed {
+		t.Fatal("WaitForChangeOrPeriodic() did not report same-size content change")
+	}
+}

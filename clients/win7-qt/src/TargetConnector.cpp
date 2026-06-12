@@ -11,6 +11,7 @@
 #include <QDir>
 #include <QDirIterator>
 #include <QElapsedTimer>
+#include <QFile>
 #include <QFileInfo>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -53,6 +54,29 @@ bool certificateMatchesPinned(const QSslCertificate& certificate, const QList<QS
         }
     }
     return false;
+}
+
+QByteArray hashFileForSignature(const QString& absolutePath, QString* error)
+{
+    QFile file(absolutePath);
+    if (!file.open(QIODevice::ReadOnly)) {
+        if (error != nullptr) {
+            *error = QStringLiteral("读取文件失败：%1").arg(file.errorString());
+        }
+        return {};
+    }
+    QCryptographicHash hash(QCryptographicHash::Sha256);
+    while (!file.atEnd()) {
+        const QByteArray chunk = file.read(512 * 1024);
+        if (chunk.isEmpty() && file.error() != QFile::NoError) {
+            if (error != nullptr) {
+                *error = QStringLiteral("读取文件失败：%1").arg(file.errorString());
+            }
+            return {};
+        }
+        hash.addData(chunk);
+    }
+    return hash.result();
 }
 } // namespace
 
@@ -676,10 +700,15 @@ QString TargetConnector::folderSignature(QString* error) const
         if (matcher.matches(relativePath, false)) {
             continue;
         }
-        entries.append(QStringLiteral("%1|%2|%3")
+        const QByteArray hash = hashFileForSignature(info.absoluteFilePath(), error).toHex();
+        if (hash.isEmpty()) {
+            return {};
+        }
+        entries.append(QStringLiteral("%1|%2|%3|%4")
             .arg(relativePath)
             .arg(info.size())
-            .arg(info.lastModified().toUTC().toMSecsSinceEpoch()));
+            .arg(info.lastModified().toUTC().toMSecsSinceEpoch())
+            .arg(QString::fromLatin1(hash)));
     }
     std::sort(entries.begin(), entries.end());
     return entries.join(QLatin1Char('\n'));
