@@ -60,6 +60,7 @@ private:
         Role role = Target;
         QString name;
         QString deviceAlias;
+        QString boundPeerID;
         QString linkText;
         QString targetFolder;
         QString status;

@@ -69,28 +69,34 @@ func TestLinkCarriesSourceCertificate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Parse() error = %v", err)
 	}
-	if link.CACertificatePEM != certificatePEM {
+	if link.SourceCACertificatePEM != certificatePEM || !strings.Contains(link.CACertificatePEM, strings.TrimSpace(certificatePEM)) {
 		t.Fatal("parsed link did not preserve source certificate")
 	}
 }
 
-func TestLinkCarriesCertificateBundle(t *testing.T) {
+func TestLinkCarriesSeparatedCertificates(t *testing.T) {
 	service := NewLinkService()
 	service.random = fixedRandom
 	sourceCertificatePEM := testCertificatePEM(t)
 	relayCertificatePEM := testRelayCertificatePEM(t)
-	bundle := sourceCertificatePEM + "\n" + relayCertificatePEM
 
-	encoded, err := service.IssueWithCertificate("session-1", "192.168.1.10:7443", "relay.example:7443", bundle)
+	encoded, err := service.IssueWithCertificates("session-1", "192.168.1.10:7443", "relay.example:7443", "relay-secret", sourceCertificatePEM, relayCertificatePEM)
 	if err != nil {
-		t.Fatalf("IssueWithCertificate() error = %v", err)
+		t.Fatalf("IssueWithCertificates() error = %v", err)
 	}
 	link, err := service.Parse(encoded)
 	if err != nil {
 		t.Fatalf("Parse() error = %v", err)
 	}
-	if link.CACertificatePEM != bundle {
-		t.Fatal("parsed link did not preserve certificate bundle")
+	if link.SourceCACertificatePEM != sourceCertificatePEM {
+		t.Fatal("parsed link did not preserve source certificate")
+	}
+	if link.RelayCACertificatePEM != relayCertificatePEM {
+		t.Fatal("parsed link did not preserve Relay certificate")
+	}
+	if !strings.Contains(link.CACertificatePEM, strings.TrimSpace(sourceCertificatePEM)) ||
+		!strings.Contains(link.CACertificatePEM, strings.TrimSpace(relayCertificatePEM)) {
+		t.Fatal("parsed legacy bundle did not include both certificates")
 	}
 }
 

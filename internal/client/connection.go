@@ -89,10 +89,10 @@ func connectTarget(
 	credential auth.Credential,
 	relayToken, authenticationToken []byte,
 	peerID string,
-	clientTLS *tls.Config,
+	sourceTLS, relayTLS *tls.Config,
 	maxPayload uint32,
 ) (targetConnection, error) {
-	transport, err := network.NewTLSTransport(clientTLS, maxPayload)
+	transport, err := network.NewTLSTransport(sourceTLS, maxPayload)
 	if err != nil {
 		return targetConnection{}, err
 	}
@@ -117,7 +117,7 @@ func connectTarget(
 		return targetConnection{}, fmt.Errorf("%w: %v", errConnectionUnavailable, directErr)
 	}
 	session, relayErr := connectRelay(
-		ctx, credential.RelayEndpoint, credential.SessionID, relay.RoleTarget, relayToken, credential.RelayToken, clientTLS, maxPayload,
+		ctx, credential.RelayEndpoint, credential.SessionID, relay.RoleTarget, relayToken, credential.RelayToken, relayTLS, maxPayload,
 	)
 	if relayErr != nil {
 		if directConnected {

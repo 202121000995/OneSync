@@ -15,10 +15,10 @@ OneSync 是一个源端到目标端的文件同步工具。当前版本用于验
 
 到 GitHub Releases 下载最新验收包：
 
-- Windows：`onesync-windows-amd64-v1.39.zip`
-- Linux：`onesync-linux-amd64-v1.39.tar.gz`
+- Windows：`onesync-windows-amd64-v1.40.zip`
+- Linux：`onesync-linux-amd64-v1.40.tar.gz`
 
-发布版本从 `v1.00` 开始递增，当前版本为 `v1.39`，后续版本按 `v1.40`、`v1.41` 继续发布。
+发布版本从 `v1.00` 开始递增，当前版本为 `v1.40`，后续版本按 `v1.40`、`v1.41` 继续发布。
 
 ## Windows 7 兼容版
 
@@ -63,7 +63,7 @@ curl -fsSL https://raw.githubusercontent.com/202121000995/OneSync/main/packaging
 中国大陆服务器如果无法直接连接 GitHub，可以使用代理：
 
 ```sh
-curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/202121000995/OneSync/main/packaging/acceptance-scripts/linux/deploy-onesync.sh | sudo env RELEASE_TAG=v1.39 GH_PROXY=https://gh-proxy.org/ sh
+curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/202121000995/OneSync/main/packaging/acceptance-scripts/linux/deploy-onesync.sh | sudo env RELEASE_TAG=v1.40 GH_PROXY=https://gh-proxy.org/ sh
 ```
 
 如果要自定义传输流水线窗口，可以安装或重装时加上 `ONESYNC_TRANSFER_PIPELINE=16`；默认值已经使用适合 Relay 的窗口，不填即可。
@@ -71,14 +71,14 @@ curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/202121000995/O
 如果 GitHub API 或 raw 缓存不可用，可以直接指定 Linux 包地址：
 
 ```sh
-curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/202121000995/OneSync/main/packaging/acceptance-scripts/linux/deploy-onesync.sh | sudo env PACKAGE_URL=https://gh-proxy.org/https://github.com/202121000995/OneSync/releases/download/v1.39/onesync-linux-amd64-v1.39.tar.gz sh
+curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/202121000995/OneSync/main/packaging/acceptance-scripts/linux/deploy-onesync.sh | sudo env PACKAGE_URL=https://gh-proxy.org/https://github.com/202121000995/OneSync/releases/download/v1.40/onesync-linux-amd64-v1.40.tar.gz sh
 ```
 
 ### 手动安装
 
 ```sh
-tar -xzf onesync-linux-amd64-v1.39.tar.gz
-cd onesync-linux-amd64-v1.39
+tar -xzf onesync-linux-amd64-v1.40.tar.gz
+cd onesync-linux-amd64-v1.40
 sudo ./onesyncctl install
 sudo onesyncctl start
 ```
@@ -124,13 +124,13 @@ sudo onesyncctl upgrade
 固定升级到某个版本：
 
 ```sh
-sudo env RELEASE_TAG=v1.39 GH_PROXY=https://gh-proxy.org onesyncctl upgrade
+sudo env RELEASE_TAG=v1.40 GH_PROXY=https://gh-proxy.org onesyncctl upgrade
 ```
 
 直接指定 Linux 包地址：
 
 ```sh
-sudo env PACKAGE_URL=https://gh-proxy.org/https://github.com/202121000995/OneSync/releases/download/v1.39/onesync-linux-amd64-v1.39.tar.gz onesyncctl upgrade
+sudo env PACKAGE_URL=https://gh-proxy.org/https://github.com/202121000995/OneSync/releases/download/v1.40/onesync-linux-amd64-v1.40.tar.gz onesyncctl upgrade
 ```
 
 ### 卸载
@@ -156,13 +156,13 @@ curl -fsSL https://raw.githubusercontent.com/202121000995/OneSync/main/packaging
 中国大陆服务器可使用代理：
 
 ```sh
-curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/202121000995/OneSync/main/packaging/acceptance-scripts/linux/deploy-relaytls.sh | sudo env RELAY_HOSTS=<你的Relay域名或IP> RELAY_PORT=7443 RELAY_TOKEN=<自定义Relay令牌> RELEASE_TAG=v1.39 GH_PROXY=https://gh-proxy.org/ sh
+curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/202121000995/OneSync/main/packaging/acceptance-scripts/linux/deploy-relaytls.sh | sudo env RELAY_HOSTS=<你的Relay域名或IP> RELAY_PORT=7443 RELAY_TOKEN=<自定义Relay令牌> RELEASE_TAG=v1.40 GH_PROXY=https://gh-proxy.org/ sh
 ```
 
 如果 GitHub API 或 raw 缓存不可用，可以直接指定 Linux 包地址：
 
 ```sh
-curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/202121000995/OneSync/main/packaging/acceptance-scripts/linux/deploy-relaytls.sh | sudo env RELAY_HOSTS=<你的Relay域名或IP> RELAY_PORT=7443 RELAY_TOKEN=<自定义Relay令牌> PACKAGE_URL=https://gh-proxy.org/https://github.com/202121000995/OneSync/releases/download/v1.39/onesync-linux-amd64-v1.39.tar.gz sh
+curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/202121000995/OneSync/main/packaging/acceptance-scripts/linux/deploy-relaytls.sh | sudo env RELAY_HOSTS=<你的Relay域名或IP> RELAY_PORT=7443 RELAY_TOKEN=<自定义Relay令牌> PACKAGE_URL=https://gh-proxy.org/https://github.com/202121000995/OneSync/releases/download/v1.40/onesync-linux-amd64-v1.40.tar.gz sh
 ```
 
 `RELAY_HOSTS` 必须是用户实际会填写到同步链接里的 Relay 域名或 IP，不包含端口。  
@@ -172,7 +172,7 @@ curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/202121000995/O
 如果服务器已经安装宝塔或 1Panel，并且证书由面板申请和续期，推荐直接使用面板证书路径安装：
 
 ```sh
-curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/202121000995/OneSync/main/packaging/acceptance-scripts/linux/deploy-relaytls.sh | sudo env RELAY_HOSTS=<你的Relay域名> RELAY_PORT=443 RELAY_TOKEN=<自定义Relay令牌> ONESYNC_RELAY_CERT=/path/fullchain.pem ONESYNC_RELAY_KEY=/path/privkey.pem RELEASE_TAG=v1.39 GH_PROXY=https://gh-proxy.org/ sh
+curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/202121000995/OneSync/main/packaging/acceptance-scripts/linux/deploy-relaytls.sh | sudo env RELAY_HOSTS=<你的Relay域名> RELAY_PORT=443 RELAY_TOKEN=<自定义Relay令牌> ONESYNC_RELAY_CERT=/path/fullchain.pem ONESYNC_RELAY_KEY=/path/privkey.pem RELEASE_TAG=v1.40 GH_PROXY=https://gh-proxy.org/ sh
 ```
 
 安装后也可以切换到宝塔 / 1Panel 证书路径：
@@ -200,8 +200,8 @@ ONESYNC_RELAY_ADMIN_LISTEN=0.0.0.0:8766
 ### 手动安装
 
 ```sh
-tar -xzf onesync-linux-amd64-v1.39.tar.gz
-cd onesync-linux-amd64-v1.39
+tar -xzf onesync-linux-amd64-v1.40.tar.gz
+cd onesync-linux-amd64-v1.40
 sudo RELAY_HOSTS=<你的Relay域名或IP> RELAY_PORT=7443 RELAY_TOKEN=<自定义Relay令牌> ./onesync-relayctl install
 sudo onesync-relayctl start
 ```
@@ -254,13 +254,13 @@ sudo onesync-relayctl upgrade
 固定升级到某个版本：
 
 ```sh
-sudo env RELEASE_TAG=v1.39 GH_PROXY=https://gh-proxy.org onesync-relayctl upgrade
+sudo env RELEASE_TAG=v1.40 GH_PROXY=https://gh-proxy.org onesync-relayctl upgrade
 ```
 
 直接指定 Linux 包地址：
 
 ```sh
-sudo env PACKAGE_URL=https://gh-proxy.org/https://github.com/202121000995/OneSync/releases/download/v1.39/onesync-linux-amd64-v1.39.tar.gz onesync-relayctl upgrade
+sudo env PACKAGE_URL=https://gh-proxy.org/https://github.com/202121000995/OneSync/releases/download/v1.40/onesync-linux-amd64-v1.40.tar.gz onesync-relayctl upgrade
 ```
 
 ### 卸载

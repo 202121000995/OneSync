@@ -15,7 +15,7 @@ class SourceConnector : public QObject
     Q_OBJECT
 
 public:
-    SourceConnector(const SyncLink& link, const QString& sourceFolder, const QStringList& ignoreRules);
+    SourceConnector(const SyncLink& link, const QString& sourceFolder, const QStringList& ignoreRules, const QString& boundPeerID);
 
 public slots:
     void run();
@@ -28,6 +28,7 @@ signals:
     void fileProgress(const QString& path, quint64 transferredBytes, quint64 totalBytes);
     void snapshotScanned(quint64 fileCount, quint64 byteCount, quint64 ignoredCount);
     void planReceived(int operationCount, quint64 standardBytes);
+    void targetAuthenticated(const QString& peerID);
     void finished(bool ok, const QString& message);
 
 private:
@@ -68,6 +69,7 @@ private:
     SyncLink link;
     QString sourceFolder;
     QStringList ignoreRules;
+    QString boundPeerID;
     QAtomicInt cancelled = 0;
     quint64 receivedBytes = 0;
     quint64 sentBytes = 0;

@@ -190,7 +190,7 @@ func TestLinkIssueAndJoinStoresCredentialSeparately(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Parse() error = %v", err)
 	}
-	if parsed.CACertificatePEM != sourceCertificatePEM {
+	if parsed.SourceCACertificatePEM != sourceCertificatePEM || !bytes.Contains([]byte(parsed.CACertificatePEM), bytes.TrimSpace([]byte(sourceCertificatePEM))) {
 		t.Fatal("link did not include source certificate")
 	}
 
@@ -209,7 +209,7 @@ func TestLinkIssueAndJoinStoresCredentialSeparately(t *testing.T) {
 	if credential.Token == "" || credential.Endpoint != "192.168.1.10:7443" || credential.PeerID == "" {
 		t.Fatalf("credential = %+v", credential)
 	}
-	if credential.CACertificatePEM != sourceCertificatePEM {
+	if credential.SourceCACertificatePEM != sourceCertificatePEM || !bytes.Contains([]byte(credential.CACertificatePEM), bytes.TrimSpace([]byte(sourceCertificatePEM))) {
 		t.Fatal("joined credential did not store source certificate")
 	}
 	if manager.tasks["target"].PeerAddress != "192.168.1.10:7443" {
@@ -313,16 +313,25 @@ func TestLinkIssueBundlesRelayCertificate(t *testing.T) {
 	if parsed.RelayToken != "relay-secret" {
 		t.Fatalf("RelayToken = %q, want relay-secret", parsed.RelayToken)
 	}
-	if !bytes.Contains([]byte(parsed.CACertificatePEM), []byte(sourceCertificatePEM)) ||
-		!bytes.Contains([]byte(parsed.CACertificatePEM), []byte(relayCertificatePEM)) {
+	if parsed.SourceCACertificatePEM != sourceCertificatePEM {
+		t.Fatal("link did not include dedicated source certificate")
+	}
+	if parsed.RelayCACertificatePEM != relayCertificatePEM {
+		t.Fatal("link did not include dedicated Relay certificate")
+	}
+	if !bytes.Contains([]byte(parsed.CACertificatePEM), bytes.TrimSpace([]byte(sourceCertificatePEM))) ||
+		!bytes.Contains([]byte(parsed.CACertificatePEM), bytes.TrimSpace([]byte(relayCertificatePEM))) {
 		t.Fatal("link did not include both source and Relay certificates")
 	}
 	credential, err := credentials.Load("source")
 	if err != nil {
 		t.Fatalf("Load(source) error = %v", err)
 	}
+	if credential.SourceCACertificatePEM != sourceCertificatePEM || credential.RelayCACertificatePEM != relayCertificatePEM {
+		t.Fatal("source credential did not store separated certificates")
+	}
 	if credential.CACertificatePEM != parsed.CACertificatePEM {
-		t.Fatal("source credential did not store bundled certificates")
+		t.Fatal("source credential did not store legacy bundled certificates")
 	}
 	if credential.RelayToken != "relay-secret" {
 		t.Fatalf("source credential RelayToken = %q, want relay-secret", credential.RelayToken)
@@ -445,8 +454,8 @@ func TestLinkTestUsesConfiguredConnectionTester(t *testing.T) {
 	if tester.endpoint != "192.168.1.10:7443" || tester.relayEndpoint != "relay.example:7443" {
 		t.Fatalf("tester called with endpoint=%q relay=%q", tester.endpoint, tester.relayEndpoint)
 	}
-	if !bytes.Contains([]byte(tester.caCertificatePEM), []byte(sourceCertificatePEM)) ||
-		!bytes.Contains([]byte(tester.caCertificatePEM), []byte(relayCertificatePEM)) {
+	if !bytes.Contains([]byte(tester.caCertificatePEM), bytes.TrimSpace([]byte(sourceCertificatePEM))) ||
+		!bytes.Contains([]byte(tester.caCertificatePEM), bytes.TrimSpace([]byte(relayCertificatePEM))) {
 		t.Fatal("tester did not receive bundled link certificates")
 	}
 	if !bytes.Contains(response.Body.Bytes(), []byte(`"usable":true`)) {

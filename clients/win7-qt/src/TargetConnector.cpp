@@ -26,6 +26,8 @@ const int kRetryDelayMs = 5000;
 const int kConnectedIdleDelayMs = 10 * 60 * 1000;
 const int kAuthenticationTimeoutMs = 60000;
 const int kSyncMessageTimeoutMs = 120000;
+const int kIdleSignatureCheckMs = 1000;
+const int kChangeSettleDelayMs = 600;
 const int kMaxPayload = 16 * 1024 * 1024;
 const quint64 kAuthenticationRequestID = 1;
 
@@ -42,6 +44,12 @@ QByteArray certificateFingerprint(const QSslCertificate& certificate)
     return certificate.digest(QCryptographicHash::Sha256).toHex();
 }
 
+bool isReservedPartialPath(const QString& relativePath)
+{
+    const QString normalized = QDir::fromNativeSeparators(relativePath);
+    return normalized == QStringLiteral(".onesync-part") || normalized.startsWith(QStringLiteral(".onesync-part/"));
+}
+
 bool certificateMatchesPinned(const QSslCertificate& certificate, const QList<QSslCertificate>& pinnedCertificates)
 {
     if (certificate.isNull()) {
@@ -54,29 +62,6 @@ bool certificateMatchesPinned(const QSslCertificate& certificate, const QList<QS
         }
     }
     return false;
-}
-
-QByteArray hashFileForSignature(const QString& absolutePath, QString* error)
-{
-    QFile file(absolutePath);
-    if (!file.open(QIODevice::ReadOnly)) {
-        if (error != nullptr) {
-            *error = QStringLiteral("读取文件失败：%1").arg(file.errorString());
-        }
-        return {};
-    }
-    QCryptographicHash hash(QCryptographicHash::Sha256);
-    while (!file.atEnd()) {
-        const QByteArray chunk = file.read(512 * 1024);
-        if (chunk.isEmpty() && file.error() != QFile::NoError) {
-            if (error != nullptr) {
-                *error = QStringLiteral("读取文件失败：%1").arg(file.errorString());
-            }
-            return {};
-        }
-        hash.addData(chunk);
-    }
-    return hash.result();
 }
 } // namespace
 
@@ -338,7 +323,7 @@ bool TargetConnector::waitBeforeConnectedCycle(QSslSocket* controlSocket, QStrin
             QThread::msleep(250);
         }
         elapsedSinceSignatureCheck += 250;
-        if (elapsedSinceSignatureCheck < 1000) {
+        if (elapsedSinceSignatureCheck < kIdleSignatureCheckMs) {
             continue;
         }
         elapsedSinceSignatureCheck = 0;
@@ -348,16 +333,35 @@ bool TargetConnector::waitBeforeConnectedCycle(QSslSocket* controlSocket, QStrin
             continue;
         }
         if (!lastFolderSignature.isEmpty() && currentSignature != lastFolderSignature) {
-            lastFolderSignature = currentSignature;
+            bool cancelled = false;
+            for (int settled = 0; settled < kChangeSettleDelayMs; settled += 200) {
+                if (isCancelled(error)) {
+                    cancelled = true;
+                    break;
+                }
+                QThread::msleep(200);
+            }
+            if (cancelled) {
+                return false;
+            }
+            QString stableError;
+            const QString stableSignature = folderSignature(&stableError);
+            if (stableSignature.isEmpty()) {
+                continue;
+            }
+            lastFolderSignature = stableSignature;
+            if (stableSignature != currentSignature) {
+                continue;
+            }
             if (controlSocket != nullptr && controlSocket->state() == QAbstractSocket::ConnectedState) {
                 QString wakeError;
                 if (!sendRelayWake(controlSocket, &wakeError)) {
                     emit logMessage(QStringLiteral("检测到目标端文件变化，但通知源端失败：%1").arg(wakeError));
                 } else {
-                    emit logMessage(QStringLiteral("检测到目标端文件变化，已通知源端并立即准备下一轮同步。"));
+                    emit logMessage(QStringLiteral("检测到目标端文件变化，并已等待 %1ms 确认文件稳定，已通知源端并立即准备下一轮同步。").arg(kChangeSettleDelayMs));
                 }
             } else {
-                emit logMessage(QStringLiteral("检测到目标端文件变化，立即准备下一轮同步。"));
+                emit logMessage(QStringLiteral("检测到目标端文件变化，并已等待 %1ms 确认文件稳定，立即准备下一轮同步。").arg(kChangeSettleDelayMs));
             }
             return true;
         }
@@ -368,10 +372,16 @@ bool TargetConnector::waitBeforeConnectedCycle(QSslSocket* controlSocket, QStrin
 
 bool TargetConnector::connectTls(QSslSocket* socket, const Endpoint& endpoint, int timeoutMs, QString* error)
 {
-    const QList<QSslCertificate> certificates = QSslCertificate::fromData(link.caCertificatePem.toUtf8(), QSsl::Pem);
+    Endpoint relayEndpoint;
+    const bool isRelayEndpoint = link.hasRelay() &&
+        EndpointParser::parse(link.relayEndpoint, &relayEndpoint, nullptr) &&
+        endpoint.host == relayEndpoint.host &&
+        endpoint.port == relayEndpoint.port;
+    const QString certificatePem = isRelayEndpoint ? link.relayCertificatePem() : link.sourceCertificatePem();
+    const QList<QSslCertificate> certificates = QSslCertificate::fromData(certificatePem.toUtf8(), QSsl::Pem);
     if (!certificates.isEmpty()) {
         socket->setCaCertificates(certificates);
-        socket->setPeerVerifyMode(QSslSocket::QueryPeer);
+        socket->setPeerVerifyMode(QSslSocket::VerifyPeer);
     } else {
         socket->setPeerVerifyMode(QSslSocket::VerifyPeer);
     }
@@ -382,7 +392,7 @@ bool TargetConnector::connectTls(QSslSocket* socket, const Endpoint& endpoint, i
     if (!socket->waitForEncrypted(timeoutMs)) {
         const QString detail = socket->errorString();
         if (error != nullptr) {
-            if (link.hasRelay() && link.caCertificatePem.trimmed().isEmpty() &&
+            if (isRelayEndpoint && certificatePem.trimmed().isEmpty() &&
                 detail.contains(QStringLiteral("self-signed"), Qt::CaseInsensitive)) {
                 *error = QStringLiteral("TLS 连接失败：Relay 使用自签证书，但同步链接没有携带 Relay 证书。请在源端创建同步时填写 Relay 证书，或使用新版 Win7 源端自动写入证书。原始错误：%1").arg(detail);
             } else {
@@ -395,11 +405,13 @@ bool TargetConnector::connectTls(QSslSocket* socket, const Endpoint& endpoint, i
         const QSslCertificate peerCertificate = socket->peerCertificate();
         if (!certificateMatchesPinned(peerCertificate, certificates)) {
             if (error != nullptr) {
-                *error = QStringLiteral("TLS 连接失败：Relay 返回的证书和同步链接里的 Relay 证书不一致。请让源端重新生成链接，或在 Relay 服务器执行 onesync-relayctl info 后核对证书。");
+                *error = isRelayEndpoint
+                    ? QStringLiteral("TLS 连接失败：Relay 返回的证书和同步链接里的 Relay 证书不一致。请让源端重新生成链接，或在 Relay 服务器执行 onesync-relayctl info 后核对证书。")
+                    : QStringLiteral("TLS 连接失败：源端返回的证书和同步链接里的源端证书不一致。请让源端重新生成链接。");
             }
             return false;
         }
-        emit logMessage(QStringLiteral("Relay TLS 证书指纹已匹配。"));
+        emit logMessage(isRelayEndpoint ? QStringLiteral("Relay TLS 证书指纹已匹配。") : QStringLiteral("源端 TLS 证书指纹已匹配。"));
     }
     return true;
 }
@@ -725,20 +737,18 @@ QString TargetConnector::folderSignature(QString* error) const
         it.next();
         const QFileInfo info = it.fileInfo();
         const QString relativePath = QDir::fromNativeSeparators(rootDir.relativeFilePath(info.absoluteFilePath()));
-        if (matcher.matches(relativePath, false)) {
+        if (isReservedPartialPath(relativePath) || matcher.matches(relativePath, false)) {
             continue;
         }
-        const QByteArray hash = hashFileForSignature(info.absoluteFilePath(), error).toHex();
-        if (hash.isEmpty()) {
-            return {};
-        }
-        entries.append(QStringLiteral("%1|%2|%3|%4")
+        entries.append(QStringLiteral("%1|%2|%3")
             .arg(relativePath)
             .arg(info.size())
-            .arg(info.lastModified().toUTC().toMSecsSinceEpoch())
-            .arg(QString::fromLatin1(hash)));
+            .arg(info.lastModified().toUTC().toMSecsSinceEpoch()));
     }
     std::sort(entries.begin(), entries.end());
+    if (entries.isEmpty()) {
+        return QStringLiteral("<empty>");
+    }
     return entries.join(QLatin1Char('\n'));
 }
 

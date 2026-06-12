@@ -232,12 +232,12 @@ func (r *runner) runCycle(ctx context.Context, taskID string, reporter task.Stat
 		}
 		session := sessionDigest(credential.SessionID)
 		addLog(ctx, reporter, "info", fmt.Sprintf("源端开始等待连接：会话=%s，直连地址=%s，Relay=%s，已绑定对端=%t", session, credential.Endpoint, emptyDash(credential.RelayEndpoint), expectedPeerID != ""))
-		clientTLS, err := clientTLSForCredential(r.factory.clientTLS, credential)
+		relayTLS, err := clientTLSForCertificate(r.factory.clientTLS, relayCACertificatePEM(credential), "Relay")
 		if err != nil {
 			return err
 		}
 		if credential.RelayEndpoint != "" {
-			return r.runRelaySourceControlCycles(ctx, taskID, reporter, credential, token, []byte(credential.Token), expectedPeerID, clientTLS)
+			return r.runRelaySourceControlCycles(ctx, taskID, reporter, credential, token, []byte(credential.Token), expectedPeerID, relayTLS)
 		}
 		connection, err := connectSource(
 			ctx,
@@ -246,7 +246,7 @@ func (r *runner) runCycle(ctx context.Context, taskID string, reporter task.Stat
 			[]byte(credential.Token),
 			expectedPeerID,
 			r.factory.serverTLS,
-			clientTLS,
+			relayTLS,
 			r.factory.maxPayload,
 		)
 		if err != nil {
@@ -287,14 +287,18 @@ func (r *runner) runCycle(ctx context.Context, taskID string, reporter task.Stat
 		return r.runConnectedCycles(ctx, taskID, reporter, engine, wake)
 	}
 
-	clientTLS, err := clientTLSForCredential(r.factory.clientTLS, credential)
+	sourceTLS, err := clientTLSForCertificate(r.factory.clientTLS, sourceCACertificatePEM(credential), "source")
+	if err != nil {
+		return err
+	}
+	relayTLS, err := clientTLSForCertificate(r.factory.clientTLS, relayCACertificatePEM(credential), "Relay")
 	if err != nil {
 		return err
 	}
 	session := sessionDigest(credential.SessionID)
 	addLog(ctx, reporter, "info", fmt.Sprintf("目标端开始连接源端：会话=%s，直连地址=%s，Relay=%s，对端身份=%s", session, credential.Endpoint, emptyDash(credential.RelayEndpoint), safePeerID(credential.PeerID)))
 	if credential.RelayEndpoint != "" {
-		return r.runRelayTargetControlCycles(ctx, taskID, reporter, credential, token, clientTLS)
+		return r.runRelayTargetControlCycles(ctx, taskID, reporter, credential, token, relayTLS)
 	}
 	connection, err := connectTarget(
 		ctx,
@@ -302,7 +306,8 @@ func (r *runner) runCycle(ctx context.Context, taskID string, reporter task.Stat
 		token,
 		[]byte(credential.Token),
 		credential.PeerID,
-		clientTLS,
+		sourceTLS,
+		relayTLS,
 		r.factory.maxPayload,
 	)
 	if err != nil {
@@ -651,9 +656,9 @@ func (r *runner) waitForConnectedChange(ctx context.Context, wake wakeController
 	}
 }
 
-func clientTLSForCredential(base *tls.Config, credential auth.Credential) (*tls.Config, error) {
+func clientTLSForCertificate(base *tls.Config, caCertificatePEM, label string) (*tls.Config, error) {
 	config := base.Clone()
-	if credential.CACertificatePEM == "" {
+	if caCertificatePEM == "" {
 		return config, nil
 	}
 	var roots *x509.CertPool
@@ -666,12 +671,26 @@ func clientTLSForCredential(base *tls.Config, credential auth.Credential) (*tls.
 			roots = x509.NewCertPool()
 		}
 	}
-	if !roots.AppendCertsFromPEM([]byte(credential.CACertificatePEM)) {
-		return nil, errors.New("task link CA certificate is invalid")
+	if !roots.AppendCertsFromPEM([]byte(caCertificatePEM)) {
+		return nil, fmt.Errorf("%s CA certificate is invalid", label)
 	}
 	config.RootCAs = roots
 	config.MinVersion = tls.VersionTLS13
 	return config, nil
+}
+
+func sourceCACertificatePEM(credential auth.Credential) string {
+	if credential.SourceCACertificatePEM != "" {
+		return credential.SourceCACertificatePEM
+	}
+	return credential.CACertificatePEM
+}
+
+func relayCACertificatePEM(credential auth.Credential) string {
+	if credential.RelayCACertificatePEM != "" {
+		return credential.RelayCACertificatePEM
+	}
+	return credential.CACertificatePEM
 }
 
 func (f *Factory) loadCredential(taskID string) (auth.Credential, error) {

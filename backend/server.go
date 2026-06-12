@@ -770,19 +770,20 @@ func (s *Server) issueLink(writer http.ResponseWriter, request *http.Request) {
 		writeAPIError(writer, http.StatusBadRequest, errors.New("source direct connection is not ready; restart OneSync or enter a Relay endpoint"))
 		return
 	}
-	caCertificate := ""
+	sourceCertificate := ""
 	if s.directTLSConfigured {
-		caCertificate = s.directTLSCertificate
+		sourceCertificate = s.directTLSCertificate
 	}
+	relayCertificate := ""
 	if strings.TrimSpace(input.RelayEndpoint) != "" {
-		relayCertificate, err := s.certificateFetcher.Fetch(request.Context(), input.RelayEndpoint)
+		fetchedRelayCertificate, err := s.certificateFetcher.Fetch(request.Context(), input.RelayEndpoint)
 		if err != nil {
 			writeAPIError(writer, http.StatusBadRequest, err)
 			return
 		}
-		caCertificate = certificateBundle(caCertificate, relayCertificate)
+		relayCertificate = fetchedRelayCertificate
 	}
-	encoded, err := s.links.IssueWithRelayCertificate(input.TaskID, input.Endpoint, input.RelayEndpoint, input.RelayToken, caCertificate)
+	encoded, err := s.links.IssueWithCertificates(input.TaskID, input.Endpoint, input.RelayEndpoint, input.RelayToken, sourceCertificate, relayCertificate)
 	if err != nil {
 		writeAPIError(writer, http.StatusBadRequest, err)
 		return
@@ -794,7 +795,8 @@ func (s *Server) issueLink(writer http.ResponseWriter, request *http.Request) {
 	}
 	if err := s.credentials.Save(input.TaskID, syncauth.Credential{
 		SessionID: link.SessionID, Endpoint: link.Endpoint,
-		RelayEndpoint: link.RelayEndpoint, RelayToken: link.RelayToken, CACertificatePEM: link.CACertificatePEM,
+		RelayEndpoint: link.RelayEndpoint, RelayToken: link.RelayToken,
+		CACertificatePEM: link.CACertificatePEM, SourceCACertificatePEM: link.SourceCACertificatePEM, RelayCACertificatePEM: link.RelayCACertificatePEM,
 		Token: link.Token, OneTime: true,
 	}); err != nil {
 		writeAPIError(writer, http.StatusInternalServerError, err)
@@ -846,7 +848,8 @@ func (s *Server) joinLink(writer http.ResponseWriter, request *http.Request) {
 		}
 		if err := s.credentials.Save(input.TaskID, syncauth.Credential{
 			SessionID: link.SessionID, Endpoint: link.Endpoint,
-			RelayEndpoint: link.RelayEndpoint, RelayToken: link.RelayToken, CACertificatePEM: link.CACertificatePEM,
+			RelayEndpoint: link.RelayEndpoint, RelayToken: link.RelayToken,
+			CACertificatePEM: link.CACertificatePEM, SourceCACertificatePEM: link.SourceCACertificatePEM, RelayCACertificatePEM: link.RelayCACertificatePEM,
 			Token: link.Token, PeerID: peerID,
 		}); err != nil {
 			writeAPIError(writer, http.StatusInternalServerError, err)
@@ -868,7 +871,8 @@ func (s *Server) joinLink(writer http.ResponseWriter, request *http.Request) {
 	}
 	if err := s.credentials.Save(input.TaskID, syncauth.Credential{
 		SessionID: link.SessionID, Endpoint: link.Endpoint,
-		RelayEndpoint: link.RelayEndpoint, RelayToken: link.RelayToken, CACertificatePEM: link.CACertificatePEM,
+		RelayEndpoint: link.RelayEndpoint, RelayToken: link.RelayToken,
+		CACertificatePEM: link.CACertificatePEM, SourceCACertificatePEM: link.SourceCACertificatePEM, RelayCACertificatePEM: link.RelayCACertificatePEM,
 		Token: link.Token, PeerID: peerID,
 	}); err != nil {
 		writeAPIError(writer, http.StatusInternalServerError, err)

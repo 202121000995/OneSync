@@ -24,6 +24,16 @@ bool SyncLink::hasRelay() const
     return !relayEndpoint.trimmed().isEmpty();
 }
 
+QString SyncLink::sourceCertificatePem() const
+{
+    return sourceCaCertificatePem.trimmed().isEmpty() ? caCertificatePem : sourceCaCertificatePem;
+}
+
+QString SyncLink::relayCertificatePem() const
+{
+    return relayCaCertificatePem.trimmed().isEmpty() ? caCertificatePem : relayCaCertificatePem;
+}
+
 QByteArray SyncLink::decodedToken() const
 {
     return QByteArray::fromBase64(
@@ -33,6 +43,16 @@ QByteArray SyncLink::decodedToken() const
 }
 
 bool SyncLinkParser::parse(const QString& encoded, SyncLink* link, QString* error)
+{
+    return parseWithExpiryMode(encoded, true, link, error);
+}
+
+bool SyncLinkParser::parseStored(const QString& encoded, SyncLink* link, QString* error)
+{
+    return parseWithExpiryMode(encoded, false, link, error);
+}
+
+bool SyncLinkParser::parseWithExpiryMode(const QString& encoded, bool rejectExpired, SyncLink* link, QString* error)
 {
     if (link == nullptr) {
         if (error != nullptr) {
@@ -62,11 +82,13 @@ bool SyncLinkParser::parse(const QString& encoded, SyncLink* link, QString* erro
     parsed.relayEndpoint = object.value(QStringLiteral("relay_endpoint")).toString();
     parsed.relayToken = object.value(QStringLiteral("relay_token")).toString();
     parsed.caCertificatePem = object.value(QStringLiteral("ca_certificate_pem")).toString();
+    parsed.sourceCaCertificatePem = object.value(QStringLiteral("source_ca_certificate_pem")).toString();
+    parsed.relayCaCertificatePem = object.value(QStringLiteral("relay_ca_certificate_pem")).toString();
     parsed.token = object.value(QStringLiteral("token")).toString();
     parsed.issuedAt = parseDateTime(object.value(QStringLiteral("issued_at")));
     parsed.expiresAt = parseDateTime(object.value(QStringLiteral("expires_at")));
 
-    if (!validate(parsed, error)) {
+    if (!validate(parsed, rejectExpired, error)) {
         return false;
     }
     *link = parsed;
@@ -95,7 +117,7 @@ QByteArray SyncLinkParser::decodeBase64Url(const QString& encoded, QString* erro
     return decoded;
 }
 
-bool SyncLinkParser::validate(const SyncLink& link, QString* error)
+bool SyncLinkParser::validate(const SyncLink& link, bool rejectExpired, QString* error)
 {
     if (link.version != kLinkVersion) {
         if (error != nullptr) {
@@ -151,7 +173,7 @@ bool SyncLinkParser::validate(const SyncLink& link, QString* error)
         }
         return false;
     }
-    if (QDateTime::currentDateTimeUtc() >= link.expiresAt) {
+    if (rejectExpired && QDateTime::currentDateTimeUtc() >= link.expiresAt) {
         if (error != nullptr) {
             *error = QStringLiteral("同步链接已过期。");
         }

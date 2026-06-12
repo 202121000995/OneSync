@@ -32,7 +32,7 @@ else
   curl -fsSL https://raw.githubusercontent.com/202121000995/OneSync/main/packaging/acceptance-scripts/linux/deploy-onesync.sh | sudo sh
 
   中国大陆服务器可用代理：
-  curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/202121000995/OneSync/main/packaging/acceptance-scripts/linux/deploy-onesync.sh | sudo env RELEASE_TAG=v1.39 GH_PROXY=https://gh-proxy.org/ sh
+  curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/202121000995/OneSync/main/packaging/acceptance-scripts/linux/deploy-onesync.sh | sudo env RELEASE_TAG=v1.40 GH_PROXY=https://gh-proxy.org/ sh
 EOF
 fi
 

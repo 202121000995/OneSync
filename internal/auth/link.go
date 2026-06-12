@@ -26,15 +26,17 @@ const (
 
 // Link contains the public connection metadata carried between devices.
 type Link struct {
-	Version          int       `json:"version"`
-	SessionID        string    `json:"session_id"`
-	Endpoint         string    `json:"endpoint"`
-	RelayEndpoint    string    `json:"relay_endpoint,omitempty"`
-	RelayToken       string    `json:"relay_token,omitempty"`
-	CACertificatePEM string    `json:"ca_certificate_pem,omitempty"`
-	Token            string    `json:"token"`
-	IssuedAt         time.Time `json:"issued_at"`
-	ExpiresAt        time.Time `json:"expires_at"`
+	Version                int       `json:"version"`
+	SessionID              string    `json:"session_id"`
+	Endpoint               string    `json:"endpoint"`
+	RelayEndpoint          string    `json:"relay_endpoint,omitempty"`
+	RelayToken             string    `json:"relay_token,omitempty"`
+	CACertificatePEM       string    `json:"ca_certificate_pem,omitempty"` // Legacy bundle for older clients.
+	SourceCACertificatePEM string    `json:"source_ca_certificate_pem,omitempty"`
+	RelayCACertificatePEM  string    `json:"relay_ca_certificate_pem,omitempty"`
+	Token                  string    `json:"token"`
+	IssuedAt               time.Time `json:"issued_at"`
+	ExpiresAt              time.Time `json:"expires_at"`
 }
 
 type issuedLink struct {
@@ -72,7 +74,13 @@ func (s *LinkService) IssueWithCertificate(sessionID, endpoint, relayEndpoint, c
 
 // IssueWithRelayCertificate creates a link with optional Relay access token and public CA certificate.
 func (s *LinkService) IssueWithRelayCertificate(sessionID, endpoint, relayEndpoint, relayToken, caCertificatePEM string) (string, error) {
-	if err := validateLinkMetadata(sessionID, endpoint, relayEndpoint, relayToken, caCertificatePEM); err != nil {
+	return s.IssueWithCertificates(sessionID, endpoint, relayEndpoint, relayToken, caCertificatePEM, caCertificatePEM)
+}
+
+// IssueWithCertificates creates a link with certificate pins separated by endpoint role.
+func (s *LinkService) IssueWithCertificates(sessionID, endpoint, relayEndpoint, relayToken, sourceCACertificatePEM, relayCACertificatePEM string) (string, error) {
+	legacyBundle := certificateBundle(sourceCACertificatePEM, relayCACertificatePEM)
+	if err := validateLinkMetadataWithCertificates(sessionID, endpoint, relayEndpoint, relayToken, legacyBundle, sourceCACertificatePEM, relayCACertificatePEM); err != nil {
 		return "", err
 	}
 	tokenBytes := make([]byte, linkTokenBytes)
@@ -82,15 +90,17 @@ func (s *LinkService) IssueWithRelayCertificate(sessionID, endpoint, relayEndpoi
 	token := base64.RawURLEncoding.EncodeToString(tokenBytes)
 	now := s.now().UTC()
 	link := Link{
-		Version:          LinkVersion,
-		SessionID:        sessionID,
-		Endpoint:         endpoint,
-		RelayEndpoint:    relayEndpoint,
-		RelayToken:       relayToken,
-		CACertificatePEM: caCertificatePEM,
-		Token:            token,
-		IssuedAt:         now,
-		ExpiresAt:        now.Add(DefaultLinkTTL),
+		Version:                LinkVersion,
+		SessionID:              sessionID,
+		Endpoint:               endpoint,
+		RelayEndpoint:          relayEndpoint,
+		RelayToken:             relayToken,
+		CACertificatePEM:       legacyBundle,
+		SourceCACertificatePEM: sourceCACertificatePEM,
+		RelayCACertificatePEM:  relayCACertificatePEM,
+		Token:                  token,
+		IssuedAt:               now,
+		ExpiresAt:              now.Add(DefaultLinkTTL),
 	}
 	data, err := json.Marshal(link)
 	if err != nil {
@@ -130,7 +140,7 @@ func (s *LinkService) Parse(encoded string) (Link, error) {
 	if link.Version != LinkVersion {
 		return Link{}, fmt.Errorf("同步链接版本不支持：当前客户端只支持链接版本 %d，收到版本 %d；请升级 OneSync，或让源端重新生成兼容链接", LinkVersion, link.Version)
 	}
-	if err := validateLinkMetadata(link.SessionID, link.Endpoint, link.RelayEndpoint, link.RelayToken, link.CACertificatePEM); err != nil {
+	if err := validateLinkMetadataWithCertificates(link.SessionID, link.Endpoint, link.RelayEndpoint, link.RelayToken, link.CACertificatePEM, link.SourceCACertificatePEM, link.RelayCACertificatePEM); err != nil {
 		return Link{}, err
 	}
 	tokenBytes, err := base64.RawURLEncoding.DecodeString(link.Token)
@@ -177,6 +187,10 @@ func (s *LinkService) removeExpiredLocked(now time.Time) {
 }
 
 func validateLinkMetadata(sessionID, endpoint, relayEndpoint, relayToken, caCertificatePEM string) error {
+	return validateLinkMetadataWithCertificates(sessionID, endpoint, relayEndpoint, relayToken, caCertificatePEM, "", "")
+}
+
+func validateLinkMetadataWithCertificates(sessionID, endpoint, relayEndpoint, relayToken, caCertificatePEM, sourceCACertificatePEM, relayCACertificatePEM string) error {
 	if strings.TrimSpace(sessionID) == "" || len(sessionID) > 128 {
 		return errors.New("session ID is invalid")
 	}
@@ -195,30 +209,61 @@ func validateLinkMetadata(sessionID, endpoint, relayEndpoint, relayToken, caCert
 	if len(relayToken) > 512 {
 		return errors.New("relay token is too large")
 	}
-	if caCertificatePEM != "" {
-		if len(caCertificatePEM) > 8192 {
-			return errors.New("CA certificate is too large")
-		}
-		rest := []byte(caCertificatePEM)
-		found := false
-		for {
-			rest = bytes.TrimSpace(rest)
-			if len(rest) == 0 {
-				break
-			}
-			var block *pem.Block
-			block, rest = pem.Decode(rest)
-			if block == nil || block.Type != "CERTIFICATE" {
-				return errors.New("CA certificate is invalid")
-			}
-			if _, err := x509.ParseCertificate(block.Bytes); err != nil {
-				return errors.New("CA certificate is invalid")
-			}
-			found = true
-		}
-		if !found {
-			return errors.New("CA certificate is invalid")
-		}
+	if err := validateCertificateBundle(caCertificatePEM); err != nil {
+		return err
+	}
+	if err := validateCertificateBundle(sourceCACertificatePEM); err != nil {
+		return err
+	}
+	if err := validateCertificateBundle(relayCACertificatePEM); err != nil {
+		return err
 	}
 	return nil
+}
+
+func validateCertificateBundle(caCertificatePEM string) error {
+	if caCertificatePEM == "" {
+		return nil
+	}
+	if len(caCertificatePEM) > 8192 {
+		return errors.New("CA certificate is too large")
+	}
+	rest := []byte(caCertificatePEM)
+	found := false
+	for {
+		rest = bytes.TrimSpace(rest)
+		if len(rest) == 0 {
+			break
+		}
+		var block *pem.Block
+		block, rest = pem.Decode(rest)
+		if block == nil || block.Type != "CERTIFICATE" {
+			return errors.New("CA certificate is invalid")
+		}
+		if _, err := x509.ParseCertificate(block.Bytes); err != nil {
+			return errors.New("CA certificate is invalid")
+		}
+		found = true
+	}
+	if !found {
+		return errors.New("CA certificate is invalid")
+	}
+	return nil
+}
+
+func certificateBundle(certificates ...string) string {
+	seen := make(map[string]struct{})
+	var parts []string
+	for _, certificate := range certificates {
+		certificate = strings.TrimSpace(certificate)
+		if certificate == "" {
+			continue
+		}
+		if _, exists := seen[certificate]; exists {
+			continue
+		}
+		seen[certificate] = struct{}{}
+		parts = append(parts, certificate)
+	}
+	return strings.Join(parts, "\n")
 }

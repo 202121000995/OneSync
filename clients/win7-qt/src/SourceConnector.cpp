@@ -27,6 +27,8 @@ const int kRetryDelayMs = 5000;
 const int kConnectedIdleDelayMs = 10 * 60 * 1000;
 const int kAuthenticationTimeoutMs = 60000;
 const int kSyncMessageTimeoutMs = 120000;
+const int kIdleSignatureCheckMs = 1000;
+const int kChangeSettleDelayMs = 600;
 const int kMaxPayload = 16 * 1024 * 1024;
 const int kMaxChunkSize = 512 * 1024;
 const int kPipelineChunks = 8;
@@ -88,6 +90,12 @@ QByteArray certificateFingerprint(const QSslCertificate& certificate)
     return certificate.digest(QCryptographicHash::Sha256).toHex();
 }
 
+bool isReservedPartialPath(const QString& relativePath)
+{
+    const QString normalized = QDir::fromNativeSeparators(relativePath);
+    return normalized == QStringLiteral(".onesync-part") || normalized.startsWith(QStringLiteral(".onesync-part/"));
+}
+
 bool certificateMatchesPinned(const QSslCertificate& certificate, const QList<QSslCertificate>& pinnedCertificates)
 {
     if (certificate.isNull()) {
@@ -103,10 +111,11 @@ bool certificateMatchesPinned(const QSslCertificate& certificate, const QList<QS
 }
 } // namespace
 
-SourceConnector::SourceConnector(const SyncLink& link, const QString& sourceFolder, const QStringList& ignoreRules)
+SourceConnector::SourceConnector(const SyncLink& link, const QString& sourceFolder, const QStringList& ignoreRules, const QString& boundPeerID)
     : link(link)
     , sourceFolder(sourceFolder)
     , ignoreRules(ignoreRules)
+    , boundPeerID(boundPeerID)
 {
 }
 
@@ -299,7 +308,7 @@ bool SourceConnector::waitBeforeConnectedCycle(QSslSocket* controlSocket, QStrin
             QThread::msleep(250);
         }
         elapsedSinceSignatureCheck += 250;
-        if (elapsedSinceSignatureCheck < 1000) {
+        if (elapsedSinceSignatureCheck < kIdleSignatureCheckMs) {
             continue;
         }
         elapsedSinceSignatureCheck = 0;
@@ -309,16 +318,35 @@ bool SourceConnector::waitBeforeConnectedCycle(QSslSocket* controlSocket, QStrin
             continue;
         }
         if (!lastFolderSignature.isEmpty() && currentSignature != lastFolderSignature) {
-            lastFolderSignature = currentSignature;
+            bool cancelled = false;
+            for (int settled = 0; settled < kChangeSettleDelayMs; settled += 200) {
+                if (isCancelled(error)) {
+                    cancelled = true;
+                    break;
+                }
+                QThread::msleep(200);
+            }
+            if (cancelled) {
+                return false;
+            }
+            QString stableError;
+            const QString stableSignature = folderSignature(&stableError);
+            if (stableSignature.isEmpty()) {
+                continue;
+            }
+            lastFolderSignature = stableSignature;
+            if (stableSignature != currentSignature) {
+                continue;
+            }
             if (controlSocket != nullptr && controlSocket->state() == QAbstractSocket::ConnectedState) {
                 QString wakeError;
                 if (!sendRelayWake(controlSocket, &wakeError)) {
                     emit logMessage(QStringLiteral("检测到本地文件变化，但通知目标端失败：%1").arg(wakeError));
                 } else {
-                    emit logMessage(QStringLiteral("检测到本地文件变化，已通知目标端并立即启动下一轮同步。"));
+                    emit logMessage(QStringLiteral("检测到本地文件变化，并已等待 %1ms 确认文件稳定，已通知目标端并立即启动下一轮同步。").arg(kChangeSettleDelayMs));
                 }
             } else {
-                emit logMessage(QStringLiteral("检测到本地文件变化，立即启动下一轮同步。"));
+                emit logMessage(QStringLiteral("检测到本地文件变化，并已等待 %1ms 确认文件稳定，立即启动下一轮同步。").arg(kChangeSettleDelayMs));
             }
             return true;
         }
@@ -329,10 +357,10 @@ bool SourceConnector::waitBeforeConnectedCycle(QSslSocket* controlSocket, QStrin
 
 bool SourceConnector::connectTls(QSslSocket* socket, const Endpoint& endpoint, int timeoutMs, QString* error)
 {
-    const QList<QSslCertificate> certificates = QSslCertificate::fromData(link.caCertificatePem.toUtf8(), QSsl::Pem);
+    const QList<QSslCertificate> certificates = QSslCertificate::fromData(link.relayCertificatePem().toUtf8(), QSsl::Pem);
     if (!certificates.isEmpty()) {
         socket->setCaCertificates(certificates);
-        socket->setPeerVerifyMode(QSslSocket::QueryPeer);
+        socket->setPeerVerifyMode(QSslSocket::VerifyPeer);
     } else {
         socket->setPeerVerifyMode(QSslSocket::VerifyPeer);
     }
@@ -557,20 +585,18 @@ QString SourceConnector::folderSignature(QString* error) const
         it.next();
         const QFileInfo info = it.fileInfo();
         const QString relativePath = QDir::fromNativeSeparators(rootDir.relativeFilePath(info.absoluteFilePath()));
-        if (matcher.matches(relativePath, false)) {
+        if (isReservedPartialPath(relativePath) || matcher.matches(relativePath, false)) {
             continue;
         }
-        const QByteArray hash = fileHash(info.absoluteFilePath(), error).toHex();
-        if (hash.isEmpty()) {
-            return {};
-        }
-        entries.append(QStringLiteral("%1|%2|%3|%4")
+        entries.append(QStringLiteral("%1|%2|%3")
             .arg(relativePath)
             .arg(info.size())
-            .arg(info.lastModified().toUTC().toMSecsSinceEpoch())
-            .arg(QString::fromLatin1(hash)));
+            .arg(info.lastModified().toUTC().toMSecsSinceEpoch()));
     }
     std::sort(entries.begin(), entries.end());
+    if (entries.isEmpty()) {
+        return QStringLiteral("<empty>");
+    }
     return entries.join(QLatin1Char('\n'));
 }
 
@@ -592,6 +618,12 @@ bool SourceConnector::authenticateTarget(QSslSocket* socket, const QByteArray& t
             const QByteArray left = QCryptographicHash::hash(receivedToken, QCryptographicHash::Sha256);
             const QByteArray right = QCryptographicHash::hash(token, QCryptographicHash::Sha256);
             valid = left == right;
+            if (valid && !boundPeerID.trimmed().isEmpty() && peerID != boundPeerID) {
+                valid = false;
+                if (error != nullptr) {
+                    *error = QStringLiteral("目标端身份不匹配：这个发送任务已绑定其他目标端。请在设备管理里“踢出/重置”后重新生成链接。");
+                }
+            }
         }
     }
 
@@ -601,9 +633,16 @@ bool SourceConnector::authenticateTarget(QSslSocket* socket, const QByteArray& t
     }
     if (!valid) {
         if (error != nullptr) {
-            *error = QStringLiteral("目标端同步认证失败。");
+            if (error->isEmpty()) {
+                *error = QStringLiteral("目标端同步认证失败。");
+            }
         }
         return false;
+    }
+    if (boundPeerID.trimmed().isEmpty()) {
+        boundPeerID = peerID;
+        emit targetAuthenticated(peerID);
+        emit logMessage(QStringLiteral("已绑定目标端身份：%1。后续只允许这个目标端接入。").arg(shortPeerID(peerID)));
     }
     emit logMessage(QStringLiteral("目标端认证通过：%1").arg(shortPeerID(peerID)));
     return true;

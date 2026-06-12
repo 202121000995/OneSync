@@ -182,7 +182,7 @@ void applyModernDialogStyle(QDialog* dialog)
 }
 } // namespace
 
-const QString kWin7Version = QStringLiteral("1.39");
+const QString kWin7Version = QStringLiteral("1.40");
 
 MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent)
@@ -721,7 +721,7 @@ void MainWindow::startSelectedTask()
     TargetConnector* connector = nullptr;
     SourceConnector* sourceConnector = nullptr;
     if (source) {
-        sourceConnector = new SourceConnector(task->link, task->targetFolder, task->ignoreRules);
+        sourceConnector = new SourceConnector(task->link, task->targetFolder, task->ignoreRules, task->boundPeerID);
         worker = sourceConnector;
         sourceConnector->moveToThread(thread);
         sourceConnectors.insert(taskID, sourceConnector);
@@ -779,6 +779,18 @@ void MainWindow::startSelectedTask()
             task->globalBytes = standardBytes;
             task->detail = QStringLiteral("同步计划：%1 个文件").arg(operationCount);
             refreshTaskTable();
+        });
+        connect(sourceConnector, &SourceConnector::targetAuthenticated, this, [this, taskID](const QString& peerID) {
+            SyncTask* task = taskByID(taskID);
+            if (task == nullptr || !task->boundPeerID.trimmed().isEmpty()) {
+                return;
+            }
+            task->boundPeerID = peerID;
+            task->connectedDevices = 1;
+            task->detail = QStringLiteral("已绑定目标端：%1").arg(peerID.left(12));
+            saveTasks();
+            refreshTaskTable();
+            appendTaskLog(taskID, QStringLiteral("首次连接后已绑定目标端身份：%1。").arg(peerID.left(12)));
         });
     } else if (connector != nullptr) {
         connect(thread, &QThread::started, connector, &TargetConnector::run);
@@ -1053,7 +1065,7 @@ void MainWindow::kickSelectedDevice()
     }
     const bool source = isSourceTask(*task);
     const QString prompt = source
-        ? QStringLiteral("将清除这个发送任务当前记录的设备状态。同步链接会保留，目标端需要重新加入或重新启动。")
+        ? QStringLiteral("将清除这个发送任务当前绑定的目标端，并重新生成同步链接。旧链接会失效，目标端需要使用新链接重新加入。")
         : QStringLiteral("将清除这个接收任务保存的同步链接和设备状态。之后需要重新粘贴源端链接加入。");
     if (QMessageBox::question(this, QStringLiteral("踢出/重置设备"), prompt) != QMessageBox::Yes) {
         return;
@@ -1064,11 +1076,28 @@ void MainWindow::kickSelectedDevice()
     task->deviceDisabled = false;
     task->status = QStringLiteral("停止");
     if (source) {
-        task->detail = QStringLiteral("已重置设备状态，等待目标端重新加入。");
+        QString error;
+        if (!parseTaskLink(task, &error)) {
+            QMessageBox::warning(this, QStringLiteral("同步链接无效"), error);
+            return;
+        }
+        const QString refreshedLink = buildSourceLink(task->link.relayEndpoint, task->link.relayToken, task->link.relayCertificatePem(), &error);
+        if (refreshedLink.isEmpty()) {
+            QMessageBox::warning(this, QStringLiteral("重新生成链接失败"), error);
+            return;
+        }
+        task->linkText = refreshedLink;
+        task->boundPeerID.clear();
+        if (!parseTaskLink(task, &error)) {
+            QMessageBox::warning(this, QStringLiteral("同步链接生成失败"), error);
+            return;
+        }
+        task->detail = QStringLiteral("已重置设备状态并生成新链接，等待目标端重新加入。");
     } else {
         task->linkText.clear();
         task->link = SyncLink();
         task->linkReady = false;
+        task->boundPeerID.clear();
         task->detail = QStringLiteral("已清除同步链接，请重新加入。");
     }
 
@@ -1076,8 +1105,11 @@ void MainWindow::kickSelectedDevice()
     refreshLogFilter();
     refreshTaskTable();
     appendTaskLog(task->id, source
-        ? QStringLiteral("已重置设备状态，同步链接已保留。")
+        ? QStringLiteral("已重置设备状态，并重新生成同步链接。")
         : QStringLiteral("已踢出设备并清除接收端同步链接。"));
+    if (source) {
+        showSourceLink(*task);
+    }
 }
 
 void MainWindow::testSelectedConnection()
@@ -1311,6 +1343,7 @@ void MainWindow::loadTasks()
         task.role = settings.value(QStringLiteral("role")).toString() == QStringLiteral("source") ? SyncTask::Source : SyncTask::Target;
         task.name = settings.value(QStringLiteral("name"), QStringLiteral("接收任务")).toString();
         task.deviceAlias = settings.value(QStringLiteral("deviceAlias")).toString();
+        task.boundPeerID = settings.value(QStringLiteral("boundPeerID")).toString();
         task.deviceDisabled = settings.value(QStringLiteral("deviceDisabled")).toBool();
         task.linkText = settings.value(QStringLiteral("link")).toString();
         task.targetFolder = settings.value(QStringLiteral("targetFolder")).toString();
@@ -1346,6 +1379,7 @@ void MainWindow::saveTasks() const
         settings.setValue(QStringLiteral("role"), task.role == SyncTask::Source ? QStringLiteral("source") : QStringLiteral("target"));
         settings.setValue(QStringLiteral("name"), task.name);
         settings.setValue(QStringLiteral("deviceAlias"), task.deviceAlias);
+        settings.setValue(QStringLiteral("boundPeerID"), task.boundPeerID);
         settings.setValue(QStringLiteral("deviceDisabled"), task.deviceDisabled);
         settings.setValue(QStringLiteral("link"), task.linkText);
         settings.setValue(QStringLiteral("targetFolder"), task.targetFolder);
@@ -1647,7 +1681,7 @@ bool MainWindow::parseTaskLink(SyncTask* task, QString* error)
         return false;
     }
     SyncLink parsed;
-    if (!SyncLinkParser::parse(task->linkText, &parsed, error)) {
+    if (!SyncLinkParser::parseStored(task->linkText, &parsed, error)) {
         task->linkReady = false;
         return false;
     }
@@ -1723,6 +1757,7 @@ QString MainWindow::buildSourceLink(const QString& relayEndpoint, const QString&
     }
     if (!trustedCertificatePem.isEmpty()) {
         object.insert(QStringLiteral("ca_certificate_pem"), trustedCertificatePem);
+        object.insert(QStringLiteral("relay_ca_certificate_pem"), trustedCertificatePem);
     }
     object.insert(QStringLiteral("token"), base64Url(randomBytes(32)));
     object.insert(QStringLiteral("issued_at"), issuedAt.toString(Qt::ISODateWithMs));
@@ -1736,7 +1771,7 @@ bool MainWindow::testTaskConnection(const SyncTask& task, QString* detail) const
     SyncLink link = task.link;
     if (!task.linkReady) {
         QString error;
-        if (!SyncLinkParser::parse(task.linkText, &link, &error)) {
+        if (!SyncLinkParser::parseStored(task.linkText, &link, &error)) {
             if (detail != nullptr) {
                 *detail = QStringLiteral("连接测试失败：同步链接无效：%1").arg(error);
             }
@@ -1755,10 +1790,11 @@ bool MainWindow::testTaskConnection(const SyncTask& task, QString* detail) const
     }
 
     QSslSocket socket;
-    const QList<QSslCertificate> certificates = QSslCertificate::fromData(link.caCertificatePem.toUtf8(), QSsl::Pem);
+    const QString certificatePem = link.hasRelay() ? link.relayCertificatePem() : link.sourceCertificatePem();
+    const QList<QSslCertificate> certificates = QSslCertificate::fromData(certificatePem.toUtf8(), QSsl::Pem);
     if (!certificates.isEmpty()) {
         socket.setCaCertificates(certificates);
-        socket.setPeerVerifyMode(QSslSocket::QueryPeer);
+        socket.setPeerVerifyMode(QSslSocket::VerifyPeer);
     } else {
         socket.setPeerVerifyMode(QSslSocket::VerifyPeer);
     }
@@ -1794,6 +1830,7 @@ bool MainWindow::testTaskConnection(const SyncTask& task, QString* detail) const
 
 bool MainWindow::runTaskDialog(SyncTask* task, bool editing)
 {
+    const QString previousLinkText = task != nullptr ? task->linkText : QString();
     QDialog dialog(this);
     dialog.setWindowTitle(editing ? QStringLiteral("任务参数") : QStringLiteral("加入同步"));
     applyModernDialogStyle(&dialog);
@@ -1855,10 +1892,18 @@ bool MainWindow::runTaskDialog(SyncTask* task, bool editing)
     task->targetFolder = folder;
     task->linkText = link;
     QString error;
-    if (!parseTaskLink(task, &error)) {
+    SyncLink parsed;
+    const bool sameStoredLink = editing && link == previousLinkText;
+    const bool parsedOK = sameStoredLink
+        ? SyncLinkParser::parseStored(task->linkText, &parsed, &error)
+        : SyncLinkParser::parse(task->linkText, &parsed, &error);
+    if (!parsedOK) {
+        task->linkReady = false;
         QMessageBox::warning(this, QStringLiteral("同步链接无效"), error);
         return false;
     }
+    task->link = parsed;
+    task->linkReady = true;
     task->status = QStringLiteral("停止");
     task->detail = task->link.hasRelay()
         ? QStringLiteral("Relay：%1").arg(task->link.relayEndpoint)
@@ -1879,7 +1924,7 @@ bool MainWindow::runSourceTaskDialog(SyncTask* task, bool editing)
     auto* folderEdit = new QLineEdit(task->targetFolder);
     auto* relayEdit = new QLineEdit(task->linkReady ? task->link.relayEndpoint : QString());
     auto* relayTokenEdit = new QLineEdit(task->linkReady ? task->link.relayToken : QString());
-    auto* caEdit = new QTextEdit(task->linkReady ? task->link.caCertificatePem : QString());
+    auto* caEdit = new QTextEdit(task->linkReady ? task->link.relayCertificatePem() : QString());
     caEdit->setAcceptRichText(false);
     caEdit->setPlaceholderText(QStringLiteral("公网 SSL / 通配符证书请留空。只有自签 Relay 证书才粘贴 sudo onesync-relayctl cert 输出的 PEM。"));
 
@@ -1946,6 +1991,7 @@ bool MainWindow::runSourceTaskDialog(SyncTask* task, bool editing)
     task->name = name;
     task->targetFolder = folder;
     task->linkText = link;
+    task->boundPeerID.clear();
     if (!parseTaskLink(task, &error)) {
         QMessageBox::warning(this, QStringLiteral("同步链接生成失败"), error);
         return false;
