@@ -244,7 +244,7 @@ func (b *Broker) handleControl(ctx context.Context, connection net.Conn, reader 
 	peer := &controlPeer{
 		connection:   connection,
 		registration: registration,
-		outgoing:     make(chan controlMessage, 8),
+		outgoing:     make(chan controlMessage, 128),
 		done:         make(chan struct{}),
 	}
 	remove := b.registerControl(peer)
@@ -342,11 +342,16 @@ func (b *Broker) authorize(registration registration) bool {
 	return registration.accessTokenPresent && sameToken(b.accessTokenHash, registration.accessTokenHash)
 }
 
-func (p *controlPeer) send(message controlMessage) {
+func (p *controlPeer) send(message controlMessage) bool {
+	timer := time.NewTimer(10 * time.Second)
+	defer timer.Stop()
 	select {
 	case p.outgoing <- message:
+		return true
 	case <-p.done:
-	default:
+		return false
+	case <-timer.C:
+		return false
 	}
 }
 

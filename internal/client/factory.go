@@ -356,9 +356,14 @@ func (r *runner) runConnectedCycles(ctx context.Context, taskID string, reporter
 		}
 		if changed {
 			if wake != nil {
-				_ = wake.SendWake(ctx)
+				if err := wake.SendWake(ctx); err != nil {
+					addLog(ctx, reporter, "warning", fmt.Sprintf("检测到同步目录变化，但通知对端失败：%v；仍会在本机开始下一轮同步", err))
+				} else {
+					addLog(ctx, reporter, "info", fmt.Sprintf("检测到同步目录变化，并已等待 %s 确认文件写入稳定，已通知对端并使用现有连接开始下一轮同步", filewatch.DescribeChangeWait()))
+				}
+			} else {
+				addLog(ctx, reporter, "info", fmt.Sprintf("检测到同步目录变化，并已等待 %s 确认文件写入稳定，使用现有连接开始下一轮同步", filewatch.DescribeChangeWait()))
 			}
-			addLog(ctx, reporter, "info", fmt.Sprintf("检测到同步目录变化，并已等待 %s 确认文件写入稳定，使用现有连接开始下一轮同步", filewatch.DescribeChangeWait()))
 		}
 		if woke {
 			addLog(ctx, reporter, "info", "收到对端变化通知，使用现有连接开始下一轮同步")

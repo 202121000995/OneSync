@@ -80,7 +80,7 @@ func JoinControl(ctx context.Context, connection net.Conn, sessionID, role strin
 		connection: connection,
 		sessionID:  sessionID,
 		role:       roleValue,
-		incoming:   make(chan controlMessage, 16),
+		incoming:   make(chan controlMessage, 128),
 		errors:     make(chan error, 1),
 	}
 	go client.readLoop()
@@ -194,10 +194,7 @@ func (c *ControlClient) readLoop() {
 			_ = c.writeControl(controlMessagePong, nil)
 			continue
 		}
-		select {
-		case c.incoming <- message:
-		default:
-		}
+		c.incoming <- message
 	}
 }
 
