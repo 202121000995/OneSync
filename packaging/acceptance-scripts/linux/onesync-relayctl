@@ -23,7 +23,7 @@ CERT_PATH_FILE=${ONESYNC_RELAY_CERT_PATH_FILE:-$CONFIG_DIR/relay.cert-paths}
 ADMIN_LISTEN=${ONESYNC_RELAY_ADMIN_LISTEN:-0.0.0.0:${ONESYNC_RELAY_ADMIN_PORT:-8766}}
 ADMIN_AUTH_FILE=${ONESYNC_RELAY_ADMIN_AUTH_FILE:-$CONFIG_DIR/relay-admin-auth.json}
 REPO=${ONESYNC_REPO:-202121000995/OneSync}
-DEFAULT_RELEASE_TAG=${ONESYNC_DEFAULT_RELEASE_TAG:-v1.38}
+DEFAULT_RELEASE_TAG=${ONESYNC_DEFAULT_RELEASE_TAG:-v1.39}
 GH_PROXY=${GH_PROXY:-}
 RELEASE_TAG=${ONESYNC_RELEASE_TAG:-${RELEASE_TAG:-}}
 PACKAGE_URL=${ONESYNC_LINUX_PACKAGE_URL:-${PACKAGE_URL:-}}
@@ -524,7 +524,7 @@ upgrade_service() {
 	url=$(latest_linux_package_url)
 	if [ -z "$url" ]; then
 		printf 'Cannot find latest Linux package from GitHub repo %s.\n' "$REPO" >&2
-		printf 'Retry with RELEASE_TAG=v1.38 or PACKAGE_URL=https://...tar.gz.\n' >&2
+		printf 'Retry with RELEASE_TAG=v1.39 or PACKAGE_URL=https://...tar.gz.\n' >&2
 		exit 1
 	fi
 	curl -fL "$(proxy_url "$url")" -o "$tmp/onesync-linux.tar.gz"

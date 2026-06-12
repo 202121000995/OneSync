@@ -23,6 +23,7 @@ type ControlClient struct {
 	sendMu     sync.Mutex
 	incoming   chan controlMessage
 	errors     chan error
+	done       chan struct{}
 	closeOnce  sync.Once
 }
 
@@ -82,6 +83,7 @@ func JoinControl(ctx context.Context, connection net.Conn, sessionID, role strin
 		role:       roleValue,
 		incoming:   make(chan controlMessage, 128),
 		errors:     make(chan error, 1),
+		done:       make(chan struct{}),
 	}
 	go client.readLoop()
 	return client, nil
@@ -175,6 +177,7 @@ func (c *ControlClient) Close() error {
 		return nil
 	}
 	c.closeOnce.Do(func() {
+		close(c.done)
 		_ = c.connection.Close()
 	})
 	return nil
@@ -194,7 +197,11 @@ func (c *ControlClient) readLoop() {
 			_ = c.writeControl(controlMessagePong, nil)
 			continue
 		}
-		c.incoming <- message
+		select {
+		case c.incoming <- message:
+		case <-c.done:
+			return
+		}
 	}
 }
 
@@ -204,6 +211,8 @@ func (c *ControlClient) readControl(ctx context.Context) (controlMessage, error)
 		return message, nil
 	case err := <-c.errors:
 		return controlMessage{}, err
+	case <-c.done:
+		return controlMessage{}, net.ErrClosed
 	case <-ctx.Done():
 		return controlMessage{}, ctx.Err()
 	}

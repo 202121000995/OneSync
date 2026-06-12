@@ -115,6 +115,152 @@ func TestBrokerControlConnectionInvitesDataSession(t *testing.T) {
 	waitBrokerResults(t, controlResults, true)
 }
 
+func TestBrokerControlDataInvitationsDoNotAccumulate(t *testing.T) {
+	broker := mustBroker(t, Config{
+		WaitTimeout: time.Second,
+		IdleTimeout: time.Second,
+		MaxWaiting:  10,
+		MaxBytes:    1024,
+	})
+	token := bytes.Repeat([]byte{0x42}, tokenSize)
+	sourceControl, targetControl, controlResults := joinControlPair(t, broker, "session", token)
+	defer sourceControl.Close()
+	defer targetControl.Close()
+
+	for range 5 {
+		if _, err := sourceControl.RequestSession(context.Background()); err != nil {
+			t.Fatalf("RequestSession() error = %v", err)
+		}
+	}
+
+	if got := brokerDataWaitingCount(broker); got != 1 {
+		t.Fatalf("data waiting invitations = %d, want 1", got)
+	}
+
+	_ = sourceControl.Close()
+	_ = targetControl.Close()
+	waitBrokerResults(t, controlResults, true)
+}
+
+func TestBrokerControlDataInvitationExpiresWithoutJoin(t *testing.T) {
+	broker := mustBroker(t, Config{
+		WaitTimeout: 20 * time.Millisecond,
+		IdleTimeout: time.Second,
+		MaxWaiting:  10,
+		MaxBytes:    1024,
+	})
+	token := bytes.Repeat([]byte{0x42}, tokenSize)
+	sourceControl, targetControl, controlResults := joinControlPair(t, broker, "session", token)
+	defer sourceControl.Close()
+	defer targetControl.Close()
+
+	if _, err := sourceControl.RequestSession(context.Background()); err != nil {
+		t.Fatalf("RequestSession() error = %v", err)
+	}
+	if got := brokerDataWaitingCount(broker); got != 1 {
+		t.Fatalf("data waiting invitations immediately after request = %d, want 1", got)
+	}
+	deadline := time.After(500 * time.Millisecond)
+	ticker := time.NewTicker(5 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		if got := brokerDataWaitingCount(broker); got == 0 {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("data waiting invitation did not expire, count = %d", brokerDataWaitingCount(broker))
+		case <-ticker.C:
+		}
+	}
+
+	_ = sourceControl.Close()
+	_ = targetControl.Close()
+	waitBrokerResults(t, controlResults, true)
+}
+
+func TestBrokerControlReadLoopStopsWhenIncomingIsFull(t *testing.T) {
+	broker := mustBroker(t, Config{
+		WaitTimeout: time.Second,
+		IdleTimeout: time.Second,
+		MaxWaiting:  10,
+		MaxBytes:    1024,
+	})
+	server, client := net.Pipe()
+	result := make(chan error, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { result <- broker.Handle(ctx, server) }()
+
+	token := bytes.Repeat([]byte{0x42}, tokenSize)
+	if err := writeControlJoin(client, "session", roleSource, token, ""); err != nil {
+		t.Fatalf("writeControlJoin() error = %v", err)
+	}
+	if err := readReady(context.Background(), client, "wait ready"); err != nil {
+		t.Fatalf("readReady() error = %v", err)
+	}
+	writeDone := make(chan struct{})
+	go func() {
+		defer close(writeDone)
+		for range 512 {
+			if err := writeControlMessage(client, controlMessageWake, nil); err != nil {
+				return
+			}
+		}
+	}()
+	time.Sleep(20 * time.Millisecond)
+	cancel()
+	_ = client.Close()
+
+	select {
+	case <-result:
+	case <-time.After(time.Second):
+		t.Fatal("broker Handle() did not stop after control read loop was blocked")
+	}
+	select {
+	case <-writeDone:
+	case <-time.After(time.Second):
+		t.Fatal("test writer did not stop after client close")
+	}
+}
+
+func TestControlClientReadLoopStopsWhenIncomingIsFull(t *testing.T) {
+	server, client := net.Pipe()
+	control := &ControlClient{
+		connection: client,
+		incoming:   make(chan controlMessage, 1),
+		errors:     make(chan error, 1),
+		done:       make(chan struct{}),
+	}
+	control.incoming <- controlMessage{messageType: controlMessageWake}
+	done := make(chan struct{})
+	go func() {
+		control.readLoop()
+		close(done)
+	}()
+
+	writeDone := make(chan error, 1)
+	go func() {
+		writeDone <- writeControlMessage(server, controlMessageWake, nil)
+	}()
+	select {
+	case err := <-writeDone:
+		if err != nil {
+			t.Fatalf("writeControlMessage() error = %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("test writer did not hand one control message to readLoop")
+	}
+	_ = control.Close()
+	_ = server.Close()
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("ControlClient readLoop() did not stop after close while incoming was full")
+	}
+}
+
 func TestBrokerRejectsWrongToken(t *testing.T) {
 	broker := mustBroker(t, Config{
 		WaitTimeout: 100 * time.Millisecond,
@@ -405,6 +551,31 @@ func connectPairWithAccessToken(t *testing.T, broker *Broker, sessionID string, 
 		t.Fatalf("target Register() error = %v", err)
 	}
 	return sourceClient, targetClient, results
+}
+
+func joinControlPair(t *testing.T, broker *Broker, sessionID string, token []byte) (*ControlClient, *ControlClient, chan error) {
+	t.Helper()
+	sourceControlServer, sourceControlClient := net.Pipe()
+	targetControlServer, targetControlClient := net.Pipe()
+	controlResults := make(chan error, 2)
+	go func() { controlResults <- broker.Handle(context.Background(), sourceControlServer) }()
+	go func() { controlResults <- broker.Handle(context.Background(), targetControlServer) }()
+
+	sourceControl, err := JoinControl(context.Background(), sourceControlClient, sessionID, RoleSource, token, "")
+	if err != nil {
+		t.Fatalf("source JoinControl() error = %v", err)
+	}
+	targetControl, err := JoinControl(context.Background(), targetControlClient, sessionID, RoleTarget, token, "")
+	if err != nil {
+		t.Fatalf("target JoinControl() error = %v", err)
+	}
+	return sourceControl, targetControl, controlResults
+}
+
+func brokerDataWaitingCount(broker *Broker) int {
+	broker.mu.Lock()
+	defer broker.mu.Unlock()
+	return len(broker.dataWaiting)
 }
 
 func assertRead(t *testing.T, reader io.Reader, want string) {

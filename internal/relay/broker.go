@@ -50,6 +50,13 @@ type waitingDataSession struct {
 	done       chan struct{}
 }
 
+type dataSessionInvitation struct {
+	sessionID string
+	created   time.Time
+	timer     *time.Timer
+	waiting   *waitingDataSession
+}
+
 type pairResult struct {
 	peer net.Conn
 	err  error
@@ -78,7 +85,7 @@ type Broker struct {
 	mu                  sync.Mutex
 	waiting             map[string]*waitingPeer
 	controls            map[string]*controlSession
-	dataWaiting         map[string]*waitingDataSession
+	dataWaiting         map[string]*dataSessionInvitation
 	waitTimeout         time.Duration
 	idleTimeout         time.Duration
 	maxWaiting          int
@@ -134,7 +141,7 @@ func NewBroker(config Config) (*Broker, error) {
 	return &Broker{
 		waiting:             make(map[string]*waitingPeer),
 		controls:            make(map[string]*controlSession),
-		dataWaiting:         make(map[string]*waitingDataSession),
+		dataWaiting:         make(map[string]*dataSessionInvitation),
 		waitTimeout:         config.WaitTimeout,
 		idleTimeout:         config.IdleTimeout,
 		maxWaiting:          config.MaxWaiting,
@@ -263,7 +270,13 @@ func (b *Broker) handleControl(ctx context.Context, connection net.Conn, reader 
 				readErrors <- err
 				return
 			}
-			incoming <- message
+			select {
+			case incoming <- message:
+			case <-ctx.Done():
+				return
+			case <-peer.done:
+				return
+			}
 		}
 	}()
 
@@ -447,6 +460,12 @@ func (b *Broker) pendingInvitationsLocked(sessionID string, state *controlSessio
 		state.pending = nil
 		return nil
 	}
+	b.removeDataInvitationsForSessionLocked(sessionID)
+	if len(b.dataWaiting) >= b.maxWaiting {
+		requester.send(controlMessage{messageType: controlMessageError, payload: []byte("Relay data invitation limit reached")})
+		state.pending = nil
+		return nil
+	}
 	key, err := newSessionKey()
 	if err != nil {
 		requester.send(controlMessage{messageType: controlMessageError, payload: []byte(err.Error())})
@@ -455,13 +474,41 @@ func (b *Broker) pendingInvitationsLocked(sessionID string, state *controlSessio
 	}
 	state.pending = nil
 	sessionKey := hex.EncodeToString(key[:])
-	b.dataWaiting[sessionKey] = nil
+	invitation := &dataSessionInvitation{
+		sessionID: sessionID,
+		created:   time.Now(),
+	}
+	invitation.timer = time.AfterFunc(b.waitTimeout, func() {
+		b.removeDataInvitation(sessionKey, invitation, "Relay data invitation timed out")
+	})
+	b.dataWaiting[sessionKey] = invitation
 	payload := key[:]
 	b.logger.Info("Relay data session invited", "session", sessionDigest(sessionID), "requester", relayRoleLabel(requester.registration.role))
 	return []controlMessageTarget{
 		{peer: state.source, message: controlMessage{messageType: controlMessageInviteSession, payload: payload}},
 		{peer: state.target, message: controlMessage{messageType: controlMessageInviteSession, payload: payload}},
 	}
+}
+
+func (b *Broker) removeDataInvitationsForSessionLocked(sessionID string) {
+	for sessionKey, invitation := range b.dataWaiting {
+		if invitation.sessionID != sessionID || invitation.waiting != nil {
+			continue
+		}
+		if invitation.timer != nil {
+			invitation.timer.Stop()
+		}
+		delete(b.dataWaiting, sessionKey)
+	}
+}
+
+func (b *Broker) removeDataInvitation(sessionKey string, invitation *dataSessionInvitation, reason string) {
+	b.mu.Lock()
+	if b.dataWaiting[sessionKey] == invitation && invitation.waiting == nil {
+		delete(b.dataWaiting, sessionKey)
+		b.logger.Warn(reason, "session", sessionDigest(invitation.sessionID), "age", time.Since(invitation.created).String())
+	}
+	b.mu.Unlock()
 }
 
 func (b *Broker) removeControl(peer *controlPeer) {
@@ -478,6 +525,7 @@ func (b *Broker) removeControl(peer *controlPeer) {
 		if state.pending == peer {
 			state.pending = nil
 		}
+		b.removeDataInvitationsForSessionLocked(peer.registration.sessionID)
 		if state.source == nil && state.target == nil {
 			delete(b.controls, peer.registration.sessionID)
 		}
@@ -490,7 +538,8 @@ func (b *Broker) pairDataSession(ctx context.Context, connection net.Conn, join 
 	sessionLabel := sessionDigest(join.sessionID)
 	role := relayRoleLabel(join.role)
 	b.mu.Lock()
-	if waiting, exists := b.dataWaiting[sessionKey]; exists && waiting != nil {
+	if invitation, exists := b.dataWaiting[sessionKey]; exists && invitation.waiting != nil {
+		waiting := invitation.waiting
 		if waiting.join.role == join.role {
 			b.mu.Unlock()
 			return pairOutcome{}, errors.New("Relay data session already has this role")
@@ -512,9 +561,18 @@ func (b *Broker) pairDataSession(ctx context.Context, connection net.Conn, join 
 		close(waiting.ready)
 		return pairOutcome{owner: false, done: waiting.done}, nil
 	}
-	if _, invited := b.dataWaiting[sessionKey]; !invited {
+	invitation, invited := b.dataWaiting[sessionKey]
+	if !invited {
 		b.mu.Unlock()
 		return pairOutcome{}, errors.New("Relay data session was not invited")
+	}
+	if invitation.sessionID != join.sessionID {
+		b.mu.Unlock()
+		return pairOutcome{}, errors.New("Relay data session ID mismatch")
+	}
+	if invitation.timer != nil {
+		invitation.timer.Stop()
+		invitation.timer = nil
 	}
 	waiting := &waitingDataSession{
 		connection: connection,
@@ -522,7 +580,7 @@ func (b *Broker) pairDataSession(ctx context.Context, connection net.Conn, join 
 		ready:      make(chan pairResult, 1),
 		done:       make(chan struct{}),
 	}
-	b.dataWaiting[sessionKey] = waiting
+	invitation.waiting = waiting
 	b.markWaitingLocked(join.sessionID, join.role, connection.RemoteAddr().String())
 	b.mu.Unlock()
 	b.logger.Info("Relay data peer waiting", "session", sessionLabel, "role", role, "timeout", b.waitTimeout.String())
@@ -544,7 +602,7 @@ func (b *Broker) pairDataSession(ctx context.Context, connection net.Conn, join 
 
 func (b *Broker) removeWaitingData(sessionKey string, waiting *waitingDataSession) {
 	b.mu.Lock()
-	if b.dataWaiting[sessionKey] == waiting {
+	if invitation := b.dataWaiting[sessionKey]; invitation != nil && invitation.waiting == waiting {
 		delete(b.dataWaiting, sessionKey)
 		b.markClosedLocked(waiting.join.sessionID, "waiting data session removed")
 	}
